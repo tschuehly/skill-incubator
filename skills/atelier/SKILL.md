@@ -85,9 +85,9 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    their browser. Source fidelity and cold-reader comprehension are separate checks; neither
    replaces the other.
 
-`examples/` holds runnable Surfaces: `compare-review.html` (many Regions, side Threads),
-`grill-session.html` (Proposal-driven, a composer visible under every question), `placements.html` (the three Thread
-placements side by side). Serve one and click it before writing your own.
+`examples/` holds runnable Surfaces: `grill-session.html` (Proposal-driven, a composer visible under
+every question) and `placements.html` (the three Thread placements side by side, with `side` on a
+comparison). Serve one and click it before writing your own.
 
 The first browser load needs no Ready. Ready begins only after the human could have seen the
 Surface.
