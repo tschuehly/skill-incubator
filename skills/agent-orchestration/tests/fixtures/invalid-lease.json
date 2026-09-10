@@ -1,0 +1,42 @@
+{
+  "version": 2,
+  "kind": "handoff",
+  "role": "implementer",
+  "lifecycle": {
+    "mode": "disposable",
+    "key": "implementer:invalid-example",
+    "artifactRevision": null
+  },
+  "modelBinding": {
+    "cognitiveRole": "routine-execution",
+    "provider": "gpt",
+    "model": "gpt-5.6-sol",
+    "effort": "medium",
+    "quotaSnapshot": {
+      "generatedAt": "2026-07-19T08:29:39.641Z",
+      "relevantWindows": ["codex/weekly: 83% remaining; reset 2026-07-25T03:32:52Z"],
+      "stale": false,
+      "refreshedAt": null,
+      "error": null
+    }
+  },
+  "purpose": "Implement one bounded slice",
+  "anchors": ["chapter:01"],
+  "actions": ["Apply the bounded change"],
+  "evidence": ["chapters/01.md"],
+  "constraints": [],
+  "completion": ["Return a commit"],
+  "workspaceLease": {
+    "id": "invalid-example",
+    "mode": "exclusive",
+    "path": "/tmp/shared-worktree",
+    "owner": "implementer",
+    "mutableOutputs": ["target"],
+    "activeProcess": {
+      "pid": 0,
+      "command": "",
+      "outputPath": "",
+      "owner": ""
+    }
+  }
+}

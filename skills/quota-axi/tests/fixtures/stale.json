@@ -1,0 +1,6 @@
+{
+  "providers": [
+    {"id":"claude","windows":[{"percentRemaining":55,"resetsAt":"2026-07-16T00:00:00Z"}],"state":{"status":"stale","stale":true}},
+    {"id":"codex","windows":[{"percentRemaining":34,"resetsAt":"2026-07-16T00:00:00Z"}],"state":{"status":"available","stale":false}}
+  ]
+}

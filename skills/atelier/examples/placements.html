@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier — thread placements</title>
+<link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="stylesheet" href="/atelier.css">
+<script type="module" src="/atelier.mjs"></script>
+</head>
+<body class="p-8">
+<main class="max-w-5xl mx-auto">
+<atelier-region key="placements">
+  <header class="mb-6">
+    <h1 class="text-2xl font-semibold">Thread placements</h1>
+    <p class="opacity-70 text-sm">
+      Waiting on you: <atelier-attention for="placements" mode="count" owner="human"></atelier-attention>
+      · waiting on the agent: <atelier-attention for="placements" mode="count" owner="agent"></atelier-attention>
+    </p>
+  </header>
+
+  <atelier-region key="below" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">below <atelier-attention mode="dot"></atelier-attention></h2>
+    <p class="opacity-80">The default. The thread sits under the content, so a short Region keeps
+    the comment and its context on screen together.</p>
+  </atelier-region>
+
+  <atelier-region key="side" comments="side" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">side</h2>
+    <p class="opacity-80">The thread moves into a gutter beside the content. Right when the content
+    is narrow — a comparison, a short list, a table.</p>
+  </atelier-region>
+
+  <atelier-region key="sheet" comments="sheet" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">sheet</h2>
+    <p class="opacity-80">The thread opens in a panel fixed to the bottom of the viewport. The
+    document keeps scrolling normally behind it, so an arbitrarily long Region can still be read
+    while its thread stays visible.</p>
+    <pre class="mt-3 p-3 text-xs border border-base-300 rounded-lg whitespace-pre-wrap">A long Region.
+Scroll it, comment on it, and the sheet stays put.</pre>
+  </atelier-region>
+</atelier-region>
+</main>
+</body>
+</html>

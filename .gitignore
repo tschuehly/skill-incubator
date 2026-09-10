@@ -1,0 +1,15 @@
+.DS_Store
+.idea
+# Local-only scratch: private handoffs, superseded/derivative skills, WIP.
+.scratch/
+/docs/experiments/**
+
+# Local agent runtime state and exported review transcripts.
+.agentbridge/
+pi-workbench-session-transcript-*.html
+
+# Atelier surface stores (generated per Surface).
+.review/
+
+# Impeccable live-server runtime state (holds a local auth token).
+.impeccable/

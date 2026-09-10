@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-07-19T09:14:55.844Z",
+  "providers": [
+    {
+      "provider": "claude",
+      "windows": [
+        { "label": "session", "kind": "session", "percentUsed": 33 },
+        { "label": "week", "kind": "weekly", "percentUsed": 35 },
+        { "label": "Fable week", "kind": "model", "percentUsed": 36 }
+      ],
+      "state": { "status": "stale", "stale": true }
+    },
+    {
+      "provider": "codex",
+      "windows": [
+        { "label": "session", "kind": "session", "percentUsed": 19, "windowSeconds": 604800 },
+        { "label": "GPT-5.3-Codex-Spark session", "kind": "model", "percentUsed": 0, "windowSeconds": 604800 }
+      ],
+      "state": { "status": "available", "stale": false }
+    }
+  ]
+}

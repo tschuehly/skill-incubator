@@ -1,0 +1,7 @@
+interface:
+  display_name: "Write for Humans"
+  short_description: "Make prose relevant, findable, clear, and usable"
+  default_prompt: "Use $write-for-humans to minimize the reader's effort to find the point, understand it, and act."
+
+policy:
+  allow_implicit_invocation: true

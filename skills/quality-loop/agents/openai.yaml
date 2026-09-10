@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quality Loop"
+  short_description: "Build systems through executable quality gates"
+  default_prompt: "Use $quality-loop to design, implement, review, and explain this substantial system change."

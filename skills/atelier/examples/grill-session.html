@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier — grilling session</title>
+<!--
+  Runnable. From the skill directory:
+
+    env PORT=4747 UI=examples/grill-session.html ROOT=. STORE=grill node assets/server.mjs
+    bash examples/grill-session.sh          # posts the round-one questions
+
+  A grilling Surface publishes the whole current frontier at once. Every open question sits with the
+  evidence it depends on, each Region carries its own Proposal, and Threads are sheets so a long
+  argument stays readable while the human writes about it.
+-->
+<link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="stylesheet" href="/atelier.css">
+<script type="module" src="/atelier.mjs"></script>
+</head>
+<body class="p-6 lg:p-8">
+
+<atelier-region key="grill">
+<div class="max-w-6xl mx-auto grid gap-8 lg:grid-cols-[minmax(0,1fr)_16rem]">
+
+<aside class="sticky top-2 z-50 self-start lg:order-last lg:top-8">
+  <div class="card max-h-[22vh] overflow-auto bg-base-200 lg:max-h-[calc(100vh-4rem)]">
+    <div class="card-body p-4">
+      <h3 class="font-semibold text-sm mb-2">Open loops</h3>
+      <atelier-cockpit owner="human"></atelier-cockpit>
+    </div>
+  </div>
+</aside>
+
+<main class="min-w-0">
+  <header class="mb-8">
+    <h1 class="text-2xl font-semibold">Offline-first sync — round one</h1>
+    <p class="opacity-70 mt-1 max-w-2xl">Five questions stand between this plan and a decision.
+    They are all open at once on purpose: answering the conflict policy changes what the rollout
+    question even means, and you should be able to see that.</p>
+    <p class="text-sm mt-3">
+      Waiting on you: <atelier-attention for="grill" mode="count" owner="human"></atelier-attention>
+      · waiting on me: <atelier-attention for="grill" mode="count" owner="agent"></atelier-attention>
+    </p>
+  </header>
+
+  <atelier-region key="premise" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">The premise <atelier-attention mode="dot"></atelier-attention></h2>
+    <p class="opacity-80 mb-3">Field technicians lose connectivity for 20–90 minutes in basements and
+    plant rooms. Today the app blocks on every write, so a lost signal means the job sheet is filled
+    in twice: once on paper, once in the evening.</p>
+    <div class="stats stats-vertical sm:stats-horizontal bg-base-200 w-full">
+      <div class="stat"><div class="stat-title">Sessions with a dropout</div><div class="stat-value text-2xl">38%</div><div class="stat-desc">last 30 days</div></div>
+      <div class="stat"><div class="stat-title">Median dropout</div><div class="stat-value text-2xl">31 min</div><div class="stat-desc">p95: 88 min</div></div>
+      <div class="stat"><div class="stat-title">Duplicate entry</div><div class="stat-value text-2xl">6.4 h/wk</div><div class="stat-desc">per technician</div></div>
+    </div>
+    <p class="opacity-60 text-sm mt-3">Source: telemetry export 2026-06-01 → 2026-06-30, n=214 sessions.</p>
+  </atelier-region>
+
+  <atelier-region key="sync-model" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">Sync model <atelier-attention mode="dot"></atelier-attention></h2>
+    <p class="opacity-80 mb-3">Three shapes fit the write pattern. They differ in what happens to a
+    job sheet edited on two devices during the same dropout.</p>
+    <div class="overflow-x-auto">
+      <table class="table table-sm">
+        <thead><tr><th>Model</th><th>Conflict handling</th><th>Client cost</th><th>Server cost</th></tr></thead>
+        <tbody>
+          <tr><td>Last-write-wins</td><td>Silent loss</td><td>None</td><td>None</td></tr>
+          <tr><td>Per-field merge</td><td>Automatic, explainable</td><td>Field-level versions</td><td>Merge endpoint</td></tr>
+          <tr><td>CRDT document</td><td>Automatic, opaque</td><td>~40 KB library, new mental model</td><td>Opaque blobs, no SQL reporting</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </atelier-region>
+
+  <atelier-region key="conflict-policy" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">Conflict policy <atelier-attention mode="dot"></atelier-attention></h2>
+    <p class="opacity-80">A merge that a technician cannot explain to a customer is worse than a
+    refusal. The question is who decides when two edits disagree, and how visible that is.</p>
+    <div class="mockup-code text-xs mt-3"><pre data-prefix="1"><code>job.status      = "complete"   (device A, 14:02, offline)</code></pre><pre data-prefix="2"><code>job.status      = "needs-parts" (device B, 14:05, offline)</code></pre><pre data-prefix="3"><code>job.notes      += "seal replaced" (device A, 14:03, offline)</code></pre></div>
+  </atelier-region>
+
+  <atelier-region key="rollout" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">Rollout <atelier-attention mode="dot"></atelier-attention></h2>
+    <p class="opacity-80">Offline writes cannot be dark-launched: the technician sees a different app
+    the moment the queue exists. Whatever we ship first is what a region's technicians learn.</p>
+  </atelier-region>
+
+  <atelier-region key="cost" class="mb-10">
+    <h2 class="text-lg font-semibold mb-2">What it costs to be wrong <atelier-attention mode="dot"></atelier-attention></h2>
+    <p class="opacity-80">Per-field merge is roughly three weeks and reversible. A CRDT document is
+    roughly seven and effectively permanent — the stored shape stops being queryable, so reporting
+    is rewritten with it. That asymmetry is why this round exists.</p>
+  </atelier-region>
+</main>
+
+</div>
+</atelier-region>
+
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "kind": "handoff",
+  "role": "surface-builder",
+  "lifecycle": {
+    "mode": "persistent",
+    "key": "surface-builder:example",
+    "artifactRevision": null
+  },
+  "modelBinding": {
+    "cognitiveRole": "routine-execution",
+    "provider": "gpt",
+    "model": "gpt-5.6-sol",
+    "effort": "medium",
+    "quotaSnapshot": {
+      "generatedAt": "2026-07-19T08:29:39.641Z",
+      "relevantWindows": ["codex/weekly: 83% remaining; reset 2026-07-25T03:32:52Z"],
+      "stale": false,
+      "refreshedAt": null,
+      "error": null
+    }
+  },
+  "purpose": "Render the approved concepts",
+  "anchors": ["card:overview"],
+  "actions": ["Build and verify the surface"],
+  "evidence": [".review/example.brief.json"],
+  "constraints": ["Do not interpret human feedback"],
+  "completion": ["Return the URL and revision manifest"],
+  "workspaceLease": {
+    "id": "surface-builder-example",
+    "mode": "shared-read",
+    "path": ".review",
+    "owner": "surface-builder",
+    "mutableOutputs": [],
+    "activeProcess": null
+  }
+}

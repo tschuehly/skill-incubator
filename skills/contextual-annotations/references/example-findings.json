@@ -1,0 +1,31 @@
+{
+  "findings": [
+    {
+      "id": "IA-01",
+      "number": 1,
+      "severity": "P1",
+      "title": "Operations are buried below analytics",
+      "body": "Move urgent operational work ahead of exploratory analytics.",
+      "status": "open",
+      "anchor": {
+        "selector": "[data-testid='operations-queue']",
+        "placement": "edge-right"
+      }
+    },
+    {
+      "id": "TRACK-01",
+      "number": 2,
+      "severity": "P1",
+      "title": "Save and notify are coupled",
+      "body": "Persist tracking details and send customer communication as separate transitions.",
+      "status": "resolved",
+      "evidence": "Tracking save and notification retry are separate controls in the local build.",
+      "anchor": {
+        "contextSelector": "#admin-dashboard-modal .modal-box",
+        "contextHeading": "Tracking",
+        "selector": "[data-testid='tracking-form']",
+        "placement": "top-right"
+      }
+    }
+  ]
+}

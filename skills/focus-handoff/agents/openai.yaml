@@ -1,0 +1,4 @@
+interface:
+  display_name: "Focus Handoff"
+  short_description: "Brief one focused task for a fresh session"
+  default_prompt: "Use $focus-handoff to create a concise handoff prompt for this focused task."

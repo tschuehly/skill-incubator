@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quota Axi"
+  short_description: "Read raw Claude and Codex quota"
+  default_prompt: "Use $quota-axi to report raw Claude and Codex subscription usage and freshness."

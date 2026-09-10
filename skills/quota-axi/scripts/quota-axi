@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+function fail(message) {
+  console.error(`ERROR=${message}`);
+  process.exit(2);
+}
+
+function usage() {
+  console.error('usage: quota-axi recommend --task-shape bulk|fanout|review [--input <file>|-]');
+  process.exit(2);
+}
+
+const args = process.argv.slice(2);
+if (args.shift() !== 'recommend') usage();
+
+let taskShape = '';
+let input = '';
+while (args.length) {
+  const arg = args.shift();
+  if (arg === '--task-shape') taskShape = args.shift() || '';
+  else if (arg === '--input') input = args.shift() || '';
+  else usage();
+}
+if (!['bulk', 'fanout', 'review'].includes(taskShape)) usage();
+
+let raw;
+if (input) {
+  raw = input === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(input, 'utf8');
+} else {
+  const result = spawnSync('quota-axi', ['--json'], { encoding: 'utf8' });
+  if (result.error) fail(`quota-axi --json could not start: ${result.error.message}`);
+  if (result.status !== 0) fail(`quota-axi --json failed: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+  raw = result.stdout;
+}
+
+let data;
+try {
+  data = JSON.parse(raw);
+} catch (error) {
+  fail(`quota JSON is invalid: ${error.message}`);
+}
+
+function provider(family) {
+  const entry = (data.providers || []).find(candidate => {
+    const text = `${candidate.id || ''} ${candidate.name || ''} ${candidate.provider || ''}`.toLowerCase();
+    return family === 'claude' ? /claude|anthropic/.test(text) : /codex|openai|chatgpt/.test(text);
+  });
+  if (!entry) return { headroom: null, reset: 'unknown', stale: true, status: 'missing' };
+  const values = (entry.windows || [])
+    .map(window => Number(window.percentRemaining))
+    .filter(Number.isFinite);
+  const limiting = (entry.windows || [])
+    .filter(window => Number.isFinite(Number(window.percentRemaining)))
+    .sort((a, b) => Number(a.percentRemaining) - Number(b.percentRemaining))[0];
+  const state = entry.state || {};
+  return {
+    headroom: values.length ? Math.min(...values) : null,
+    reset: limiting?.resetsAt || 'unknown',
+    stale: Boolean(state.stale || state.status === 'stale' || entry.stale),
+    status: state.status || entry.status || (values.length ? 'available' : 'unavailable'),
+  };
+}
+
+const claude = provider('claude');
+const codex = provider('codex');
+const known = value => Number.isFinite(value);
+let route;
+let reason;
+let next;
+
+if (!known(claude.headroom) && !known(codex.headroom)) {
+  route = 'stop';
+  reason = 'Neither provider has readable quota windows.';
+  next = 'Refresh provider authentication, rerun this command, and do not start heavy work yet.';
+} else if (!known(claude.headroom)) {
+  route = 'codex';
+  reason = `Claude quota is unreadable; Codex has ${codex.headroom}% headroom.`;
+  next = 'Keep heavy execution on Codex; use Claude only after its quota becomes readable.';
+} else if (!known(codex.headroom)) {
+  route = 'claude';
+  reason = `Codex quota is unreadable; Claude has ${claude.headroom}% headroom.`;
+  next = 'Keep heavy execution on Claude; use Codex only after its quota becomes readable.';
+} else if (claude.headroom < 5 && codex.headroom < 5) {
+  route = 'stop';
+  reason = `Both families are critical (Claude ${claude.headroom}%, Codex ${codex.headroom}%).`;
+  next = 'Wait for a quota reset or reduce the task to a small serial action.';
+} else if (claude.headroom < 5) {
+  route = 'codex';
+  reason = `Claude is critical at ${claude.headroom}%; Codex has ${codex.headroom}%.`;
+  next = 'Route all new heavy work to Codex and avoid new Claude work.';
+} else if (codex.headroom < 5) {
+  route = 'claude';
+  reason = `Codex is critical at ${codex.headroom}%; Claude has ${claude.headroom}%.`;
+  next = 'Route all new heavy work to Claude and avoid new Codex work.';
+} else if (claude.headroom < 20) {
+  route = 'codex';
+  reason = `Claude is low at ${claude.headroom}%; Codex has ${codex.headroom}%.`;
+  next = 'Put token-heavy execution on Codex and keep Claude use light.';
+} else if (codex.headroom < 20) {
+  route = 'claude';
+  reason = `Codex is low at ${codex.headroom}%; Claude has ${claude.headroom}%.`;
+  next = 'Use an all-Claude spine and omit GPT workers and reviewers.';
+} else if (claude.headroom > 40 && codex.headroom > 40) {
+  route = taskShape === 'review' ? 'mixed' : 'configured';
+  reason = `Both families are healthy (Claude ${claude.headroom}%, Codex ${codex.headroom}%).`;
+  next = taskShape === 'review'
+    ? 'Use a reviewer from a different model family than the author.'
+    : 'Keep the configured model-orchestration pattern.';
+} else if (taskShape === 'review') {
+  route = 'mixed';
+  reason = `Both families can review (Claude ${claude.headroom}%, Codex ${codex.headroom}%).`;
+  next = 'Use a reviewer from a different model family than the author.';
+} else if (claude.headroom >= codex.headroom) {
+  route = 'claude';
+  reason = `Claude has more limiting-window headroom (${claude.headroom}% vs ${codex.headroom}%).`;
+  next = 'Put bulk execution on Claude and reserve Codex for bounded cross-family review.';
+} else {
+  route = 'codex';
+  reason = `Codex has more limiting-window headroom (${codex.headroom}% vs ${claude.headroom}%).`;
+  next = 'Put bulk execution on Codex and reserve Claude for bounded advice or review.';
+}
+
+const freshness = claude.stale || codex.stale ? 'stale' : 'fresh';
+console.log(`ROUTE=${route}`);
+console.log(`TASK_SHAPE=${taskShape}`);
+console.log(`CLAUDE_HEADROOM=${known(claude.headroom) ? `${claude.headroom}%` : 'unreadable'}`);
+console.log(`CODEX_HEADROOM=${known(codex.headroom) ? `${codex.headroom}%` : 'unreadable'}`);
+console.log(`FRESHNESS=${freshness}`);
+console.log(`REASON=${reason}`);
+if (freshness === 'stale') {
+  console.log('WARNING=At least one provider report is stale; treat this route as advisory.');
+  if (route !== 'stop') next += ' Refresh authentication before a large irreversible fan-out.';
+}
+console.log(`NEXT=${next}`);
+if (claude.headroom < 5) console.log(`CLAUDE_RESET=${claude.reset}`);
+if (codex.headroom < 5) console.log(`CODEX_RESET=${codex.reset}`);
