@@ -78,6 +78,7 @@ Workbench.
 |-------|--------|-------|
 | `contextual-annotations` | incubating | Places one expandable, viewport-safe review bubble per finding at a semantic live-UI anchor; supports dynamic HTMX/modal re-anchoring and before/after evidence without shipping review code in production. |
 | `quality-loop` | incubating | One GitHub Issue → pre-run Design Atelier → autonomously implemented and adversarially reviewed semantic Chapters → post-run System Story Atelier → final integration PR. Script-enforced session scope, durable baseline/RED/GREEN evidence, deterministic change-shape manifests, review rounds, deviations, and delivery gates. |
+| `production-ready-pr` | incubating | Human-invoked delivery loop for local and adversarial review, PR creation, CI and Copilot observation, feedback handling, and a decision-ready handoff without merging. |
 | `agent-orchestration` | incubating | Coordinate a thin lead and bounded collaborators through validated model bindings, persistent/fresh/disposable lifecycles, durable checkpoints, and atomically acquired workspace/process leases. |
 | `quota-axi` | incubating | Read raw Claude and Codex subscription windows with `quota-axi --json`; model orchestration interprets duration, reset time, model scope, and freshness. Read-only and policy-free. |
 | `atelier` | incubating | Copy-owned HTML interaction kit with a complete shell, selectable context/decision/annotation/queue capabilities, durable feedback state, a monitor-owned live loop, and compact desktop/narrow verification. |
