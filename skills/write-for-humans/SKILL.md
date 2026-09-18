@@ -40,8 +40,10 @@ Apply every relevant rule below.
 - Open with the answer for a question, the outcome for completed work, or the required action
   for instructions. When the answer is a command, path, value, or snippet, put it in the first
   line and let prose follow it.
-- Start on the substance. Delete an opening sentence that announces what you are about to say
-  or do ("Great question", "Let me look at", "To answer your question").
+- Write the subject, not commentary about the writing. Start on the substance. Delete sentences
+  that announce, describe, or justify the text, page, explanation, language, structure, or audience,
+  unless the reader needs them to navigate or act ("This page explains", "In plain language",
+  "As described below").
 - Give each paragraph one job and put its point near the beginning.
 - Use short, descriptive headings when readers may scan or return to the text.
 - Put prerequisites before the action that needs them and warnings beside the affected step.
