@@ -43,8 +43,11 @@ const surface = (alpha = 'the quick brown fox jumps over the lazy dog', extra = 
   <atelier-region key="fig" label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg>
     <svg id="flow-svg" width="400" height="60" viewBox="0 0 400 60" style="max-width:100%">${flow.map((n, i) => `<g class="node" id="mermaid-${Date.now()}-flowchart-${n}" transform="translate(${10 + i * 130},10)"><rect width="110" height="40" fill="#ddd"/><text x="10" y="25">${n.split('-')[0]}</text></g>`).join('')}</svg><div style="height:600px"></div></atelier-region>
   <atelier-region key="beta" label="Beta"><h2>Beta</h2><p>beta body</p><div style="height:600px"></div></atelier-region>
+  <atelier-region key="late" label="Late"><details id="late-box"><summary>file</summary><div id="late-view"></div></details></atelier-region>
 ${extra}</atelier-region>
 </main><atelier-margin></atelier-margin></div>
+<script>setTimeout(() => { document.querySelector('#late-view').textContent = 'rendered late by a viewer';
+  document.dispatchEvent(new CustomEvent('atelier:rendered')); }, 600);</script>
 </body></html>`;
 
 // ---- harness -------------------------------------------------------------------------
@@ -150,7 +153,7 @@ try {
   // ---- regions ----
   await check('regions: path keys come from ancestors', async () => {
     eq(probe(`JSON.stringify([...document.querySelectorAll('atelier-region')].map(e=>e.regionKey))`),
-      ['v','v/alpha','v/list','v/fig','v/beta'], 'region keys');
+      ['v','v/alpha','v/list','v/fig','v/beta','v/late'], 'region keys');
   });
 
   await check('regions: the kernel inserts nothing into authored content', async () => {
@@ -227,6 +230,18 @@ try {
     writeSurface();
     await api('/api/ready', { changed:['v/fig'] });
     await sleep(1200);
+  });
+
+  await check('anchor: text a viewer renders late resolves, and revealing it opens its details', async () => {
+    await api('/api/state', { threads: { ...(await state()).threads, 'v/late': [{ id: 'c-late', text: 'late thread', anchor: { region: 'v/late', quote: 'rendered late' } }] } });
+    await api('/api/send', { region: 'v/late', id: 'c-late' });
+    browser(['reload']); await sleep(1800);
+    const hl = probe(`JSON.stringify([...CSS.highlights.get('atl-anchor')].map(r => r.toString()))`);
+    assert(hl.includes('rendered late'), `highlights: ${JSON.stringify(hl)}`);
+    eq(probe(`JSON.stringify(document.querySelector('#late-box').open)`), false, 'details open before reveal');
+    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('c-late')).then(() => 'ok')`]);
+    await sleep(500);
+    eq(probe(`JSON.stringify(document.querySelector('#late-box').open)`), true, 'details open after reveal');
   });
 
   await check('anchor: ⌘+Enter sends a new Thread', async () => {

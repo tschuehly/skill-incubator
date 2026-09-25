@@ -104,7 +104,11 @@ const probe = `(async () => {
   const margins = [...document.querySelectorAll('atelier-margin')];
   const activities = [...document.querySelectorAll('atelier-activity')];
   const chromeInRegion = [...margins, ...activities].filter(el => el.closest('atelier-region')).map(el => el.tagName.toLowerCase());
-  const unresolved = kernel?.unresolvedAnchors ? kernel.unresolvedAnchors() : [];
+  // Viewers and diagrams render after load; give their anchors up to 5 s to resolve before failing.
+  let unresolved = kernel?.unresolvedAnchors ? kernel.unresolvedAnchors() : [];
+  for (let i = 0; i < 20 && unresolved.length; i++) {
+    await new Promise(r => setTimeout(r, 250)); unresolved = kernel.unresolvedAnchors();
+  }
 
   // Diagrams are agent-authored: whatever renders one must mark it ready and keep prose behind it,
   // or a screenshot of a blank box is the only evidence anyone will ever have.

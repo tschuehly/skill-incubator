@@ -106,7 +106,7 @@ drawer opens below it.
 
 ### Module exports
 
-`reveal(id)` scrolls to a Thread's or Proposal's anchor and expands its card. `refresh()` rereads
+`reveal(id)` scrolls to a Thread's or Proposal's anchor, opening any `<details>` around it, and expands its card. A renderer that adds text after load — a diagram or file viewer — dispatches `atelier:rendered` on `document` when done, so anchors inside it resolve. `refresh()` rereads
 the store. `unresolvedAnchors()` lists stored anchors that no longer resolve; preflight uses it.
 
 ## Configuration (env)

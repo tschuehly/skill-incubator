@@ -317,9 +317,11 @@ const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(
 addEventListener('resize', schedule);
 document.addEventListener('scroll', e => { if (e.target !== document) schedule(); }, true);   // inner scrollers
 new ResizeObserver(schedule).observe(document.documentElement);
-// A diagram library draws after load and after every Ready; anchors inside it resolve once it says so.
+// Diagram and file viewers draw after load and after every Ready; anchors inside them resolve once
+// they say so — a diagram by setting data-diagram-ready, any renderer by dispatching atelier:rendered.
 new MutationObserver(ms => { if (ms.some(m => m.target.dataset?.diagramReady === 'true')) render(); })
   .observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-diagram-ready'] });
+document.addEventListener('atelier:rendered', () => render());
 
 // ===== margin actions ===============================================================
 const itemOf = id => cache.find(i => i.id === id);
@@ -335,7 +337,9 @@ document.addEventListener('click', async e => {
   const b = e.target.closest?.('atelier-margin button'); if (!b) return;
   const d = b.dataset, value = sel => $(sel)?.value.trim();
   if ('open' in d) {
-    active = d.open || null; render();
+    active = d.open || null;
+    const it = active && itemOf(active); unfold(it?.res?.range ? it.res.range.startContainer.parentElement : it?.res?.el);
+    render();
     const r = active && $(`[data-card="${active}"]`)?.getBoundingClientRect();
     if (r && r.bottom > innerHeight - 12) scrollBy({ top: Math.min(r.bottom - innerHeight + 24, r.top - 80), behavior: 'smooth' });
     return;
@@ -433,9 +437,11 @@ customElements.define('atelier-activity', class extends HTMLElement {
   }
 });
 // Scroll to an interaction's anchor and expand its card.
+const unfold = el => { for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true; };
 export function reveal(id) {
   const it = itemOf(id); if (!it) return;
   const target = it.res?.range ? it.res.range.startContainer.parentElement : it.res?.el;
+  unfold(target);
   target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   active = id; render();
 }
