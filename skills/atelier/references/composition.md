@@ -80,7 +80,7 @@ The material decides what the human looks at. Before writing prose, ask what sho
 
 | Material | Form |
 |---|---|
-| A flow, pipeline, sequence, state machine, or timeline | Mermaid |
+| A flow, pipeline, sequence, state machine, or timeline | Mermaid, as a [flow explainer](#flow-explainer) |
 | Options judged on shared criteria | A table, one row per option |
 | Numbers, or settings × values | A Vega-Lite chart or heatmap |
 | A graph whose layout matters, or whose every node carries a Thread | Graphviz |
@@ -106,6 +106,21 @@ When a worker shows that a change works, the human accepts or sends back each cl
   claim is explained once, before the claims.
 - **One Proposal per claim, anchored to the claim:** Accept or Rework. A claim with a gap
   recommends checking it first, and no option calls it proven.
+
+### Flow explainer
+
+When the human judges a pipeline or process — its stages, its gates, whether they are enough — the
+diagram carries the page.
+
+- **The diagram is on the first screen**, after at most about 60 words naming the subject, the
+  finding, and the decision. Mark each gap on its node (color, a badge) so the diagram shows where
+  the process is weak. Keep its `[data-diagram-fallback]` prose in the DOM and hide it visually once
+  the SVG renders. Check that every node is readable and nothing is clipped.
+- **One Region per stage, one per gate inside it.** A gate's Region says what it checks, what it
+  proves, and — only where it changes the verdict — its gap, in one sentence.
+- **Each finding lives at its gate.** The diagram and the stage Regions are the whole page; a gap is
+  a Proposal anchored at the gate it weakens. A cross-stage finding gets one Region of its own and
+  is named nowhere else.
 
 ### Draw with a library
 
