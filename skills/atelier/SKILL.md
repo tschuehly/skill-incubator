@@ -132,8 +132,11 @@ expandable context — without the session transcript.
    It fails silent handoff defects: the store is unreachable, the poller is missing or duplicated,
    this Surface's copied kit differs from the canonical one, Region keys are missing or duplicated,
    the Margin or Activity is missing, doubled, or inside a Region, a stored Anchor no longer finds
-   its target, the page throws a browser error or kernel warning, content overflows horizontally, or
-   a diagram did not render. Re-copy a drifted kit rather than patching it in place; pass
+   its target, the page throws a browser error or kernel warning, content overflows horizontally, a
+   diagram did not render, or a sentence describes the page instead of its subject. For that last
+   gate it lists each sentence with its Region; rewrite each one as the subject's fact or delete it.
+   Instructions for an interface that is itself under review go in an element marked
+   `data-subject-ui`. Re-copy a drifted kit rather than patching it in place; pass
    `--allow-kit-drift` only when the local change is deliberate and written down. `--skip-render`
    and `--skip-poller` are for kernel tests, never a human handoff.
 5. After preflight passes, run one cold-reader pass yourself: follow the primary reading path, jump

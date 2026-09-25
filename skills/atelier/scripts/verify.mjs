@@ -575,6 +575,21 @@ try {
     }
   });
 
+  await check('preflight: a sentence about the page fails the prose gate; subject-UI steps do not', async () => {
+    try {
+      writeSurface('alpha body v3', `<atelier-region key="intro" label="Intro"><p>Six decisions, most dangerous first. Reads switch region by region.</p>
+        <p data-subject-ui>Select any sentence, then press Thread.</p></atelier-region>`);
+      const result = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'],
+        { encoding:'utf8', timeout:120000 });
+      const out = `${result.stdout}\n${result.stderr}`;
+      assert(result.status === 1 && out.includes('FAIL PROSE: 1 sentence'), `preflight: ${result.status} ${out.slice(0, 400)}`);
+      assert(out.includes('"Six decisions, most dangerous first." (Region intro;'), 'the offending sentence and its Region are not listed');
+      assert(out.includes('Repair:') && !out.includes('Reads switch') && !out.includes('Select any'), 'wrong sentences listed or no repair text');
+    } finally {
+      writeSurface('alpha body v3');
+    }
+  });
+
 } finally {
   try { browser(['close']); } catch {}
   await stopServer();

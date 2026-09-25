@@ -6,7 +6,7 @@
 //
 // It checks silent handoff defects: store and poller reachability, kit drift, Region identity, the
 // margin and activity elements, stored anchors that no longer resolve, browser errors and kernel
-// warnings, overflow, and diagram rendering.
+// warnings, overflow, diagram rendering, and prose that describes the page instead of its subject.
 //
 // --skip-poller / --skip-render exist for kernel tests. Neither is a human handoff.
 import fs from 'node:fs';
@@ -14,6 +14,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { metaFindings, REPAIR } from './prose.mjs';
 
 const args = process.argv.slice(2);
 let url = '', pollerIdentity = '', evidenceDir = '', skipPoller = false, skipRender = false, allowKitDrift = false;
@@ -124,6 +125,17 @@ const probe = `(async () => {
     return [];
   });
 
+  // The agent's own prose, one block at a time: quoted source, code, diffs, diagrams, kernel chrome,
+  // and [data-subject-ui] (instructions for an interface that is itself under review) are not prose.
+  const SKIP = 'pre,code,kbd,samp,blockquote,q,svg,script,style,template,[hidden],.file-view,.d2h-wrapper,.cm-editor,'
+    + '[data-verbatim],[data-subject-ui],atelier-margin,atelier-activity,[class^="atl-"],[class*=" atl-"]';
+  const inline = el => /^inline|^contents$/.test(getComputedStyle(el).display);
+  const own = el => [...el.childNodes].map(n => n.nodeType === 3 ? n.data
+    : n.nodeType === 1 && !n.matches(SKIP) && inline(n) ? own(n) : ' ').join('');
+  const prose = [...document.body.querySelectorAll('*')].filter(el => !el.closest(SKIP) && !inline(el))
+    .map(el => ({ region: el.closest('atelier-region')?.getAttribute('key') || '(outside Regions)', text: own(el) }))
+    .filter(block => block.text.trim());
+
   const doc = document.documentElement;
   const overflow = doc.scrollWidth > doc.clientWidth + 1
     ? [{ selector:'document', width: doc.scrollWidth, viewport: doc.clientWidth }] : [];
@@ -147,7 +159,7 @@ const probe = `(async () => {
     warning: (document.querySelector('.atl-warn')?.textContent || '').trim(),
     visibleText: (document.body.innerText || '').trim().length,
     regionCount: regions.length, keys, unnamed, duplicates, margins: margins.length, activities: activities.length, chromeInRegion, unresolved,
-    diagramCount: diagrams.length, diagramFailures, overflow,
+    diagramCount: diagrams.length, diagramFailures, overflow, prose,
   });
 })()`;
 
@@ -219,6 +231,13 @@ for (const report of reports){
   if (report.duplicates.length) fail(gate, `duplicate Region keys silently merge their Threads: ${report.duplicates.join(', ')}`);
   if (report.diagramFailures.length) fail(gate, `diagram(s) are not reviewable: ${report.diagramFailures.map(d => `${d.key} — ${d.reason}`).join('; ')}`);
   if (report.overflow.length) fail(gate, `horizontal overflow: ${JSON.stringify(report.overflow)}`);
+  // Update cards are the agent's prose too, even though the kernel renders them in the margin.
+  const updates = Object.values(state.updates || {}).filter(u => !u.dismissedAt)
+    .map(u => ({ region: `${u.region} Update`, text: `${u.title || ''}. ${u.body || ''}` }));
+  const meta = report.name === 'desktop' ? metaFindings(report.prose.concat(updates)) : [];
+  if (meta.length) fail('PROSE', `${meta.length} sentence(s) describe the page instead of its subject:\n`
+    + meta.map(f => `  - "${f.sentence}" (Region ${f.region}; ${f.rule})`).join('\n') + `\n  Repair: ${REPAIR}`);
+  else if (report.name === 'desktop') pass('PROSE', `${report.prose.length} prose block(s), no sentence matches a known page-describing pattern`);
   if (!failures.some(message => message.startsWith(`FAIL ${gate}:`))){
     pass(gate, `${report.viewport.width}x${report.viewport.height}: ${report.regionCount} Region(s) with unique keys, one margin and activity outside them, 0 unresolved anchors, ${report.diagramCount} diagram(s), no overflow`);
   }

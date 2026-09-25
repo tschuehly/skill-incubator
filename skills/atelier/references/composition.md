@@ -96,10 +96,12 @@ When a worker shows that a change works, the human accepts or sends back each cl
 
 - **One Region per claim** — one behavior a check can prove, such as "Escape closes an open card",
   not one per fix or per file.
-- **Each claim carries its proof in place, open:** the human's words it answers, quoted; its own
-  diff hunk in the [file viewer](#show-files); the check that covers it with the command and the
-  exact output line; and before/after images. Where an image or a check does not exist, show the
-  empty slot labelled with what is missing.
+- **Proof sits on its claim, open:** the human's words it answers, quoted; its own diff hunk in
+  the [file viewer](#show-files); the check that covers it with the command and the exact output
+  line; and before/after images.
+- **A gap shared by every claim is one statement,** such as "No before/after screenshots exist; no
+  human has used either fix", stated once before the claims. A claim marks only what it lacks and
+  the others have.
 - **A gap belongs to the claim it weakens.** A scripted check of a human action (a synthetic paste,
   a dispatched click), a behavior no check exercises, and a change no human has used yet are gaps.
 - **One Proposal per claim, anchored to the claim:** Accept or Rework. A claim with a gap
@@ -203,11 +205,11 @@ any line, and it tells the kernel when it finishes so those anchors resolve:
 Every sentence is about the subject. Write the finding, not the process: current facts, the
 recommendation, and what the human must judge.
 
-- **Open on the subject.** The first screen names what the human is judging and where to start, in
-  about 60 words; the material follows directly.
+- **Open on the subject.** The first screen states the subject, the current finding, its
+  consequence, and the decision the human owns, in about 60 words; the material follows directly.
 - **Every sentence stays true with the layout removed.** Read each sentence as plain text in a
   chat and keep only sentences about the subject. Carry the meaning in the material itself: label
-  the box "Gate: lint", title the list "Gaps, most dangerous first", name the rule you mean. A
+  the box "Gate: lint", title the list "Unverified: paste, drag-and-drop", name the rule you mean. A
   sentence that only makes sense on this page — a legend, a reading direction, a pointer, a note
   about the page's status — is meta commentary; delete it.
 - **Show the source being judged.** Quote the passage, clause, rule, or diff hunk verbatim and

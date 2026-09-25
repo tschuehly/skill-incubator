@@ -43,6 +43,9 @@ curl -fsS "$BASE/api/state" | grep -F '"name":"atelier-test"' >/dev/null
 curl -fsS "$BASE/atelier.mjs" | grep -F "customElements.define('atelier-region'" >/dev/null
 curl -fsS "$BASE/atelier.css" | grep -F '.atl-card' >/dev/null
 
+# --- the prose gate's rules against real eval sentences and clean subject sentences ---
+node "$HERE/prose.test.mjs" >/dev/null
+
 # --- preflight's non-browser gates -----------------------------------------------------
 PORT="$PORT" CURSOR_FILE="$TMP/poller.cursor" bash "$TMP/review-poll.sh" --once >"$TMP/poller.log" 2>&1 &
 POLLER_PID=$!
