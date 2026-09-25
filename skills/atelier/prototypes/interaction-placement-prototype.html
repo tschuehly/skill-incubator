@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%23a43a32%22/></svg>">
+<title>Atelier interaction placement prototype</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg:#f3f5f4; --paper:#fff; --paper-2:#f8faf9; --ink:#202522; --muted:#65706a;
+    --line:#d7ddd9; --accent:#a43a32; --accent-soft:#f8ded9; --dark:#232a27; --shadow:0 16px 40px rgba(28,38,32,.09);
+  }
+  * { box-sizing:border-box; }
+  body { display:grid; grid-template-rows:auto minmax(0,1fr) 72px; height:100vh; margin:0; overflow:hidden; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  body::after { content:""; grid-row:3; border-top:1px solid var(--line); background:color-mix(in srgb,var(--bg) 92%,white); }
+  button,textarea { font:inherit; }
+  button:focus-visible,summary:focus-visible,textarea:focus-visible { outline:3px solid #ca756e; outline-offset:2px; }
+  .prototype-note { z-index:10; padding:9px 18px; background:#2a322e; color:#fff; font-size:.82rem; }
+  .prototype-note strong { color:#ffd4ce; }
+  .page { width:min(1180px,calc(100% - 32px)); height:100%; margin:auto; overflow:auto; padding:12px 0 110px; }
+  .question { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:3px 14px; margin-bottom:10px; padding:10px 12px; border:1px solid #e1b3ae; border-radius:13px; background:#fff8f7; }
+  .question h1 { margin:0; font-size:1rem; }
+  .question p { margin:0; color:var(--muted); font-size:.84rem; }
+  .demo { border:1px solid var(--line); border-radius:16px; background:var(--paper); box-shadow:var(--shadow); overflow:hidden; }
+  .demo-label { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--paper-2); }
+  .demo-label strong { font-size:.85rem; }
+  .demo-label span { color:var(--muted); font-size:.78rem; }
+  .surface { padding:18px; }
+  .protocol-stack { display:grid; gap:10px; margin-bottom:24px; }
+  .header { margin-bottom:10px; }
+  .eyebrow { color:var(--accent); font-size:.72rem; font-weight:850; letter-spacing:.12em; text-transform:uppercase; }
+  h2 { max-width:18ch; margin:3px 0 6px; font-size:clamp(2rem,4vw,3rem); line-height:1.03; letter-spacing:-.04em; }
+  .lead { max-width:74ch; margin:0; color:var(--muted); font-size:.94rem; }
+  .update,.proposal,.receipt,.cockpit,.evidence,.compact-bar { border:1px solid var(--line); border-radius:10px; background:#fff; }
+  .update { display:flex; justify-content:space-between; gap:14px; padding:10px 12px; border-left:4px solid var(--accent); background:#fdf4f2; }
+  .update b,.update small { display:block; }
+  .update small { margin-top:2px; color:var(--muted); }
+  .x { align-self:start; border:0; background:transparent; color:var(--muted); cursor:pointer; }
+  .receipt { padding:10px 12px; opacity:.72; }
+  .receipt b { display:block; }
+  .receipt small { color:var(--muted); }
+  .proposal { padding:13px; border-left:4px solid var(--accent); }
+  .proposal h3 { margin:0 0 10px; font-size:.95rem; }
+  .options { display:grid; gap:7px; }
+  .option { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; text-align:left; cursor:pointer; }
+  .custom { display:flex; gap:7px; margin-top:9px; }
+  textarea { flex:1; min-height:48px; resize:vertical; padding:8px; border:1px solid var(--line); border-radius:8px; }
+  .send { padding:6px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; }
+  .cockpit { padding:7px; background:rgba(248,250,249,.95); }
+  .cockpit-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:3px; }
+  .filters { display:flex; gap:5px; }
+  .filters span { padding:3px 8px; border:1px solid var(--line); border-radius:7px; font-size:.75rem; }
+  .filters span:first-child { border-color:var(--accent); color:var(--accent); }
+  .rows { display:grid; gap:4px; }
+  .row { display:grid; grid-template-columns:auto 1fr; gap:3px 8px; padding:3px 5px; border-radius:7px; font-size:.78rem; }
+  .row:hover { background:#fff; }
+  .kind { align-self:start; padding:1px 6px; border:1px solid var(--line); border-radius:999px; font-size:.68rem; text-transform:uppercase; }
+  .where { grid-column:2; color:var(--muted); font-size:.7rem; }
+  .content-grid { display:grid; grid-template-columns:260px minmax(0,1fr); gap:14px; }
+  .rail { padding:6px; border:1px solid var(--line); border-radius:10px; background:var(--paper-2); }
+  .rail button { display:block; width:100%; padding:7px 8px; border:0; border-bottom:1px solid var(--line); background:transparent; text-align:left; }
+  .rail button:first-child { border-radius:8px; background:var(--accent-soft); color:#702e28; font-weight:750; }
+  .evidence { padding:11px; }
+  .evidence h3 { margin:0 0 4px; font-size:1.2rem; }
+  .evidence p { margin:0 0 7px; color:var(--muted); }
+  .facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  .fact { padding:7px; border:1px solid var(--line); border-radius:8px; background:var(--paper-2); }
+  .fact b { display:block; color:var(--accent); }
+  .after-evidence { margin-top:9px; }
+  .compact-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 11px; background:var(--dark); color:#fff; }
+  .compact-bar button { border:1px solid rgba(255,255,255,.35); border-radius:8px; background:transparent; color:#fff; padding:5px 9px; }
+  details.compact-decision { margin-top:16px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+  details.compact-decision summary { padding:11px 13px; cursor:pointer; font-weight:750; }
+  details.compact-decision .proposal { margin:0 10px 10px; }
+  .switcher { position:fixed; left:50%; bottom:18px; z-index:20; transform:translateX(-50%); display:flex; align-items:center; gap:10px; padding:8px; border-radius:999px; background:#171c19; color:#fff; box-shadow:0 12px 32px rgba(0,0,0,.28); }
+  .switcher button { width:38px; height:38px; border:1px solid rgba(255,255,255,.28); border-radius:50%; background:transparent; color:#fff; cursor:pointer; }
+  .variant-name { min-width:240px; text-align:center; font-size:.84rem; font-weight:750; }
+  [hidden] { display:none !important; }
+  @media(max-width:760px){
+    .surface { padding:18px; }
+    .question { display:block; }
+    .question p { margin-top:4px; }
+    .content-grid { grid-template-columns:1fr; }
+    .rail { display:flex; overflow:auto; }
+    .rail button { flex:0 0 190px; border:1px solid var(--line); }
+    .facts { grid-template-columns:1fr; }
+    .switcher { width:calc(100% - 24px); justify-content:space-between; }
+    .variant-name { min-width:0; }
+  }
+</style>
+</head>
+<body>
+<div class="prototype-note"><strong>🤖 THROWAWAY PROTOTYPE</strong> — Same interaction state, three placement strategies. Nothing here changes Atelier or PhotoQuest.</div>
+<main class="page">
+  <section class="question">
+    <h1>Question: where should Atelier interactions appear?</h1>
+    <p>Same state in every variant: one Update, one decided Proposal, one open Proposal, and two navigation rows. Only placement changes in B.</p>
+  </section>
+
+  <section class="demo">
+    <div class="demo-label"><strong id="demoTitle"></strong><span id="demoSummary"></span></div>
+
+    <div class="surface" data-variant="current">
+      <div class="protocol-stack">
+        <div class="update"><div><b>Wide layout changed</b><small>Reload once to see the new layout.</small></div><button class="x" aria-label="Dismiss">✕</button></div>
+        <div class="receipt"><b>Was the first version understandable?</b><small>Decided · Needs changes</small></div>
+        <div class="proposal">
+          <h3>Are the production steps clear enough to continue?</h3>
+          <div class="options"><button class="option">Yes — continue</button><button class="option">Not yet — I have a correction</button><button class="option">Stop</button></div>
+          <div class="custom"><textarea aria-label="Custom answer" placeholder="…or answer in your own words"></textarea><button class="send">Answer</button></div>
+        </div>
+      </div>
+      <header class="header"><div class="eyebrow">PhotoQuest Video Studio</div><h2>How a verified video is made</h2><p class="lead">The evidence Thomas needs to judge is below the question that asks him to judge it.</p></header>
+      <div class="cockpit"><div class="cockpit-head"><b>Open feedback</b><div class="filters"><span>You</span><span>Agent</span><span>All</span></div></div><div class="rows"><div class="row"><span class="kind">Read</span><span>Wide layout changed</span><span class="where">pipeline-audit</span></div><div class="row"><span class="kind">Decide</span><span>Are the production steps clear enough?</span><span class="where">pipeline-audit</span></div></div></div>
+      <div class="content-grid" style="margin-top:14px"><nav class="rail"><button>1 · Isolate the work</button><button>2 · Check a scene</button><button>3 · Detect fresh scenes</button></nav><article class="evidence"><h3>Isolate the work</h3><p>Creates a separate working copy and links one verified media kit.</p><div class="facts"><div class="fact"><b>Input</b>Source files</div><div class="fact"><b>Check</b>Manifest</div><div class="fact"><b>Output</b>Working copy</div></div></article></div>
+    </div>
+
+    <div class="surface" data-variant="placement" hidden>
+      <header class="header"><div class="eyebrow">PhotoQuest Video Studio</div><h2>How a verified video is made</h2><p class="lead">Authored content establishes the job first. Kernel change: an explicit host suppresses its automatic duplicate; store, Attention, Cockpit, endpoints, and cards stay unchanged.</p></header>
+      <div class="update"><div><b>Wide layout changed</b><small>Reload once to see the new layout.</small></div><button class="x" aria-label="Dismiss">✕</button></div>
+      <div class="cockpit" style="margin-top:10px"><div class="cockpit-head"><b>Open feedback</b><div class="filters"><span>You</span><span>Agent</span><span>All</span></div></div><div class="rows"><div class="row"><span class="kind">Read</span><span>Wide layout changed</span><span class="where">pipeline-audit</span></div><div class="row"><span class="kind">Decide</span><span>Are the production steps clear enough?</span><span class="where">pipeline-audit</span></div></div></div>
+      <div class="content-grid" style="margin-top:14px"><nav class="rail"><button>1 · Isolate the work</button><button>2 · Check a scene</button><button>3 · Detect fresh scenes</button></nav><div><article class="evidence"><h3>Isolate the work</h3><p>Creates a separate working copy and links one verified media kit.</p><div class="facts"><div class="fact"><b>Input</b>Source files</div><div class="fact"><b>Check</b>Manifest</div><div class="fact"><b>Output</b>Working copy</div></div></article><div class="after-evidence"><div class="proposal"><h3>Are the production steps clear enough to continue?</h3><div class="options"><button class="option">Yes — continue</button><button class="option">Not yet — I have a correction</button><button class="option">Stop</button></div><div class="custom"><textarea aria-label="Custom answer" placeholder="…or answer in your own words"></textarea><button class="send">Answer</button></div></div><div class="receipt"><b>Was the first version understandable?</b><small>Decided · Needs changes</small></div></div></div></div>
+    </div>
+
+    <div class="surface" data-variant="compact" hidden>
+      <header class="header"><div class="eyebrow">PhotoQuest Video Studio</div><h2>How a verified video is made</h2><p class="lead">A larger redesign reduces chrome as well as moving it. This is intentionally beyond the proposed first repair.</p></header>
+      <div class="compact-bar"><span><b>2 items need attention</b> · 1 update, 1 decision</span><button>Review</button></div>
+      <div class="content-grid" style="margin-top:14px"><nav class="rail"><button>1 · Isolate the work</button><button>2 · Check a scene</button><button>3 · Detect fresh scenes</button></nav><div><article class="evidence"><h3>Isolate the work</h3><p>Creates a separate working copy and links one verified media kit.</p><div class="facts"><div class="fact"><b>Input</b>Source files</div><div class="fact"><b>Check</b>Manifest</div><div class="fact"><b>Output</b>Working copy</div></div></article><details class="compact-decision"><summary>Final review · choose an answer</summary><div class="proposal"><h3>Are the production steps clear enough to continue?</h3><div class="options"><button class="option">Yes — continue</button><button class="option">Not yet — I have a correction</button><button class="option">Stop</button></div><details><summary>Answer in your own words</summary><div class="custom"><textarea aria-label="Custom answer"></textarea><button class="send">Answer</button></div></details></div></details></div></div>
+    </div>
+  </section>
+</main>
+
+<nav class="switcher" aria-label="Prototype variants">
+  <button id="previous" aria-label="Previous variant">←</button>
+  <div class="variant-name" id="variantName"></div>
+  <button id="next" aria-label="Next variant">→</button>
+</nav>
+<script>
+  const variants = [
+    { key:'current', label:'A — Current automatic placement', summary:'Protocol first; evidence later' },
+    { key:'placement', label:'B — Explicit placement repair', summary:'Same cards, placed by the Surface' },
+    { key:'compact', label:'C — Compact chrome redesign', summary:'More machinery; shown for contrast' },
+  ];
+  const params = new URLSearchParams(location.search);
+  let index = Math.max(0, variants.findIndex(v => v.key === params.get('variant')));
+  function render(push = false){
+    const variant = variants[index];
+    document.querySelectorAll('[data-variant]').forEach(el => el.hidden = el.dataset.variant !== variant.key);
+    document.getElementById('variantName').textContent = variant.label;
+    document.getElementById('demoTitle').textContent = variant.label;
+    document.getElementById('demoSummary').textContent = variant.summary;
+    if (push){ const url = new URL(location); url.searchParams.set('variant', variant.key); history.replaceState(null,'',url); }
+  }
+  function move(delta){ index=(index+delta+variants.length)%variants.length; render(true); }
+  document.getElementById('previous').addEventListener('click',()=>move(-1));
+  document.getElementById('next').addEventListener('click',()=>move(1));
+  addEventListener('keydown',event=>{
+    if (event.target.matches('input,textarea,[contenteditable]')) return;
+    if (event.key==='ArrowLeft') move(-1);
+    if (event.key==='ArrowRight') move(1);
+  });
+  render(params.has('variant'));
+</script>
+</body>
+</html>

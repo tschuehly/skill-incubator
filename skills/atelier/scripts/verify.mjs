@@ -281,6 +281,8 @@ try {
     const { body } = await api('/api/propose', { region:'v/fig', question:'Which figure?', options:['Keep it', 'Drop it'] });
     await sleep(900);
     level(tops(body.id, `document.querySelector('atelier-region[key=fig]')`), 'proposal card');
+    assert(probe(`JSON.stringify(document.querySelector('[data-slot="${body.id}"]').innerText)`).startsWith('Decide:'), 'open Proposal is not collapsed');
+    act(`document.querySelector('[data-open="${body.id}"]').click()`);
     act(`document.querySelector('[data-decide="${body.id}"][data-i="0"]').click()`);
     await sleep(600);
     eq((await state()).proposals[body.id].choiceIndex, 0, 'choice');
@@ -302,6 +304,7 @@ try {
   await check('proposal: a custom answer is recorded', async () => {
     const { body } = await api('/api/propose', { region:'v/beta', question:'Name?', options:['A', 'B'] });
     await sleep(900);
+    act(`document.querySelector('[data-open="${body.id}"]').click()`);
     act(`(()=>{document.querySelector('[data-custom="${body.id}"]').value='my own'; document.querySelector('[data-decide-custom="${body.id}"]').click()})()`);
     await sleep(600);
     const p = (await state()).proposals[body.id];
@@ -311,6 +314,7 @@ try {
   await check('proposal: an option explanation is asked and answered in place', async () => {
     const { body } = await api('/api/propose', { region:'v/list', question:'Order?', options:['Alphabetical', 'By date'] });
     await sleep(900);
+    act(`document.querySelector('[data-open="${body.id}"]').click()`);
     act(`(()=>{document.querySelector('[data-explain-text="${body.id}:1"]').value='why date?'; document.querySelector('[data-explain="${body.id}"][data-i="1"]').click()})()`);
     await sleep(600);
     eq((await state()).proposals[body.id].explanationRequests['1'].answer, 'why date?', 'request');

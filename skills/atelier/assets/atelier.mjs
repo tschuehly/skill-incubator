@@ -188,7 +188,9 @@ function where(it) {
 function proposalHTML(it, open) {
   const pr = it.pr, decided = pr.status === 'decided';
   const choice = pr.custom || pr.options?.[pr.choiceIndex] || '';
+  // Collapsed until opened, like a Thread: expanded cards push each other off their anchors.
   if (decided && !open) return `<button class="atl-card atl-card--line atl-card--decided" data-open="${it.id}">✓ <b>Decided</b> · ${esc(String(choice).split(/[.:;(]/)[0])}</button>`;
+  if (!open) return `<button class="atl-card atl-card--line is-yours" data-open="${it.id}"><span class="atl-first"><b>Decide:</b> ${esc(pr.question)}</span><span class="atl-meta">${(pr.options || []).length} options</span></button>`;
   const opt = (o, i) => {
     const req = pr.explanationRequests?.[i], ex = pr.explanations?.[i];
     return `<div class="atl-opt-row"><button class="atl-opt ${pr.choiceIndex === i ? 'is-chosen' : ''}" data-decide="${it.id}" data-i="${i}" ${decided ? 'disabled' : ''}>${i === 0 ? '<span class="atl-rec">Recommended</span> ' : ''}${esc(o)}</button>
@@ -305,9 +307,9 @@ document.addEventListener('click', async e => {
   if (d.reject) { const ta = $(`[data-reply-text="${d.reject}"]`), msg = ta.value.trim();
     if (!msg) { ta.placeholder = 'Say what is still wrong, then Reopen'; return ta.focus({ preventScroll: true }); }
     await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); ta.value = ''; return refresh(); }
-  if (d.decide) { await post('/api/decide', { id: d.decide, choiceIndex: +d.i }); return refresh(); }
+  if (d.decide) { await post('/api/decide', { id: d.decide, choiceIndex: +d.i }); active = null; return refresh(); }
   if (d.decideCustom) { const custom = value(`[data-custom="${d.decideCustom}"]`); if (!custom) return;
-    await post('/api/decide', { id: d.decideCustom, choiceIndex: null, custom }); return refresh(); }
+    await post('/api/decide', { id: d.decideCustom, choiceIndex: null, custom }); active = null; return refresh(); }
   if (d.explain) { const answer = value(`[data-explain-text="${d.explain}:${d.i}"]`); if (!answer) return;
     await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); return refresh(); }
 });

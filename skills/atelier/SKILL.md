@@ -78,7 +78,8 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    address you use in every API call about it. Make each Region one task-shaped judgment, and each
    item the human can answer on its own — a setting value, an option, a step — its own Region. The
    human opens Threads on any sentence, element, or image point; the kernel places them in the
-   Margin. Post open choices as anchored Proposals rather than writing them as a list. Elements,
+   Margin. Post each open choice as a Proposal anchored to the source text it decides. Every
+   sentence is about the subject; follow [Write the finding](references/composition.md#write-the-finding). Elements,
    Anchors, and endpoints are in [references/protocol.md](references/protocol.md).
 
 5. **Build once from the evidence.** Do not run speculative presentation rounds. Re-open the
@@ -97,7 +98,8 @@ The first browser load needs no Ready. Ready begins only after the human could h
 Surface.
 
 **Ready when:** one composition is chosen and any offered option is resolved or recorded as an
-assumption on the Surface. Current sources support every visible claim. A cold reader can follow
+assumption on the Surface. Current sources support every visible claim. The first screen orients in
+about 60 words, and no sentence describes the Surface itself. A cold reader can follow
 the material, reach every control, and understand each term and option from its visible or
 expandable context — without the session transcript.
 

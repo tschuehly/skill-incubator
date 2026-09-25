@@ -64,7 +64,8 @@ gone.
 Place exactly one, **outside every Region** — a Ready would otherwise replace it with the human's
 half-typed Thread. Give it its own column; 320px suits most Surfaces. Each card sits at its anchor's
 height and is pushed down to avoid overlap; the expanded card sits exactly at its anchor. Collapsed
-Threads show one line; decided Proposals collapse to "✓ Decided · …". Hovering a card highlights its
+Every card is one line until opened: a Thread shows its first message, an open Proposal
+"Decide: …", a decided one "✓ Decided · …"; open Proposals are also listed under Waiting for you. Hovering a card highlights its
 anchor; clicking anchored text or an anchored element opens its card. Text anchors render through
 the CSS Custom Highlight API, element anchors as an outline.
 

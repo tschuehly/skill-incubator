@@ -79,14 +79,27 @@ The material decides what the human looks at. Before writing prose, ask what sho
 |---|---|
 | A flow, dependency, or architecture | An inline SVG or rendered diagram |
 | Options judged on shared criteria | A table, one row per option |
-| Before and after | A diff or two panes side by side |
+| Before and after | Two columns side by side, changes marked in both |
 | A UI, interaction, or state change | A click-through prototype or embedded app |
 | Media, layout, or a visual defect | The image or frame itself, with Threads on points |
 | One argument that builds | Short prose with examples beside the claims |
 
-Write the finding, not the process: current facts, the recommendation, and what the human must
-judge. Each fact appears once. What the Surface does not prove belongs in one sentence beside the
-affected claim, not in a disclaimer section.
+### Write the finding
+
+Every sentence is about the subject. Write the finding, not the process: current facts, the
+recommendation, and what the human must judge.
+
+- **Open on the subject.** The first screen names what the human is judging and where to start, in
+  about 60 words; the material follows directly.
+- **The page never describes itself.** The kernel's tools explain themselves, so there is no text
+  about the Surface, its sections, its controls, or how to read or comment on it — and no status
+  notes such as "nothing here is active yet". This is meta commentary; delete every sentence of it.
+- **Show the source being judged.** Quote the passage, clause, rule, or line verbatim, and anchor
+  the Thread or Proposal to that quote. Your analysis sits beside it, shorter than it.
+- **Ask beside the evidence.** Anchor each Proposal to the source text it decides. A collected
+  "open questions" section is a list of Proposals with their evidence removed.
+- **Each fact appears once.** A real gap — something missing, unproven, or not yet active — is one
+  sentence beside the one claim it affects, stated once for the whole Surface.
 
 ## Choose the message shape
 
