@@ -99,11 +99,11 @@ When a worker shows that a change works, the human accepts or sends back each cl
 - **Proof sits on its claim, open:** the human's words it answers, quoted; its own diff hunk in
   the [file viewer](#show-files); the check that covers it with the command and the exact output
   line; and before/after images.
-- **A gap shared by every claim is one statement,** such as "No before/after screenshots exist; no
-  human has used either fix", stated once before the claims. A claim marks only what it lacks and
-  the others have.
-- **A gap belongs to the claim it weakens.** A scripted check of a human action (a synthetic paste,
-  a dispatched click), a behavior no check exercises, and a change no human has used yet are gaps.
+- **Every gap sits on each claim it weakens.** Give each claim a compact Before / After image slot,
+  left visibly empty with a short label when no image exists. Beside its check and exact result,
+  mark what applies: missing visual proof, a scripted check of a human action (a synthetic paste, a
+  dispatched click), a behavior no check exercises, and no human use yet. A reason shared by every
+  claim is explained once, before the claims.
 - **One Proposal per claim, anchored to the claim:** Accept or Rework. A claim with a gap
   recommends checking it first, and no option calls it proven.
 
