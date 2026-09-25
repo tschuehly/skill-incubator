@@ -132,23 +132,16 @@ recommendation, and what the human must judge.
 
 - **Open on the subject.** The first screen names what the human is judging and where to start, in
   about 60 words; the material follows directly.
-- **Every sentence stays true with the layout removed.** Read each sentence as if the page were
-  plain text in a chat: if it no longer makes sense, it is meta commentary; delete it. That catches
-  all its forms — legends ("green hexagons are gates"), reading directions ("start with…", "see
-  gap 1", "ranked by…"), pointers ("the question beside this value", "under Global", "below"),
-  descriptions of the page, its controls, or how to comment, and status notes ("nothing here is
-  active yet"). Put the meaning into the material itself instead: label the box "Gate: lint",
-  title the list "Gaps, most dangerous first", name the rule you mean.
-- **Show the source being judged.** Quote the passage, clause, rule, or line verbatim, and anchor
-  the Thread or Proposal to that quote. Your analysis sits beside it, shorter than it.
-- **Ask beside the evidence.** Anchor each Proposal to the quoted source passage it decides —
-  the plan line, the rule, the diff hunk — never to your own analysis of it. Quote the passage
-  first if the page does not show it yet. A collected "open questions" section is a list of
-  Proposals with their evidence removed.
-- **Each fact appears once.** A real gap — something missing, unproven, or not yet active — is one
-  sentence beside the one claim it affects, stated once for the whole Surface. A field that repeats
-  on every item ("Does not prove", "Limits", "Caveats") is boilerplate even when each entry is
-  true: keep the gap only on the item where it changes the human's judgment.
+- **Every sentence stays true with the layout removed.** Read each sentence as plain text in a
+  chat and keep only sentences about the subject. Carry the meaning in the material itself: label
+  the box "Gate: lint", title the list "Gaps, most dangerous first", name the rule you mean. A
+  sentence that only makes sense on this page — a legend, a reading direction, a pointer, a note
+  about the page's status — is meta commentary; delete it.
+- **Show the source being judged.** Quote the passage, clause, rule, or diff hunk verbatim and
+  anchor the Thread or Proposal to that quote, so the question sits on its evidence. Your analysis
+  sits beside it, shorter than it.
+- **Each fact appears once.** Put a real gap — something missing, unproven, or not yet active — in
+  one sentence on the one item where it changes the human's judgment.
 
 ## Choose the message shape
 
@@ -159,8 +152,8 @@ Three channels, and picking the wrong one is what makes a Surface feel like chat
 - **Update** when they need to know something and no answer is required: a batch finished, a source
   changed, six Regions were re-rendered. It waits in the Activity drawer, never in the content; it
   never asks.
-- **Proposal** when work cannot continue without their judgment. Anchor it to the sentence, row, or
-  element it decides. Name real options, put the recommendation first, and state what each one
+- **Proposal** when work cannot continue without their judgment, anchored as in
+  [Show the source being judged](#write-the-finding). Name real options, put the recommendation first, and state what each one
   costs. A Proposal with one option is an Update; a Proposal whose answer you could have discovered
   yourself is a research failure, not a question. A list of open choices in the content is a set of
   Proposals written as prose: post each as a Proposal instead.

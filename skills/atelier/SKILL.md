@@ -31,8 +31,7 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    diagram, table, diff, image, or click-through prototype before prose. Never ask the human to
    invent the interface. Ask once, without blocking, when the choice would change
    their workflow; if no answer arrives in the same turn, build the recommendation and post the
-   choice as a Proposal anchored where it matters, the recommendation first — never as an
-   assumption note in the content.
+   choice as a Proposal anchored where it matters, the recommendation first.
 
 3. **Copy the kit into the project.** All four files travel together — the server serves
    `/atelier.mjs` and `/atelier.css` from its own directory:
@@ -79,9 +78,9 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    address you use in every API call about it. Make each Region one task-shaped judgment, and each
    item the human can answer on its own — a setting value, an option, a step — its own Region. The
    human opens Threads on any sentence, element, or image point; the kernel places them in the
-   Margin. Post each open choice as a Proposal anchored to the source text it decides. Every
-   sentence is about the subject; follow [Write the finding](references/composition.md#write-the-finding). Elements,
-   Anchors, and endpoints are in [references/protocol.md](references/protocol.md).
+   Margin. Write every sentence and anchor every Proposal as
+   [Write the finding](references/composition.md#write-the-finding) says. Elements, Anchors, and
+   endpoints are in [references/protocol.md](references/protocol.md).
 
 5. **Build once from the evidence.** Do not run speculative presentation rounds. Re-open the
    authoritative sources as they exist now and trace every factual claim, recommendation, and
@@ -100,7 +99,7 @@ Surface.
 
 **Ready when:** one composition is chosen and any offered option is resolved or posted as a
 Proposal. Current sources support every visible claim. The first screen orients in
-about 60 words, and no sentence describes the Surface itself. A cold reader can follow
+about 60 words, and every sentence stays true with the layout removed. A cold reader can follow
 the material, reach every control, and understand each term and option from its visible or
 expandable context — without the session transcript.
 
@@ -162,8 +161,8 @@ and the final handback — not questions the Surface already represents.
   image in `attachments`. Move it through `in_progress` and
   `implemented`; the human accepts or rejects it in place. A non-blocking follow-up is Accept, then
   a new Thread—not a third verdict state.
-- **Ask with a Proposal, never with prose.** Anchor a genuine choice to the material it changes,
-  recommendation first, with the consequence of each option stated. Facts you can discover yourself
+- **Ask with a Proposal.** Anchor a genuine choice to the source it decides, recommendation
+  first, with the consequence of each option stated. Facts you can discover yourself
   are evidence, not questions. Anything that needs no answer is an Update.
 - **Publish changes with Ready, not by reloading.** Rewrite the HTML file, then post only the
   edited leaf Region Keys to `/api/ready`; omit unchanged ancestors and unrelated Regions. The
