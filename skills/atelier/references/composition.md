@@ -140,6 +140,10 @@ recommendation, and what the human must judge.
 - **Show the source being judged.** Quote the passage, clause, rule, or diff hunk verbatim and
   anchor the Thread or Proposal to that quote, so the question sits on its evidence. Your analysis
   sits beside it, shorter than it.
+- **Every reference opens.** Make each file, commit, issue, pull request, and URL the page names a
+  link to it — a commit or issue to its page on the forge, a local file to its path on the Surface
+  server. Show a file the human must judge inline: rendered Markdown, highlighted code, or the
+  relevant diff hunk, beside the claim that cites it.
 - **Each fact appears once.** Put a real gap — something missing, unproven, or not yet active — in
   one sentence on the one item where it changes the human's judgment.
 
