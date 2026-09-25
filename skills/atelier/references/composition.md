@@ -104,6 +104,9 @@ When a worker shows that a change works, the human accepts or sends back each cl
   mark what applies: missing visual proof, a scripted check of a human action (a synthetic paste, a
   dispatched click), a behavior no check exercises, and no human use yet. A reason shared by every
   claim is explained once, before the claims.
+- **When the change is to the review tool itself,** every step and sentence about its controls —
+  buttons, cards, the margin, how to try a behavior — sits inside an element marked
+  `data-subject-ui`, beside the claim it tests.
 - **One Proposal per claim, anchored to the claim:** Accept or Rework. A claim with a gap
   recommends checking it first, and no option calls it proven.
 
