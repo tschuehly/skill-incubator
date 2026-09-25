@@ -78,8 +78,10 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    address you use in every API call about it. Make each Region one task-shaped judgment, and each
    item the human can answer on its own — a setting value, an option, a step — its own Region. The
    human opens Threads on any sentence, element, or image point; the kernel places them in the
-   Margin. Anchor each Proposal to the quoted source passage it decides — the plan line, rule, or
-   diff hunk — never to your own analysis of it. Every sentence stays true with the layout removed:
+   Margin. Anchor each Proposal in the Region holding the rule, setting value, claim, stage, or diff
+   hunk it would change; quote that subject text verbatim and keep the recommendation, options, and
+   consequences beside it. A questions file names the decisions; each one still sits at the subject
+   it changes. Every sentence stays true with the layout removed:
    no text about the page, its sections, its controls, or its status. The rest of the copy rules are
    in [Write the finding](references/composition.md#write-the-finding); elements, Anchors, and
    endpoints are in [references/protocol.md](references/protocol.md).
