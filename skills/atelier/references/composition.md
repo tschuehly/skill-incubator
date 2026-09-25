@@ -104,7 +104,7 @@ can see it drew, keeps a `[data-diagram-fallback]` caption, and runs again after
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12/dist/mermaid.esm.min.mjs';
   import vegaEmbed from 'https://cdn.jsdelivr.net/npm/vega-embed@7/+esm';
-  mermaid.initialize({ startOnLoad: false });
+  mermaid.initialize({ startOnLoad: false, flowchart: { useMaxWidth: false } });
   const ready = el => el.closest('[data-diagram]').dataset.diagramReady = 'true';
   async function draw() {
     for (const el of document.querySelectorAll('pre.mermaid:not([data-processed])')) { await mermaid.run({ nodes: [el] }); ready(el); }
@@ -115,7 +115,10 @@ can see it drew, keeps a `[data-diagram-fallback]` caption, and runs again after
 ```
 
 - **Mermaid:** give every node a short, stable name (`high[HIGH build]`). A Thread on a box finds
-  it again by that name after the diagram changes.
+  it again by that name after the diagram changes. Draw at full size (`useMaxWidth: false`) inside a
+  figure with `overflow-x: auto`: a diagram shrunk to fit its column shows half-size labels that
+  page zoom does not enlarge. Lay a chain of more than five steps out top to bottom
+  (`flowchart TB`) so it rarely needs to scroll.
 - **Vega-Lite:** render as SVG. A Thread anchors to a point on the chart, not to one mark.
 - **Graphviz** (`import { instance } from 'https://cdn.jsdelivr.net/npm/@viz-js/viz@3/+esm'`, then
   `el.append((await instance()).renderSVGElement(dot))`): give every node an `id` attribute.
@@ -129,9 +132,13 @@ recommendation, and what the human must judge.
 
 - **Open on the subject.** The first screen names what the human is judging and where to start, in
   about 60 words; the material follows directly.
-- **The page never describes itself.** The kernel's tools explain themselves, so there is no text
-  about the Surface, its sections, its controls, or how to read or comment on it — and no status
-  notes such as "nothing here is active yet". This is meta commentary; delete every sentence of it.
+- **Every sentence stays true with the layout removed.** Read each sentence as if the page were
+  plain text in a chat: if it no longer makes sense, it is meta commentary; delete it. That catches
+  all its forms — legends ("green hexagons are gates"), reading directions ("start with…", "see
+  gap 1", "ranked by…"), pointers ("the question beside this value", "under Global", "below"),
+  descriptions of the page, its controls, or how to comment, and status notes ("nothing here is
+  active yet"). Put the meaning into the material itself instead: label the box "Gate: lint",
+  title the list "Gaps, most dangerous first", name the rule you mean.
 - **Show the source being judged.** Quote the passage, clause, rule, or line verbatim, and anchor
   the Thread or Proposal to that quote. Your analysis sits beside it, shorter than it.
 - **Ask beside the evidence.** Anchor each Proposal to the source text it decides. A collected
