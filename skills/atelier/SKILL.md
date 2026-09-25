@@ -141,9 +141,11 @@ expandable context — without the session transcript.
    `data-subject-ui`. Re-copy a drifted kit rather than patching it in place; pass
    `--allow-kit-drift` only when the local change is deliberate and written down. `--skip-render`
    and `--skip-poller` are for kernel tests, never a human handoff.
-5. After preflight passes, run one cold-reader pass yourself: follow the primary reading path, jump
-   to every control, and follow its disclosures in order. Move missing definitions beside the control
-   that needs them. Rerun preflight, then open the URL for the human. This pass is a short lead-owned
+5. After preflight passes, walk the primary reading path and every control yourself. Trace each
+   relationship that shapes a decision to its rendered form — settings × values as a matrix, rules
+   moving between scopes as a map — while each value and rule stays its own addressable Region. Put
+   missing definitions beside the control that needs them, rerun preflight, then open the URL for
+   the human. This pass is a short lead-owned
    walk, not an independent review and not a delegated inspection; handing it to a subagent turns a
    one-minute check into a blocking wait and reintroduces the browser repair loop that
    [the principles](docs/principles.md) keep out of normal Atelier.
