@@ -87,7 +87,23 @@ The material decides what the human looks at. Before writing prose, ask what sho
 | Before and after | Two columns side by side, changes marked in both |
 | A UI, interaction, or state change | A click-through prototype or embedded app |
 | Media, layout, or a visual defect | The image or frame itself, with Threads on points |
+| Proof that a change works | An [evidence review](#evidence-review) |
 | One argument that builds | Short prose with examples beside the claims |
+
+### Evidence review
+
+When a worker shows that a change works, the human accepts or sends back each claim on its own.
+
+- **One Region per claim** — one behavior a check can prove, such as "Escape closes an open card",
+  not one per fix or per file.
+- **Each claim carries its proof in place, open:** the human's words it answers, quoted; its own
+  diff hunk in the [file viewer](#show-files); the check that covers it with the command and the
+  exact output line; and before/after images. Where an image or a check does not exist, show the
+  empty slot labelled with what is missing.
+- **A gap belongs to the claim it weakens.** A scripted check of a human action (a synthetic paste,
+  a dispatched click), a behavior no check exercises, and a change no human has used yet are gaps.
+- **One Proposal per claim, anchored to the claim:** Accept or Rework. A claim with a gap
+  recommends checking it first, and no option calls it proven.
 
 ### Draw with a library
 
