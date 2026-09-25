@@ -116,6 +116,11 @@ diagram carries the page.
   finding, and the decision. Mark each gap on its node (color, a badge) so the diagram shows where
   the process is weak. Keep its `[data-diagram-fallback]` prose in the DOM and hide it visually once
   the SVG renders. Check that every node is readable and nothing is clipped.
+- **Draw the forward route in stage order.** Stage 1 and its first gates sit at the top of the
+  diagram, on the first screen. Put a side lane beside the stage it branches from, and draw feedback
+  as a labelled note or a short local return, so the route keeps its order. Keep labels full-size
+  and the whole route within its column at 1440px; when it will not fit, split it into consecutive
+  diagrams that link to each other and still show where every gate runs.
 - **One Region per stage, one per gate inside it.** A gate's Region says what it checks, what it
   proves, and — only where it changes the verdict — its gap, in one sentence.
 - **Each finding lives at its gate.** The diagram and the stage Regions are the whole page; a gap is
