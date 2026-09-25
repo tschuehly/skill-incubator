@@ -73,8 +73,12 @@ A Thread card is the whole conversation: the human's first message, every reply 
 the lifecycle label, and a reply box (⌘+Enter sends, Enter inserts a newline). On `implemented` it
 offers Accept and Reopen; Reopen needs the reply box to say what is still wrong. A Proposal card
 shows the question, options with the recommended one first, a per-option "Explain this option"
-request, any explanation that came back, and a free-text answer. Unsent new Threads survive a
-reload in `localStorage`; every textarea keeps its value, focus, and caret across store updates.
+request, any explanation that came back, and a free-text answer. An open card closes with its ×,
+Escape, or a click elsewhere on the page; a half-typed text stays with the closed card. Pasting or
+dropping a PNG, JPEG, GIF, or WebP image into a new Thread or a reply uploads it through
+`/api/attach` and shows it as a thumbnail; it goes out with the message. Unsent new Threads, with
+their images, survive a reload in `localStorage`; every textarea keeps its value, focus, and caret
+across store updates.
 
 Below 1100px the margin becomes a fixed bottom list without anchoring.
 
@@ -118,7 +122,8 @@ the store. `unresolvedAnchors()` lists stored anchors that no longer resolve; pr
 ```jsonc
 {
   "name": "2026-07-11",
-  "threads":  { "<regionKey>": [ { "id":"c-…", "text":"…", "anchor":{ "region":"…", "quote":"…" } } ] },
+  "threads":  { "<regionKey>": [ { "id":"c-…", "text":"…", "anchor":{ "region":"…", "quote":"…" },
+                                  "attachments":["/.review/attachments/<file>"] } ] },
   "sent":     { "<commentId>": "<iso>" },
   "replies":  { "<commentId>": [ { "ts":"<iso>", "msg":"…", "author":"agent|human" } ] },
   "commentState": { "<commentId>": { "value":"implemented", "ts":"<iso>" } },
@@ -158,7 +163,8 @@ the store. `unresolvedAnchors()` lists stored anchors that no longer resolve; pr
 | `POST /api/update` | agent | `{region, title, body?}` | Durable agent message that asks for nothing |
 | `POST /api/update-dismiss` | UI | `{id}` | The human dismissed it |
 | `POST /api/send` | UI | `{region, id}` | Dispatches ONE comment → logs `sent` **with the comment inline**; clears that Region's existing changed marker |
-| `POST /api/thread-message` | UI | `{region, id, msg}` | The human writes into a sent Thread → stores the message with `author:"human"` and logs `sent` with `followUp:<msg>`, waking the agent |
+| `POST /api/thread-message` | UI | `{region, id, msg?, attachments?}` | The human writes into a sent Thread → stores the message with `author:"human"` and logs `sent` with `followUp:<msg>` (`"(image)"` when only images) and `attachments`, waking the agent |
+| `POST /api/attach` | UI | `{type, data}` | A pasted image, base64, at most 10 MB → stored as `.review/attachments/<file>`; returns `{url:"/.review/attachments/<file>"}` |
 | `POST /api/reply` | agent | `{region, id, msg, state?}` | Appends an agent message to the Thread; the optional `state` bumps the lifecycle in the same call |
 | `POST /api/comment-reject` | UI | `{region, id, msg}` | Requires an implemented comment and a non-empty follow-up; stores the message, sets `rejected`, logs `comment-rejected` |
 | `POST /api/comment-state` | both | `{region, id, state}` | Non-rejection lifecycle. Agent drives `acknowledged`/`in_progress`/`implemented`; the UI drives `accepted`. An optional improvement is accepted first, then sent as a new Thread |
@@ -229,7 +235,8 @@ prints every kind forever and is only for a human watching a terminal.
 
 - **`sent`** — a comment was dispatched, carried inline with its `anchor`. Acknowledge → triage →
   fix → reply. With `followUp`, the human wrote again in an existing Thread; answer that message.
-  The poller prints it as `SENT · <region> … — (follow-up) <text>`.
+  The poller prints it as `SENT · <region> … — (follow-up) <text>`. Pasted images arrive as
+  `attachments` URLs, printed as `[images: …]`; read the file at `<ROOT><url>`.
 - **`decision`** — the human resolved a Proposal. `choiceIndex` identifies the option; `custom`
   carries their own wording and is authoritative when present. Act, then reply in the Thread.
 - **`explain-request`** — the human asked what an option means. Use `proposalId`, `optionIndex` and

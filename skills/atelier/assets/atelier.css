@@ -79,3 +79,10 @@ html[data-atl-offline] atelier-activity .atl-tools::after { content: 'Offline â€
 /* kernel chrome keeps its own ink so a dark Surface theme cannot put light text on its light cards */
 .atl-btn, .atl-drawer, .atl-opt, .atl-card textarea { color: #1d232a; }
 .atl-btn--primary { color: #fff; }
+.atl-close { float: right; margin: -4px -4px 0 8px; padding: 0 4px; border: 0; background: none; color: #6b6f76; font: 18px/1 system-ui, sans-serif; cursor: pointer; }
+.atl-close:hover { color: #1d232a; }
+.atl-atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.atl-atts img { display: block; max-width: 128px; max-height: 96px; border: 1px solid #dcd8cc; border-radius: 4px; }
+.atl-att { position: relative; }
+.atl-att-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%;
+  background: #1d232a; color: #fff; font: 12px/18px system-ui, sans-serif; cursor: pointer; }

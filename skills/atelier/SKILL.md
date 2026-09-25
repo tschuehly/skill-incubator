@@ -157,7 +157,8 @@ and the final handback — not questions the Surface already represents.
 
 - **Answer a comment where it was written.** On every `sent` event — including a `followUp` in an
   existing Thread — reply in its Thread with what you picked up and set `acknowledged` within
-  seconds, then work. Read its `anchor` to see exactly what the human pointed at. Move it through `in_progress` and
+  seconds, then work. Read its `anchor` to see exactly what the human pointed at, and any pasted
+  image in `attachments`. Move it through `in_progress` and
   `implemented`; the human accepts or rejects it in place. A non-blocking follow-up is Accept, then
   a new Thread—not a third verdict state.
 - **Ask with a Proposal, never with prose.** Anchor a genuine choice to the material it changes,

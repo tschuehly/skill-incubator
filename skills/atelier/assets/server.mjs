@@ -31,9 +31,10 @@ const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.mj
 
 // ---- durable store ----
 // Every address is ONE Region key (a path like "onboarding/provider"). There is no Card/Section split.
-// { name, threads:{[region]:[{id,text,tags,sev,anchor?}]},          ← human Threads, client-owned
+// { name, threads:{[region]:[{id,text,tags,sev,anchor?,attachments?}]}, ← human Threads, client-owned
+//   attachments = ['/.review/attachments/<file>'] (pasted images, uploaded through /api/attach)
 //   anchor = {region, quote?, prefix?, selector?, point?:{x,y}}; only region = the whole Region
-//   sent:{[commentId]:iso}, replies:{[commentId]:[{ts,msg,author:'agent'|'human'}]}, commentState:{[commentId]:{value,ts}},
+//   sent:{[commentId]:iso}, replies:{[commentId]:[{ts,msg,author:'agent'|'human',attachments?}]}, commentState:{[commentId]:{value,ts}},
 //   proposals:{[id]:{id,region,threadId,anchor,question,options,explanationRequests,explanations,status,choiceIndex,custom,ts,decidedAt}},
 //   updates:{[id]:{id,region,title,body,ts,dismissedAt}},
 //   changed:{[region]:{ts}},                                        ← named by Ready, cleared by ack
@@ -94,6 +95,8 @@ const sendJSON = (res, code, obj) => { const b = JSON.stringify(obj); res.writeH
 const readBody = (req) => new Promise((resolve) => { let d=''; req.on('data',c=>d+=c); req.on('end',()=>{ try{resolve(JSON.parse(d||'{}'));}catch{resolve({});} }); });
 const commentBody = (c) => { const { id, ...rest } = c; return rest; };
 const findComment = (region, id) => (store.threads[region]||[]).find(c=>c.id===id);
+const IMAGE_TYPES = { 'image/png':'png', 'image/jpeg':'jpg', 'image/gif':'gif', 'image/webp':'webp' };
+const cleanImages = a => Array.isArray(a) ? a.filter(u => typeof u === 'string' && /^\/\.review\/attachments\/[\w.-]+$/.test(u)).slice(0, 10) : [];
 // An anchor points inside its Region; anything else is dropped rather than stored half-valid.
 function cleanAnchor(a, region){
   if (!a || typeof a !== 'object') return null;
@@ -253,14 +256,29 @@ async function handle(req, res){
 
   // A Thread is a conversation: the human writes into it after the first message. It wakes the
   // agent like a first comment does, marked as a follow-up.
-  if (p === '/api/thread-message' && req.method === 'POST'){ // { region, id, msg }
-    const { region, id, msg } = await readBody(req);
-    const text = str(msg, 4000);
+  if (p === '/api/thread-message' && req.method === 'POST'){ // { region, id, msg, attachments? }
+    const { region, id, msg, attachments } = await readBody(req);
+    const text = str(msg, 4000), images = cleanImages(attachments);
     if (!findComment(region, id) || !store.sent[id]) return sendJSON(res, 404, { ok:false, error:'unknown sent comment' });
-    if (!text) return sendJSON(res, 400, { ok:false, error:'need a msg of at most 4000 characters' });
-    (store.replies[id] ||= []).push({ ts:new Date().toISOString(), msg:text, author:'human' });
-    appendLog('sent', region, id, { followUp:text }); persist();
+    if (!text && !images.length) return sendJSON(res, 400, { ok:false, error:'need a msg of at most 4000 characters or an image' });
+    const extra = images.length ? { attachments:images } : {};
+    (store.replies[id] ||= []).push({ ts:new Date().toISOString(), msg:text || '', author:'human', ...extra });
+    appendLog('sent', region, id, { followUp:text || '(image)', ...extra }); persist();
     return sendJSON(res, 200, { ok:true, cursor: store.seq });
+  }
+
+  // An image the human pasted into a Thread. Stored under .review/attachments/ and served from
+  // there; the Thread or follow-up carries its URL, and the agent reads <ROOT><url>.
+  if (p === '/api/attach' && req.method === 'POST'){     // { type, data:base64 }
+    const { type, data } = await readBody(req);
+    const ext = IMAGE_TYPES[type];
+    if (!ext || typeof data !== 'string') return sendJSON(res, 400, { ok:false, error:'need a PNG, JPEG, GIF or WebP image' });
+    const bytes = Buffer.from(data, 'base64');
+    if (!bytes.length || bytes.length > 10 * 1024 * 1024) return sendJSON(res, 413, { ok:false, error:'images must be at most 10 MB' });
+    const file = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    await fsp.mkdir(path.join(DATA_DIR, 'attachments'), { recursive:true });
+    await fsp.writeFile(path.join(DATA_DIR, 'attachments', file), bytes);
+    return sendJSON(res, 200, { ok:true, url:`/.review/attachments/${file}` });
   }
 
   // ---- Proposals: every question the agent has takes this shape -------------------------

@@ -15,7 +15,9 @@ const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Typ
   .then(r => r.json().catch(() => ({ ok: r.ok })));
 let S = { threads: {}, sent: {}, replies: {}, commentState: {}, proposals: {}, updates: {}, changed: {}, seq: 0 };
 let active = null;                       // id of the expanded Thread or Proposal
-const pending = new Map();               // unsent new Threads: id -> { id, region, anchor, text }
+const pending = new Map();               // unsent new Threads: id -> { id, region, anchor, text, attachments }
+const kept = new Map();                  // '<card>|<field>' -> half-typed text, kept while a card is closed
+const atts = new Map();                  // '<card>|new' or '<card>|reply' -> pasted image URLs not yet sent
 const DRAFTS = 'atelier:drafts';
 
 // ===== Regions: identity only ======================================================
@@ -112,10 +114,16 @@ function openNew(anchor) {
 }
 function saveDrafts() {
   const out = {};
-  for (const [id, p] of pending) out[id] = { ...p, text: $(`[data-card="${id}"] textarea`)?.value ?? p.text ?? '' };
+  for (const [id, p] of pending) {
+    p.text = $(`[data-card="${id}"] [data-new]`)?.value ?? kept.get(id + '|new') ?? p.text ?? '';
+    p.attachments = atts.get(id + '|new') || [];
+    out[id] = p;
+  }
   try { localStorage.setItem(DRAFTS, JSON.stringify(out)); } catch {}
 }
-try { for (const [id, p] of Object.entries(JSON.parse(localStorage.getItem(DRAFTS) || '{}'))) pending.set(id, p); } catch {}
+try { for (const [id, p] of Object.entries(JSON.parse(localStorage.getItem(DRAFTS) || '{}'))) {
+  pending.set(id, p); kept.set(id + '|new', p.text || ''); if (p.attachments?.length) atts.set(id + '|new', p.attachments);
+} } catch {}
 
 const float = document.createElement('button');
 float.className = 'atl-float'; float.type = 'button'; float.textContent = '💬 Thread'; float.hidden = true;
@@ -159,8 +167,13 @@ document.addEventListener('click', e => {
     return res.el.contains(e.target);
   });
   if (hit) { active = hit.id; render(); }
+  else if (active) { active = null; render(); }      // a click elsewhere on the page closes the open card
 }, true);
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && picking) setPicking(false); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (picking) return setPicking(false);
+  if (active && !$('#atl-drawer:popover-open')) { active = null; render(); }   // the draft stays in `kept`
+});
 
 // ===== what the margin shows ========================================================
 let cache = [];
@@ -185,6 +198,10 @@ function where(it) {
   if (!it.res) return '<div class="atl-detached">Its section is no longer on this page.</div>';
   return it.res.detached ? '<div class="atl-detached">The part this pointed at has changed.</div>' : '';
 }
+const CLOSE = '<button class="atl-close" data-close aria-label="Close" title="Close (Esc)">×</button>';
+const imgs = urls => urls?.length ? `<div class="atl-atts">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Pasted image"></a>`).join('')}</div>` : '';
+const pendingImgs = key => { const u = atts.get(key) || [];
+  return u.length ? `<div class="atl-atts">${u.map((x, i) => `<span class="atl-att"><img src="${esc(x)}" alt="Pasted image"><button class="atl-att-x" data-unattach="${esc(key)}" data-i="${i}" aria-label="Remove image">×</button></span>`).join('')}</div>` : ''; };
 function proposalHTML(it, open) {
   const pr = it.pr, decided = pr.status === 'decided';
   const choice = pr.custom || pr.options?.[pr.choiceIndex] || '';
@@ -197,11 +214,11 @@ function proposalHTML(it, open) {
       ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? '<div class="atl-meta">Explanation requested</div>' : decided ? ''
         : `<details class="atl-ask"><summary>Explain this option</summary><textarea data-explain-text="${it.id}:${i}" placeholder="What is unclear?"></textarea><button class="atl-btn" data-explain="${it.id}" data-i="${i}">Ask</button></details>`}</div>`;
   };
-  return `<div class="atl-card atl-card--decision ${open ? 'is-open' : ''}" data-card="${it.id}">${where(it)}
+  return `<div class="atl-card atl-card--decision is-open" data-card="${it.id}">${CLOSE}${where(it)}
     <div class="atl-kicker">${decided ? 'Decided' : 'Decision needed'}</div>
     <p class="atl-q">${esc(pr.question)}</p>
     ${(pr.options || []).map(opt).join('')}
-    ${decided ? (pr.custom ? `<div class="atl-msg atl-msg--you">${esc(pr.custom)}</div>` : '') + '<button class="atl-link" data-open="">Collapse</button>'
+    ${decided ? (pr.custom ? `<div class="atl-msg atl-msg--you">${esc(pr.custom)}</div>` : '')
       : `<textarea placeholder="Or answer in your own words…" data-custom="${it.id}"></textarea><div class="atl-row"><button class="atl-btn atl-btn--primary" data-decide-custom="${it.id}">Send answer</button></div>`}
   </div>`;
 }
@@ -210,19 +227,20 @@ function cardHTML(it) {
   if (it.kind === 'proposal') return proposalHTML(it, open);
   const c = it.c, st = S.commentState[c.id]?.value, replies = S.replies[c.id] || [];
   const quote = it.anchor?.quote ? `<blockquote>${esc(it.anchor.quote.slice(0, 140))}</blockquote>` : '';
-  if (it.kind === 'new') return `<div class="atl-card is-open" data-card="${it.id}">${quote}
-      <textarea data-new placeholder="Start a Thread…  (⌘+Enter sends)">${esc(c.text || '')}</textarea>
+  if (it.kind === 'new' && !open) return `<button class="atl-card atl-card--line" data-open="${it.id}">
+      <span class="atl-first">✎ ${esc(kept.get(it.id + '|new') || c.text || 'Unsent Thread')}</span><span class="atl-meta">Not sent</span></button>`;
+  if (it.kind === 'new') return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}
+      <textarea data-new placeholder="Start a Thread…  (⌘+Enter sends; paste images)">${esc(c.text || '')}</textarea>${pendingImgs(it.id + '|new')}
       <div class="atl-row"><button class="atl-btn atl-btn--primary" data-send="${it.id}">Send</button><button class="atl-link" data-discard="${it.id}">Discard</button></div></div>`;
   if (!open) return `<button class="atl-card atl-card--line ${st === 'implemented' ? 'is-yours' : ''}" data-open="${it.id}">
       <span class="atl-first">${esc(c.text)}</span><span class="atl-meta">${replies.length ? replies.length + (replies.length > 1 ? ' replies' : ' reply') + ' · ' : ''}${STATE[st] || ''}</span></button>`;
-  return `<div class="atl-card is-open" data-card="${it.id}">${quote}${where(it)}
-      <div class="atl-msg atl-msg--you">${esc(c.text)}</div>
-      ${replies.map(r => `<div class="atl-msg ${r.author === 'human' ? 'atl-msg--you' : ''}"><span class="atl-who">${r.author === 'human' ? 'You' : 'Agent'}</span>${esc(r.msg)}</div>`).join('')}
+  return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}${where(it)}
+      <div class="atl-msg atl-msg--you">${esc(c.text)}${imgs(c.attachments)}</div>
+      ${replies.map(r => `<div class="atl-msg ${r.author === 'human' ? 'atl-msg--you' : ''}"><span class="atl-who">${r.author === 'human' ? 'You' : 'Agent'}</span>${esc(r.msg)}${imgs(r.attachments)}</div>`).join('')}
       <div class="atl-state">${STATE[st] || ''}</div>
-      <textarea data-reply-text="${it.id}" placeholder="${st === 'implemented' ? 'Reply, or say what is still wrong…' : 'Reply…'}  (⌘+Enter sends)"></textarea>
+      <textarea data-reply-text="${it.id}" placeholder="${st === 'implemented' ? 'Reply, or say what is still wrong…' : 'Reply…'}  (⌘+Enter sends)"></textarea>${pendingImgs(it.id + '|reply')}
       <div class="atl-row"><button class="atl-btn ${st === 'implemented' ? '' : 'atl-btn--primary'}" data-reply="${it.id}">Reply</button>
-      ${st === 'implemented' ? `<button class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}
-      <button class="atl-link" data-open="">Collapse</button></div></div>`;
+      ${st === 'implemented' ? `<button class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}</div></div>`;
 }
 
 const highlights = typeof Highlight !== 'undefined' && CSS.highlights;
@@ -238,10 +256,10 @@ function render() {
     it.res.el.classList.add(it.id === active ? 'atl-el-active' : 'atl-el-anchor');
   if (margin) {
     const focused = margin.querySelector('textarea:focus');
-    const typed = [...margin.querySelectorAll('textarea')].map(t => [t.closest('[data-card]')?.dataset.card, textareaKind(t), t.value]);
-    margin.innerHTML = `<div class="atl-margin-head">Threads · select text or Alt+click anything</div>` +
+    for (const t of margin.querySelectorAll('textarea')) kept.set(keyOf(t), t.value);
+    margin.innerHTML = `<div class="atl-margin-head">Threads</div>` +
       cache.map(it => `<div class="atl-slot" data-slot="${it.id}">${cardHTML(it)}</div>`).join('');
-    for (const [id, kind, v] of typed) { const ta = findTextarea(margin, id, kind); if (ta && v) ta.value = v; }
+    for (const t of margin.querySelectorAll('textarea')) { const v = kept.get(keyOf(t)); if (v) t.value = v; }
     const ta = focused && findTextarea(margin, focused.closest('[data-card]')?.dataset.card, textareaKind(focused));
     // preventScroll: the card is not placed yet, and focusing it at its unplaced spot scrolls the page
     if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(focused.selectionStart, focused.selectionEnd); }
@@ -250,6 +268,7 @@ function render() {
   renderActivity();
 }
 const textareaKind = t => t.dataset.replyText ? 'reply' : t.dataset.custom ? 'custom' : t.dataset.explainText ? 'explain:' + t.dataset.explainText : 'new';
+const keyOf = t => t.closest('[data-card]')?.dataset.card + '|' + textareaKind(t);
 const findTextarea = (m, id, kind) => [...m.querySelectorAll(`[data-card="${id}"] textarea`)].find(t => textareaKind(t) === kind);
 
 // Each card sits level with its anchor, pushed down to avoid overlap; the active card is exact.
@@ -283,12 +302,12 @@ new ResizeObserver(schedule).observe(document.documentElement);
 // ===== margin actions ===============================================================
 const itemOf = id => cache.find(i => i.id === id);
 async function sendNew(id) {
-  const p = pending.get(id), text = $(`[data-card="${id}"] textarea`)?.value.trim();
-  if (!p || !text) return;
-  (S.threads[p.region] ||= []).push({ id, text, anchor: p.anchor });
+  const p = pending.get(id), text = $(`[data-card="${id}"] textarea`)?.value.trim(), images = atts.get(id + '|new') || [];
+  if (!p || (!text && !images.length)) return;
+  (S.threads[p.region] ||= []).push({ id, text, anchor: p.anchor, ...(images.length ? { attachments: images } : {}) });
   await post('/api/state', { threads: S.threads });
   await post('/api/send', { region: p.region, id });
-  pending.delete(id); saveDrafts(); await refresh();
+  pending.delete(id); kept.delete(id + '|new'); atts.delete(id + '|new'); saveDrafts(); await refresh();
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest?.('atelier-margin button'); if (!b) return;
@@ -299,10 +318,14 @@ document.addEventListener('click', async e => {
     if (r && r.bottom > innerHeight - 12) scrollBy({ top: Math.min(r.bottom - innerHeight + 24, r.top - 80), behavior: 'smooth' });
     return;
   }
+  if ('close' in d) { active = null; return render(); }
+  if (d.unattach) { atts.get(d.unattach)?.splice(+d.i, 1); if (d.unattach.endsWith('|new')) saveDrafts(); return render(); }
   if (d.send) return sendNew(d.send);
   if (d.discard) { pending.delete(d.discard); saveDrafts(); active = null; return render(); }
-  if (d.reply) { const msg = value(`[data-reply-text="${d.reply}"]`); if (!msg) return;
-    await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg }); $(`[data-reply-text="${d.reply}"]`).value = ''; return refresh(); }
+  if (d.reply) { const msg = value(`[data-reply-text="${d.reply}"]`), images = atts.get(d.reply + '|reply') || [];
+    if (!msg && !images.length) return;
+    await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg, attachments: images });
+    $(`[data-reply-text="${d.reply}"]`).value = ''; atts.delete(d.reply + '|reply'); return refresh(); }
   if (d.accept) { await post('/api/comment-state', { region: itemOf(d.accept).region, id: d.accept, state: 'accepted' }); return refresh(); }
   if (d.reject) { const ta = $(`[data-reply-text="${d.reject}"]`), msg = ta.value.trim();
     if (!msg) { ta.placeholder = 'Say what is still wrong, then Reopen'; return ta.focus({ preventScroll: true }); }
@@ -326,7 +349,31 @@ document.addEventListener('keydown', e => {
   e.preventDefault();
   (ta.closest('details') || ta.closest('[data-card]')).querySelector('[data-send],[data-reply],[data-decide-custom],[data-explain]')?.click();
 });
-document.addEventListener('input', e => { if (e.target.closest?.('atelier-margin [data-new]')) saveDrafts(); });
+document.addEventListener('input', e => {
+  const t = e.target.closest?.('atelier-margin textarea'); if (!t) return;
+  kept.set(keyOf(t), t.value);
+  if (t.matches('[data-new]')) saveDrafts();
+});
+
+// Pasting or dropping an image into a new Thread or a reply uploads it and attaches it there.
+const IMAGE = /^image\/(png|jpeg|gif|webp)$/;
+async function attachFiles(ta, files) {
+  const key = keyOf(ta), list = atts.get(key) || [];
+  for (const f of files) {
+    const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(f); });
+    const res = await post('/api/attach', { name: f.name || 'pasted', type: f.type, data });
+    if (res.url) list.push(res.url); else warn(`Image not attached: ${res.error || 'upload failed'}`);
+  }
+  atts.set(key, list); kept.set(key, ta.value);
+  if (key.endsWith('|new')) saveDrafts();
+  render();
+}
+const imageTarget = e => { const ta = e.target.closest?.('atelier-margin [data-new], atelier-margin [data-reply-text]');
+  const files = [...(e.clipboardData || e.dataTransfer)?.files || []].filter(f => IMAGE.test(f.type));
+  return ta && files.length ? [ta, files] : null; };
+document.addEventListener('paste', e => { const hit = imageTarget(e); if (hit) { e.preventDefault(); attachFiles(...hit); } });
+document.addEventListener('dragover', e => { if (e.target.closest?.('atelier-margin textarea')) e.preventDefault(); });
+document.addEventListener('drop', e => { const hit = imageTarget(e); if (hit) { e.preventDefault(); attachFiles(...hit); } });
 
 // ===== notifications: on by default, asked for on the first gesture ==================
 const NOTIFY = 'atelier:notify';
@@ -402,7 +449,10 @@ async function onReady(named) {
   const path = el => { const ks = []; for (let e = el; e; e = e.parentElement?.closest('atelier-region')) ks.unshift(e.getAttribute('key')); return ks.join('/'); };
   const incoming = new Map([...doc.querySelectorAll('atelier-region')].map(el => [path(el), el]));
   // ponytail: a Region new to the page reloads rather than being inserted; insert it if Readys add Regions often
-  if (named.some(k => incoming.has(k) && !regionEl(k))) { saveDrafts(); return location.reload(); }
+  if (named.some(k => incoming.has(k) && !regionEl(k))) {
+    saveDrafts(); try { sessionStorage.setItem('atelier:active', active || ''); } catch {}
+    return location.reload();
+  }
   for (const key of named) { const cur = regionEl(key), next = incoming.get(key); if (cur && next) cur.replaceWith(document.importNode(next, true)); }
   const unknown = named.filter(k => !incoming.has(k));
   warn(unknown.length ? `Ready named ${unknown.length} Region(s) this page does not contain: ${unknown.join(', ')}` : '');
@@ -435,6 +485,7 @@ async function loop() {
 }
 async function boot() {
   document.body.append(float);
+  try { active = sessionStorage.getItem('atelier:active') || null; sessionStorage.removeItem('atelier:active'); } catch {}
   try { await refresh(); } catch { document.documentElement.setAttribute('data-atl-offline', ''); }
   loop();
 }

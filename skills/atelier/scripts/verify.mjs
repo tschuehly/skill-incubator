@@ -272,8 +272,61 @@ try {
     await sleep(200);
     act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value='draft kept'; t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
     browser(['reload']); await sleep(1300);
+    assert(probe(`JSON.stringify(document.querySelector('atelier-margin').innerText)`).includes('✎ draft kept'), 'unsent Thread not listed after reload');
+    act(`[...document.querySelectorAll('atelier-margin [data-open]')].find(b=>b.innerText.includes('draft kept')).click()`);
     eq(probe(`JSON.stringify(document.querySelector('atelier-margin [data-new]')?.value)`), 'draft kept', 'draft after reload');
     act(`document.querySelector('atelier-margin [data-discard]').click()`);
+  });
+
+  await check('margin: ×, Escape and a click outside close a card and keep its draft', async () => {
+    const c = await threadOf('v/beta', 'keyboard thread');
+    const isOpen = () => probe(`JSON.stringify(!!document.querySelector('[data-card="${c.id}"].is-open'))`);
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    act(`(()=>{const t=document.querySelector('[data-reply-text="${c.id}"]'); t.value='kept draft'; t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    act(`document.querySelector('[data-card="${c.id}"] [data-close]').click()`);
+    eq(isOpen(), false, 'open after ×');
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    eq(probe(`JSON.stringify(document.querySelector('[data-reply-text="${c.id}"]').value)`), 'kept draft', 'draft after reopening');
+    act(`document.querySelector('[data-reply-text="${c.id}"]').focus({preventScroll:true})`);
+    browser(['press', 'Escape']);
+    eq(isOpen(), false, 'open after Escape');
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    act(`document.querySelector('atelier-region[key=beta] h2').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}))`);
+    eq(isOpen(), false, 'open after clicking the page');
+    act(`(()=>{document.querySelector('[data-open="${c.id}"]').click(); document.querySelector('[data-reply-text="${c.id}"]').value='';
+      document.querySelector('[data-reply-text="${c.id}"]').dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-close]').click()})()`);
+  });
+
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const pasteInto = sel => act(`(()=>{const b=Uint8Array.from(atob('${PNG}'),c=>c.charCodeAt(0)); const dt=new DataTransfer();
+    dt.items.add(new File([b],'shot.png',{type:'image/png'})); document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:dt}))})()`);
+
+  await check('thread: a pasted image uploads, shows, and goes out with a new Thread', async () => {
+    altClick(`document.querySelector('atelier-region[key=beta] p')`);
+    await sleep(200);
+    pasteInto('atelier-margin [data-new]');
+    await sleep(800);
+    eq(probe(`JSON.stringify(document.querySelectorAll('atelier-margin .atl-att img').length)`), 1, 'thumbnails before sending');
+    await typeNewAndSend('image thread');
+    const c = await threadOf('v/beta', 'image thread');
+    assert(/^\/\.review\/attachments\/[\w.-]+\.png$/.test(c?.attachments?.[0] || ''), `attachments ${JSON.stringify(c?.attachments)}`);
+    const r = await fetch(base + c.attachments[0]);
+    eq([r.status, r.headers.get('content-type')], [200, 'image/png'], 'served image');
+    const ev = (await state()).log.filter(e => e.kind === 'sent').at(-1);
+    eq(ev.comment.attachments, c.attachments, 'image in the wake event');
+  });
+
+  await check('thread: an image pasted into a reply goes out as a follow-up', async () => {
+    const c = await threadOf('v/beta', 'image thread');
+    act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
+    pasteInto(`[data-reply-text="${c.id}"]`);
+    await sleep(800);
+    act(`document.querySelector('[data-reply="${c.id}"]').click()`);
+    await sleep(700);
+    const s = await state(), last = s.replies[c.id].at(-1), ev = s.log.at(-1);
+    assert(last.author === 'human' && last.attachments?.length === 1, `reply ${JSON.stringify(last)}`);
+    eq([ev.followUp, ev.attachments], ['(image)', last.attachments], 'follow-up event');
+    eq(probe(`JSON.stringify(document.querySelectorAll('[data-card="${c.id}"] .atl-msg img').length)`), 2, 'images shown in the Thread');
   });
 
   // ---- proposals ----

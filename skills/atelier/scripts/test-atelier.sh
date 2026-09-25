@@ -122,6 +122,23 @@ grep -F 'SENT · screening (id k1' "$TMP/follow.log" >/dev/null
 grep -F '(follow-up) One more thing.' "$TMP/follow.log" >/dev/null
 curl -fsS "$BASE/api/state" | grep -F '"author":"human"' >/dev/null
 
+# --- a pasted image is stored, served, and named in the follow-up wake line -------------
+bad_image="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/api/attach" -H 'Content-Type: application/json' -d '{"type":"text/html","data":"PGI+"}')"
+[ "$bad_image" = 400 ] || { echo "FAIL: non-image upload returned $bad_image" >&2; exit 1; }
+image_url="$(curl -fsS -X POST "$BASE/api/attach" -H 'Content-Type: application/json' \
+  -d '{"type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="}' \
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).url))')"
+[ -f "$TMP$image_url" ] || { echo "FAIL: image not stored at $image_url" >&2; exit 1; }
+curl -fsS -o /dev/null "$BASE$image_url"
+CURSOR="$(curl -fsS "$BASE/api/state" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(String(JSON.parse(s).seq)))')" \
+  PORT="$PORT" CURSOR_FILE="$TMP/image.cursor" bash "$TMP/review-poll.sh" --once >"$TMP/image.log" 2>&1 &
+POLLER_PID=$!
+sleep 0.4
+post api/thread-message "{\"region\":\"screening\",\"id\":\"k1\",\"attachments\":[\"$image_url\"]}"
+wait "$POLLER_PID"; POLLER_PID=''
+grep -F "(follow-up) (image) [images: $image_url]" "$TMP/image.log" >/dev/null \
+  || { echo "FAIL: poller line lacks the image:" >&2; cat "$TMP/image.log" >&2; exit 1; }
+
 # --- a Proposal keeps its anchor, and drops anything that is not one --------------------
 post api/propose '{"region":"screening/detail","question":"Here?","options":["A"],"anchor":{"quote":"material","prefix":"","junk":1,"point":{"x":"no"}}}'
 anchored="$(curl -fsS "$BASE/api/state")"

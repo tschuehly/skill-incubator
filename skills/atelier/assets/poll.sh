@@ -182,6 +182,7 @@ parse_wake_jq() {
        elif (.action // "") != "" then .action
        elif (.choiceIndex != null) then ("Option " + (.choiceIndex | tostring))
        else (.status // "") end)
+      + (((.comment.attachments // .attachments // []) | join(" ")) as $img | if $img != "" then " [images: " + $img + "]" else "" end)
     ] | map(tostring | gsub("[\n\t]"; " ") | gsub(""; " ")) | join("")
   '
 }
@@ -199,11 +200,14 @@ for ev in data.get("events") or []:
     if kind not in wk:
         continue
     c = ev.get("comment") or {}
+    images = " ".join(c.get("attachments") or ev.get("attachments") or [])
     detail = ("(follow-up) " + ev["followUp"]) if ev.get("followUp") else c.get("text") or ev.get("text") or ev.get("msg") or ev.get("answer") or ev.get("custom") or ev.get("action") or ""
     if not detail and ev.get("choiceIndex") is not None:
         detail = "Option " + str(ev.get("choiceIndex"))
     if not detail:
         detail = ev.get("status", "") or ""
+    if images:
+        detail = detail + " [images: " + images + "]"
     row = [
         str(ev.get("seq", "")),
         kind,
