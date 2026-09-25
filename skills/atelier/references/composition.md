@@ -141,10 +141,14 @@ recommendation, and what the human must judge.
   title the list "Gaps, most dangerous first", name the rule you mean.
 - **Show the source being judged.** Quote the passage, clause, rule, or line verbatim, and anchor
   the Thread or Proposal to that quote. Your analysis sits beside it, shorter than it.
-- **Ask beside the evidence.** Anchor each Proposal to the source text it decides. A collected
-  "open questions" section is a list of Proposals with their evidence removed.
+- **Ask beside the evidence.** Anchor each Proposal to the quoted source passage it decides —
+  the plan line, the rule, the diff hunk — never to your own analysis of it. Quote the passage
+  first if the page does not show it yet. A collected "open questions" section is a list of
+  Proposals with their evidence removed.
 - **Each fact appears once.** A real gap — something missing, unproven, or not yet active — is one
-  sentence beside the one claim it affects, stated once for the whole Surface.
+  sentence beside the one claim it affects, stated once for the whole Surface. A field that repeats
+  on every item ("Does not prove", "Limits", "Caveats") is boilerplate even when each entry is
+  true: keep the gap only on the item where it changes the human's judgment.
 
 ## Choose the message shape
 

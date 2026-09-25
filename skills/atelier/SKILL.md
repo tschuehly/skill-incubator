@@ -30,8 +30,9 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    what job the human is doing, how the material divides into Regions, and what shows it best — a
    diagram, table, diff, image, or click-through prototype before prose. Never ask the human to
    invent the interface. Ask once, without blocking, when the choice would change
-   their workflow; if no answer arrives in the same turn, build the recommendation and label the
-   assumption on the Surface.
+   their workflow; if no answer arrives in the same turn, build the recommendation and post the
+   choice as a Proposal anchored where it matters, the recommendation first — never as an
+   assumption note in the content.
 
 3. **Copy the kit into the project.** All four files travel together — the server serves
    `/atelier.mjs` and `/atelier.css` from its own directory:
@@ -97,8 +98,8 @@ Proposals). Serve one and click it before writing your own.
 The first browser load needs no Ready. Ready begins only after the human could have seen the
 Surface.
 
-**Ready when:** one composition is chosen and any offered option is resolved or recorded as an
-assumption on the Surface. Current sources support every visible claim. The first screen orients in
+**Ready when:** one composition is chosen and any offered option is resolved or posted as a
+Proposal. Current sources support every visible claim. The first screen orients in
 about 60 words, and no sentence describes the Surface itself. A cold reader can follow
 the material, reach every control, and understand each term and option from its visible or
 expandable context — without the session transcript.
