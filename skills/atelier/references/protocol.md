@@ -48,7 +48,9 @@ the hierarchy.
   "point": { "x": 0.25, "y": 0.5 } }       // a point on an IMG or SVG, relative to its box
 ```
 
-Only `region` means the whole Region. The human creates anchors three ways: select text and click
+Only `region` means the whole Region. Inside a diagram, a click anchors the box it hit: a Mermaid or
+Graphviz `g.node`, or any SVG element carrying `data-anchor="<name>"`, found again by its name
+rather than its position. The human creates anchors three ways: select text and click
 the floating "💬 Thread" button; Alt+click any element; or press "💬 Comment on…" in the Activity
 tools and click. Text anchors resolve again by `quote` + `prefix` after every Ready, so rewording
 around a quote keeps it; removing the quoted words detaches it. A detached anchor falls back to its
@@ -62,7 +64,7 @@ gone.
 ```
 
 Place exactly one, **outside every Region** — a Ready would otherwise replace it with the human's
-half-typed Thread. Give it its own column; 320px suits most Surfaces. Each card sits at its anchor's
+half-typed Thread. Give it its own column that grows with the screen, `clamp(340px, 32vw, 520px)`. Each card sits at its anchor's
 height and is pushed down to avoid overlap; the expanded card sits exactly at its anchor. Collapsed
 Every card is one line until opened: a Thread shows its first message, an open Proposal
 "Decide: …", a decided one "✓ Decided · …"; open Proposals are also listed under Waiting for you. Hovering a card highlights its

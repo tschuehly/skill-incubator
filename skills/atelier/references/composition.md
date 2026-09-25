@@ -57,7 +57,7 @@ Every Surface authors the same three-part frame; the content inside it is free.
 <header class="top">            <!-- sticky; title, section links, and the one <atelier-activity> -->
   <b>Title</b><nav>…</nav><atelier-activity></atelier-activity>
 </header>
-<div class="page">              <!-- grid: minmax(0,1fr) 320px; one column below 1100px -->
+<div class="page">              <!-- grid: minmax(0,1fr) clamp(340px,32vw,520px); one column below 1100px -->
   <main> …Regions… </main>
   <atelier-margin></atelier-margin>
 </div>
@@ -66,6 +66,9 @@ Every Surface authors the same three-part frame; the content inside it is free.
 - Keep the header and the margin **outside every Region**; a Ready replaces Regions and would take
   them along. Preflight fails when either is missing, doubled, or inside a Region.
 - Put section navigation in the header, not in a side column: the right side belongs to Threads.
+- Use the screen. Give the page no max-width below 1800px and let the margin grow with it
+  (`clamp(340px, 32vw, 520px)`), so decisions and Threads have room. Cap only prose line length
+  (about 75ch); diagrams, tables, and diffs take the full content width.
 - Set `--atl-header-height` on `:root` and `scroll-margin-top` on Regions to the header's height so
   jumps land below it.
 - Tabs, side-by-side panes, and toggles are ordinary authored HTML. They hold no interaction state,
@@ -77,12 +80,47 @@ The material decides what the human looks at. Before writing prose, ask what sho
 
 | Material | Form |
 |---|---|
-| A flow, dependency, or architecture | An inline SVG or rendered diagram |
+| A flow, pipeline, sequence, state machine, or timeline | Mermaid |
 | Options judged on shared criteria | A table, one row per option |
+| Numbers, or settings × values | A Vega-Lite chart or heatmap |
+| A graph whose layout matters, or whose every node carries a Thread | Graphviz |
 | Before and after | Two columns side by side, changes marked in both |
 | A UI, interaction, or state change | A click-through prototype or embedded app |
 | Media, layout, or a visual defect | The image or frame itself, with Threads on points |
 | One argument that builds | Short prose with examples beside the claims |
+
+### Draw with a library
+
+Draw diagrams with a library rather than placing SVG shapes by hand; hand-written SVG is for
+custom visuals such as an annotated screenshot. Each renderer marks its figure ready so preflight
+can see it drew, keeps a `[data-diagram-fallback]` caption, and runs again after a Ready:
+
+```html
+<figure data-diagram="pipeline">
+  <pre class="mermaid">flowchart LR
+  draft[Draft build] --> high[HIGH build] --> review{Review}</pre>
+  <figcaption data-diagram-fallback>Draft build, then HIGH build, then review.</figcaption>
+</figure>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12/dist/mermaid.esm.min.mjs';
+  import vegaEmbed from 'https://cdn.jsdelivr.net/npm/vega-embed@7/+esm';
+  mermaid.initialize({ startOnLoad: false });
+  const ready = el => el.closest('[data-diagram]').dataset.diagramReady = 'true';
+  async function draw() {
+    for (const el of document.querySelectorAll('pre.mermaid:not([data-processed])')) { await mermaid.run({ nodes: [el] }); ready(el); }
+    for (const el of document.querySelectorAll('[data-vega]:not(:has(svg))')) { await vegaEmbed(el, JSON.parse(el.dataset.vega), { renderer: 'svg', actions: false }); ready(el); }
+  }
+  draw(); document.addEventListener('atelier:ready', draw);
+</script>
+```
+
+- **Mermaid:** give every node a short, stable name (`high[HIGH build]`). A Thread on a box finds
+  it again by that name after the diagram changes.
+- **Vega-Lite:** render as SVG. A Thread anchors to a point on the chart, not to one mark.
+- **Graphviz** (`import { instance } from 'https://cdn.jsdelivr.net/npm/@viz-js/viz@3/+esm'`, then
+  `el.append((await instance()).renderSVGElement(dot))`): give every node an `id` attribute.
+- A syntax error leaves the figure unready, so preflight fails and names it; fix the source rather
+  than falling back to prose.
 
 ### Write the finding
 

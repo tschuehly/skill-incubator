@@ -23,14 +23,14 @@ const FILTER = process.argv[2] || '';
 // Deliberately library-free: verification must not depend on a CDN being reachable. The layout
 // is the contract every Surface follows: a header holding <atelier-activity>, the content, and one
 // <atelier-margin> outside every Region.
-const surface = (alpha = 'the quick brown fox jumps over the lazy dog', extra = '') => `<!doctype html>
+const surface = (alpha = 'the quick brown fox jumps over the lazy dog', extra = '', flow = ['draft-0', 'high-1']) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>verify</title>
 <link rel="stylesheet" href="/atelier.css">
 <script type="module" src="/atelier.mjs"></script>
 <style>
   body{font-family:system-ui;margin:0}
   header{position:sticky;top:0;z-index:20;display:flex;gap:12px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #ccc}
-  .page{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;padding:16px 24px}
+  .page{display:grid;grid-template-columns:minmax(0,1fr) clamp(340px,32vw,520px);gap:24px;padding:16px 24px}
   @media (max-width:1100px){.page{grid-template-columns:minmax(0,1fr)}}
 </style>
 </head><body>
@@ -40,7 +40,8 @@ const surface = (alpha = 'the quick brown fox jumps over the lazy dog', extra = 
   <h1>Verify</h1>
   <atelier-region key="alpha" label="Alpha"><h2>Alpha</h2><p id="alpha-body">${alpha}</p><div style="height:900px"></div></atelier-region>
   <atelier-region key="list" label="List"><ul><li>first item</li><li>second item</li><li>third item</li></ul><div style="height:600px"></div></atelier-region>
-  <atelier-region key="fig" label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg><div style="height:600px"></div></atelier-region>
+  <atelier-region key="fig" label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg>
+    <svg id="flow-svg" width="400" height="60" viewBox="0 0 400 60" style="max-width:100%">${flow.map((n, i) => `<g class="node" id="mermaid-${Date.now()}-flowchart-${n}" transform="translate(${10 + i * 130},10)"><rect width="110" height="40" fill="#ddd"/><text x="10" y="25">${n.split('-')[0]}</text></g>`).join('')}</svg><div style="height:600px"></div></atelier-region>
   <atelier-region key="beta" label="Beta"><h2>Beta</h2><p>beta body</p><div style="height:600px"></div></atelier-region>
 ${extra}</atelier-region>
 </main><atelier-margin></atelier-margin></div>
@@ -213,6 +214,21 @@ try {
     level(tops(c.id, `({getBoundingClientRect(){const r=document.querySelector('#fig-svg').getBoundingClientRect();return {top:r.top+r.height*0.5}}})`), 'point card');
   });
 
+  await check('anchor: a diagram box is found by its name after the diagram changes', async () => {
+    altClick(`document.querySelector('#flow-svg g.node:nth-of-type(2) rect')`);
+    await sleep(200);
+    await typeNewAndSend('box thread');
+    const c = await threadOf('v/fig', 'box thread');
+    eq(c?.anchor?.selector, ':scope g.node[id*="-flowchart-high-"]', 'box selector');
+    writeSurface(undefined, undefined, ['concept-0', 'draft-1', 'high-2']);
+    await api('/api/ready', { changed:['v/fig'] });
+    await sleep(1500);
+    eq(probe(`JSON.stringify(document.querySelector('#flow-svg .atl-el-anchor, #flow-svg .atl-el-active')?.textContent)`), 'high', 'anchored box after Ready');
+    writeSurface();
+    await api('/api/ready', { changed:['v/fig'] });
+    await sleep(1200);
+  });
+
   await check('anchor: ⌘+Enter sends a new Thread', async () => {
     altClick(`document.querySelector('atelier-region[key=beta] p')`);
     await sleep(300);
@@ -336,7 +352,11 @@ try {
     level(tops(body.id, `document.querySelector('atelier-region[key=fig]')`), 'proposal card');
     assert(probe(`JSON.stringify(document.querySelector('[data-slot="${body.id}"]').innerText)`).startsWith('Decide:'), 'open Proposal is not collapsed');
     act(`document.querySelector('[data-open="${body.id}"]').click()`);
-    act(`document.querySelector('[data-decide="${body.id}"][data-i="0"]').click()`);
+    eq(probe(`JSON.stringify(document.querySelector('[data-decide="${body.id}"]').disabled)`), true, 'Decide enabled before a choice');
+    act(`document.querySelector('[data-choose="${body.id}"][value="0"]').closest('label').click()`);
+    await sleep(200);
+    eq((await state()).proposals[body.id].status, 'open', 'picking an option decided it');
+    act(`document.querySelector('[data-decide="${body.id}"]').click()`);
     await sleep(600);
     eq((await state()).proposals[body.id].choiceIndex, 0, 'choice');
     assert(probe(`JSON.stringify(document.querySelector('[data-slot="${body.id}"]').innerText)`).startsWith('✓'), 'decided card did not collapse');
@@ -354,14 +374,23 @@ try {
     level(t, 'anchored proposal');
   });
 
-  await check('proposal: a custom answer is recorded', async () => {
+  await check('proposal: a custom answer is recorded and a decision can be changed', async () => {
     const { body } = await api('/api/propose', { region:'v/beta', question:'Name?', options:['A', 'B'] });
     await sleep(900);
     act(`document.querySelector('[data-open="${body.id}"]').click()`);
-    act(`(()=>{document.querySelector('[data-custom="${body.id}"]').value='my own'; document.querySelector('[data-decide-custom="${body.id}"]').click()})()`);
+    act(`document.querySelector('[data-choose="${body.id}"][value="custom"]').closest('label').click()`);
+    await sleep(200);
+    act(`(()=>{const t=document.querySelector('[data-custom="${body.id}"]'); t.value='my own'; t.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-decide="${body.id}"]').click()})()`);
     await sleep(600);
     const p = (await state()).proposals[body.id];
     eq([p.status, p.custom], ['decided', 'my own'], 'custom decision');
+    act(`document.querySelector('[data-open="${body.id}"]').click()`);
+    act(`document.querySelector('[data-choose="${body.id}"][value="1"]').closest('label').click()`);
+    await sleep(200);
+    act(`document.querySelector('[data-decide="${body.id}"]').click()`);
+    await sleep(600);
+    const q = (await state()).proposals[body.id];
+    eq([q.choiceIndex, q.custom], [1, null], 'changed decision');
   });
 
   await check('proposal: an option explanation is asked and answered in place', async () => {

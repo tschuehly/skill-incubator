@@ -99,12 +99,26 @@ function anchorFromElement(el, event) {
   const region = el.closest('atelier-region');
   if (!region) return null;
   if (el === region) return { region: region.regionKey };
+  // Inside a diagram, anchor the box that was clicked (Mermaid and Graphviz draw each as g.node, or
+  // mark your own with data-anchor); anywhere else on an SVG or image, a relative point.
+  const box = el.closest('svg g.node, svg [data-anchor]');
+  if (box && region.contains(box)) return { region: region.regionKey, selector: boxSelector(box, region) };
   const target = el.closest('svg') || el, a = { region: region.regionKey, selector: selectorFor(target, region) };
   if (target.tagName === 'IMG' || target.tagName.toLowerCase() === 'svg') {
     const r = target.getBoundingClientRect();
     a.point = { x: +((event.clientX - r.left) / r.width).toFixed(3), y: +((event.clientY - r.top) / r.height).toFixed(3) };
   }
   return a;
+}
+// A diagram box is found again by its name, not its position: Mermaid ids are
+// mermaid-<render>-<name>-<counter>, and both parts that change are left out.
+function boxSelector(box, region) {
+  const own = box.getAttribute('data-anchor');
+  if (own) return `:scope [data-anchor="${CSS.escape(own)}"]`;
+  const m = /^mermaid-\d+-(.+)-\d+$/.exec(box.id);
+  if (m) return `:scope g.node[id*="-${CSS.escape(m[1])}-"]`;
+  if (box.id && !/^node\d+$/.test(box.id)) return `:scope #${CSS.escape(box.id)}`;
+  return selectorFor(box, region);
 }
 function openNew(anchor) {
   const id = 'c-' + Math.random().toString(36).slice(2, 10);
@@ -202,26 +216,31 @@ const CLOSE = '<button class="atl-close" data-close aria-label="Close" title="Cl
 const imgs = urls => urls?.length ? `<div class="atl-atts">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Pasted image"></a>`).join('')}</div>` : '';
 const pendingImgs = key => { const u = atts.get(key) || [];
   return u.length ? `<div class="atl-atts">${u.map((x, i) => `<span class="atl-att"><img src="${esc(x)}" alt="Pasted image"><button class="atl-att-x" data-unattach="${esc(key)}" data-i="${i}" aria-label="Remove image">×</button></span>`).join('')}</div>` : ''; };
+// A decision is two steps: pick an option, then Decide. One stray click never commits, and a
+// decided Proposal can be reopened and changed.
 function proposalHTML(it, open) {
   const pr = it.pr, decided = pr.status === 'decided';
   const choice = pr.custom || pr.options?.[pr.choiceIndex] || '';
-  // Collapsed until opened, like a Thread: expanded cards push each other off their anchors.
-  if (decided && !open) return `<button class="atl-card atl-card--line atl-card--decided" data-open="${it.id}">✓ <b>Decided</b> · ${esc(String(choice).split(/[.:;(]/)[0])}</button>`;
-  if (!open) return `<button class="atl-card atl-card--line is-yours" data-open="${it.id}"><span class="atl-first"><b>Decide:</b> ${esc(pr.question)}</span><span class="atl-meta">${(pr.options || []).length} options</span></button>`;
+  if (decided && !open) return `<button class="atl-card atl-card--line atl-card--decided" data-open="${it.id}">✓ <b>Decided</b> · ${esc(clean(String(choice)).split(/[.:;(]/)[0])}</button>`;
+  if (!open) return `<button class="atl-card atl-card--line atl-card--ask" data-open="${it.id}"><span class="atl-first"><b>Decide:</b> ${esc(pr.question)}</span><span class="atl-meta">${(pr.options || []).length} options</span></button>`;
+  const picked = kept.get(it.id + '|choice') ?? (decided ? (pr.custom ? 'custom' : String(pr.choiceIndex)) : '');
   const opt = (o, i) => {
     const req = pr.explanationRequests?.[i], ex = pr.explanations?.[i];
-    return `<div class="atl-opt-row"><button class="atl-opt ${pr.choiceIndex === i ? 'is-chosen' : ''}" data-decide="${it.id}" data-i="${i}" ${decided ? 'disabled' : ''}>${i === 0 ? '<span class="atl-rec">Recommended</span> ' : ''}${esc(o)}</button>
-      ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? '<div class="atl-meta">Explanation requested</div>' : decided ? ''
-        : `<details class="atl-ask"><summary>Explain this option</summary><textarea data-explain-text="${it.id}:${i}" placeholder="What is unclear?"></textarea><button class="atl-btn" data-explain="${it.id}" data-i="${i}">Ask</button></details>`}</div>`;
+    return `<label class="atl-choice ${picked === String(i) ? 'is-picked' : ''}"><input type="radio" name="atl-${it.id}" data-choose="${it.id}" value="${i}" ${picked === String(i) ? 'checked' : ''}>
+      <span>${esc(clean(o))}${i === 0 ? ' <span class="atl-rec">Recommended</span>' : ''}</span></label>
+      ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? '<div class="atl-explain atl-meta">Explanation requested</div>'
+        : `<details class="atl-ask"><summary>Why?</summary><textarea data-explain-text="${it.id}:${i}" placeholder="What is unclear?"></textarea><button class="atl-btn" data-explain="${it.id}" data-i="${i}">Ask</button></details>`}`;
   };
   return `<div class="atl-card atl-card--decision is-open" data-card="${it.id}">${CLOSE}${where(it)}
     <div class="atl-kicker">${decided ? 'Decided' : 'Decision needed'}</div>
     <p class="atl-q">${esc(pr.question)}</p>
-    ${(pr.options || []).map(opt).join('')}
-    ${decided ? (pr.custom ? `<div class="atl-msg atl-msg--you">${esc(pr.custom)}</div>` : '')
-      : `<textarea placeholder="Or answer in your own words…" data-custom="${it.id}"></textarea><div class="atl-row"><button class="atl-btn atl-btn--primary" data-decide-custom="${it.id}">Send answer</button></div>`}
+    <div class="atl-choices" role="radiogroup">${(pr.options || []).map(opt).join('')}
+      <label class="atl-choice ${picked === 'custom' ? 'is-picked' : ''}"><input type="radio" name="atl-${it.id}" data-choose="${it.id}" value="custom" ${picked === 'custom' ? 'checked' : ''}><span>Something else</span></label>
+      ${picked === 'custom' ? `<textarea data-custom="${it.id}" placeholder="Your answer…">${esc(pr.custom || '')}</textarea>` : ''}</div>
+    <div class="atl-row"><button class="atl-btn atl-btn--primary" data-decide="${it.id}" ${picked ? '' : 'disabled'}>${decided ? 'Change decision' : 'Decide'}</button></div>
   </div>`;
 }
+const clean = o => o.replace(/\s*\((recommended|empfohlen)\)\s*$/i, '');
 function cardHTML(it) {
   const open = it.id === active;
   if (it.kind === 'proposal') return proposalHTML(it, open);
@@ -298,6 +317,9 @@ const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(
 addEventListener('resize', schedule);
 document.addEventListener('scroll', e => { if (e.target !== document) schedule(); }, true);   // inner scrollers
 new ResizeObserver(schedule).observe(document.documentElement);
+// A diagram library draws after load and after every Ready; anchors inside it resolve once it says so.
+new MutationObserver(ms => { if (ms.some(m => m.target.dataset?.diagramReady === 'true')) render(); })
+  .observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-diagram-ready'] });
 
 // ===== margin actions ===============================================================
 const itemOf = id => cache.find(i => i.id === id);
@@ -330,9 +352,13 @@ document.addEventListener('click', async e => {
   if (d.reject) { const ta = $(`[data-reply-text="${d.reject}"]`), msg = ta.value.trim();
     if (!msg) { ta.placeholder = 'Say what is still wrong, then Reopen'; return ta.focus({ preventScroll: true }); }
     await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); ta.value = ''; return refresh(); }
-  if (d.decide) { await post('/api/decide', { id: d.decide, choiceIndex: +d.i }); active = null; return refresh(); }
-  if (d.decideCustom) { const custom = value(`[data-custom="${d.decideCustom}"]`); if (!custom) return;
-    await post('/api/decide', { id: d.decideCustom, choiceIndex: null, custom }); active = null; return refresh(); }
+  if (d.decide) {
+    const picked = kept.get(d.decide + '|choice'); if (!picked) return;
+    if (picked === 'custom') { const custom = value(`[data-custom="${d.decide}"]`); if (!custom) return $(`[data-custom="${d.decide}"]`)?.focus({ preventScroll: true });
+      await post('/api/decide', { id: d.decide, choiceIndex: null, custom }); }
+    else await post('/api/decide', { id: d.decide, choiceIndex: +picked });
+    kept.delete(d.decide + '|choice'); kept.delete(d.decide + '|custom'); active = null; return refresh();
+  }
   if (d.explain) { const answer = value(`[data-explain-text="${d.explain}:${d.i}"]`); if (!answer) return;
     await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); return refresh(); }
 });
@@ -347,7 +373,11 @@ document.addEventListener('mouseover', e => {
 document.addEventListener('keydown', e => {
   const ta = e.target.closest?.('atelier-margin textarea'); if (!ta || e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
   e.preventDefault();
-  (ta.closest('details') || ta.closest('[data-card]')).querySelector('[data-send],[data-reply],[data-decide-custom],[data-explain]')?.click();
+  (ta.closest('details') || ta.closest('[data-card]')).querySelector('[data-send],[data-reply],[data-decide],[data-explain]')?.click();
+});
+document.addEventListener('change', e => {
+  const r = e.target.closest?.('atelier-margin [data-choose]'); if (!r) return;
+  kept.set(r.dataset.choose + '|choice', r.value); render();
 });
 document.addEventListener('input', e => {
   const t = e.target.closest?.('atelier-margin textarea'); if (!t) return;
