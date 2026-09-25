@@ -1,701 +1,445 @@
-// atelier kernel — light-DOM custom elements over one durable store.
+// atelier kernel — the browser half. Vendored from the atelier skill: copy it, never patch it.
 //
-// The agent authors the document; this file supplies identity, durable state and behavior.
-// Nothing here renders content or imposes layout. All chrome is scoped under .atl-* so a content
-// library (daisyUI/Tailwind) can never restyle it by tag, and the kernel never restyles the agent.
-//
-//   <script type="module" src="/atelier.mjs"></script>
-//   <atelier-region key="onboarding">
-//     <atelier-region key="provider" comments="side"> …agent HTML… </atelier-region>
-//   </atelier-region>
-//
-// A Region's identity is the path of local keys from the root: "onboarding/provider".
+// The kernel supplies interaction, never layout. It never inserts anything into authored content.
+//   <atelier-region key label>  identity and address only
+//   <atelier-margin>            Threads and Proposals, each level with its anchor (the Surface places it)
+//   <atelier-activity>          Pick-to-comment + one drawer: waiting for you, changed, Updates
+// A Thread opens on an anchor: selected text, any element (Alt+click or Pick), a point on an image
+// or SVG, or a whole Region. Ready swaps only the named Regions into the open page.
+// ponytail: iframe picking is not built; a Surface that embeds a cooperating app posts its own
+// anchors (see references/protocol.md#extending). Narrow screens get a bottom list, not anchoring.
 
-// ===== store =========================================================================
-// Server-owned state. `threads` is the only client-owned slice (drafts autosave back).
-export const S = { threads:{}, sent:{}, replies:{}, commentState:{}, proposals:{}, updates:{},
-  changed:{}, log:[], seq:0 };
-const listeners = new Set();
-export const subscribe = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
-const emit = (focused = captureInteractionFocus()) => {
-  listeners.forEach(fn => fn());
-  if (focused) focusInteraction(focused);
-};
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  .then(r => r.json().catch(() => ({ ok: r.ok })));
+let S = { threads: {}, sent: {}, replies: {}, commentState: {}, proposals: {}, updates: {}, changed: {}, seq: 0 };
+let active = null;                       // id of the expanded Thread or Proposal
+const pending = new Map();               // unsent new Threads: id -> { id, region, anchor, text }
+const DRAFTS = 'atelier:drafts';
 
-const post = async (path, body) => {
-  const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body||{}) });
-  const j = await r.json().catch(()=>({}));
-  if (!r.ok || j.ok === false) throw new Error(j.error || `${path} failed`);
-  return j;
-};
-async function pull(){
-  const r = await fetch('/api/state');
-  Object.assign(S, await r.json());
-}
-const saveNow = () => post('/api/state', { threads:S.threads });
-// Human drafts are local to this browser: keeping them out of the shared store means a store
-// update arriving mid-sentence can never overwrite what the human is typing.
-const DRAFT = 'atelier:draft:';
-const draftGet = (key) => { try { return localStorage.getItem(DRAFT + key); } catch { return null; } };
-const draftSet = (key, value) => { try { localStorage.setItem(DRAFT + key, value); } catch {} };
-const draftClear = (key) => { try { localStorage.removeItem(DRAFT + key); localStorage.removeItem(DRAFT + key + ':open'); } catch {} };
-function clearDrafts(prefix){
-  try { for (const key of Object.keys(localStorage)) if (key.startsWith(DRAFT + prefix)) localStorage.removeItem(key); } catch {}
-}
-function captureEditor(root){
-  const input = document.activeElement;
-  return input instanceof HTMLTextAreaElement && root.contains(input) && input.dataset.draft
-    ? { key:input.dataset.draft, start:input.selectionStart, end:input.selectionEnd } : null;
-}
-function wireEditors(root, active){
-  root.querySelectorAll('form[data-editor]').forEach(form => { form.hidden = draftGet(form.dataset.editor + ':open') !== 'open'; });
-  root.querySelectorAll('textarea[data-draft]').forEach(input => {
-    const saved = draftGet(input.dataset.draft); if (saved !== null) input.value = saved;
-    input.addEventListener('input', () => draftSet(input.dataset.draft, input.value));
-    input.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && event.metaKey){ event.preventDefault(); input.form?.requestSubmit(); }
-    });
-  });
-  if (active){
-    const input = [...root.querySelectorAll('textarea[data-draft]')].find(el => el.dataset.draft === active.key);
-    if (input && !input.closest('[hidden]')){ input.focus(); input.setSelectionRange(active.start, active.end); }
-  }
-}
-function openEditor(form){
-  form.hidden = false; draftSet(form.dataset.editor + ':open', 'open'); form.querySelector('textarea')?.focus();
-}
-function closeEditor(form){
-  const key = form.dataset.editor; draftClear(key); form.hidden = true;
-}
-
-// ===== derived attention =============================================================
-// Attention is never stored. Each item points at a Region and belongs to exactly one side:
-// `owner:'human'` means it is waiting on you, `owner:'agent'` means it is waiting on the agent.
-export function attention(){
-  const items = [];
-  for (const [region, meta] of Object.entries(S.changed))
-    items.push({ kind:'changed', region, id:region, owner:'human', label:'Changed', ts:meta.ts });
-  for (const u of Object.values(S.updates)) if (!u.dismissedAt)
-    items.push({ kind:'update', region:u.region, id:u.id, owner:'human', label:u.title, ts:u.ts });
-  for (const pr of Object.values(S.proposals)){
-    if (pr.status === 'open') items.push({ kind:'decision', region:pr.region, id:pr.id, owner:'human', label:pr.question, ts:pr.ts });
-    for (const [index, req] of Object.entries(pr.explanationRequests||{}))
-      if (req.status === 'requested')
-        items.push({ kind:'explanation', region:pr.region, id:`${pr.id}:${index}`, owner:'agent', label:pr.options[index]||'Option', ts:req.ts });
-  }
-  for (const [region, thread] of Object.entries(S.threads)) for (const c of thread){
-    const value = S.commentState[c.id]?.value;
-    if (!value) continue;
-    if (value === 'implemented') items.push({ kind:'verdict', region, id:c.id, owner:'human', label:c.text||'Comment', ts:S.commentState[c.id].ts });
-    else if (value === 'rejected') items.push({ kind:'rework', region, id:c.id, owner:'agent', label:c.text||'Comment', ts:S.commentState[c.id].ts });
-    else if (['open','acknowledged','in_progress'].includes(value))
-      items.push({ kind:'request', region, id:c.id, owner:'agent', label:c.text||'Comment', ts:S.commentState[c.id].ts });
-  }
-  return items;
-}
-const attentionFor = (region, owner) => attention().filter(a => a.region === region && (!owner || a.owner === owner));
-
-// ===== regions =======================================================================
-const regionEls = () => [...document.querySelectorAll('atelier-region')];
-const regionKeys = () => new Set(regionEls().map(el => el.regionKey));
-function regionPath(el){
-  const parts = [];
-  for (let node = el; node; node = node.parentElement?.closest('atelier-region')){
-    parts.unshift((node.getAttribute('key')||'').trim() || 'unnamed');
-    if (!node.parentElement) break;
-  }
-  return parts.join('/');
-}
-export const findRegion = (key) => regionEls().find(el => el.regionKey === key) || null;
-const esc = (s) => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const uid = () => 'c-' + Math.random().toString(36).slice(2, 10);
-
+// ===== Regions: identity only ======================================================
 class AtelierRegion extends HTMLElement {
-  connectedCallback(){
-    // Identity only. Chrome is mounted after the document parses, so appended nodes can never
-    // land in the middle of content the parser has not reached yet.
-    this.regionKey = regionPath(this);
-    this.setAttribute('data-review-region', '');
-    this.setAttribute('data-region-key', this.regionKey);
+  get regionKey() {
+    const parent = this.parentElement?.closest('atelier-region');
+    return (parent ? parent.regionKey + '/' : '') + (this.getAttribute('key') || 'unnamed');
   }
-  get placement(){ return this.getAttribute('comments') || 'below'; }
-  get label(){ return this.getAttribute('label') || this.querySelector('h1,h2,h3,h4')?.textContent?.trim() || this.regionKey; }
+  get label() { return this.getAttribute('label') || this.querySelector('h1,h2,h3,h4')?.textContent.trim() || this.getAttribute('key'); }
 }
 customElements.define('atelier-region', AtelierRegion);
+const regionEls = () => [...document.querySelectorAll('atelier-region')];
+const regionEl = key => regionEls().find(r => r.regionKey === key);
+const labelOf = key => regionEl(key)?.label || key;
 
-// ===== attention marker ==============================================================
-// What the marker says. Every human-owned kind gets its own words; every agent-owned kind shares
-// one, because the store records that a state was asserted at a timestamp and never that work is
-// under way. Nothing clears `in_progress` when a session dies, so "agent working" would be a claim
-// no stored fact supports. Per-comment lifecycle belongs in the Thread, where CSTATE renders every
-// item; this marker shows one item plus +N, so a finer label here would describe the Region less
-// truthfully, not more.
-const LEAD = { changed:'Changed', decision:'Decide', update:'Read', verdict:'Your call' };
-const LEAD_AGENT = 'With agent';
-// Placeable anywhere: inside prose, in a heading, in a nav, beside a diagram.
-//   <atelier-attention/>                       marker for the Region it sits in
-//   <atelier-attention for="a/b" mode="count"/> counter for another Region and its descendants
-class AtelierAttention extends HTMLElement {
-  connectedCallback(){
-    // Capture slotted text ONCE: rendering replaces this element's own children, so reading it
-    // later would return whatever the last render wrote (or nothing at all).
-    this.slotted ??= this.textContent.trim();
-    this.unsub = subscribe(()=>this.render());
-    this.render();
+// ===== anchors ======================================================================
+// { region, quote?, prefix?, selector?, point?:{x,y} }. Only `region` means the whole Region.
+// Text is found again by quote + prefix, so it survives a Ready that re-renders the Region.
+const CHROME = 'atelier-margin,atelier-activity,.atl-float,.atl-warnings';
+function textIndex(root) {
+  const nodes = [], w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.parentElement.closest(`${CHROME},script,style,textarea,[hidden]`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  let text = '', n;
+  while ((n = w.nextNode())) { nodes.push({ n, at: text.length }); text += n.data; }
+  return { text, nodes };
+}
+function rangeAt(idx, start, end) {
+  const find = pos => { let k = idx.nodes.length - 1; while (k > 0 && idx.nodes[k].at > pos) k--; return idx.nodes[k]; };
+  const a = find(start), b = find(end - 1), r = document.createRange();
+  r.setStart(a.n, start - a.at); r.setEnd(b.n, end - b.at); return r;
+}
+function selectorFor(el, root) {
+  const parts = [];
+  for (let e = el; e && e !== root; e = e.parentElement) {
+    const same = [...e.parentElement.children].filter(c => c.tagName === e.tagName);
+    parts.unshift(e.tagName.toLowerCase() + (same.length > 1 ? `:nth-of-type(${same.indexOf(e) + 1})` : ''));
   }
-  disconnectedCallback(){ this.unsub?.(); }
-  get target(){ return this.getAttribute('for') || this.closest('atelier-region')?.regionKey || ''; }
-  render(){
-    const key = this.target, owner = this.getAttribute('owner') || '';
-    const mode = this.getAttribute('mode') || 'badge';
-    // count rolls up descendants: every Region key under this path
-    const items = mode === 'count'
-      ? attention().filter(a => (a.region === key || a.region.startsWith(key + '/')) && (!owner || a.owner === owner))
-      : attentionFor(key, owner);
-    // A count is a readout the agent placed in a sentence, so it prints zero rather than vanishing
-    // and leaving a dangling label. Every other mode is a marker: no marker means nothing waiting.
-    if (mode === 'count'){
-      this.innerHTML = `<span class="atl-badge${items.length ? '' : ' atl-badge--zero'}">${items.length}</span>`;
-      return;
+  return parts.length ? ':scope > ' + parts.join(' > ') : null;
+}
+// -> { range } | { el, point? } | { el, detached:true } | null (Region gone)
+function resolve(anchor, fallbackRegion) {
+  const root = regionEl(anchor?.region || fallbackRegion);
+  if (!root) return null;
+  if (anchor?.quote) {
+    const idx = textIndex(root);
+    let at = -1, from = 0;
+    while ((from = idx.text.indexOf(anchor.quote, from)) !== -1) {       // prefer the occurrence with its context
+      if (at === -1) at = from;
+      if (anchor.prefix && idx.text.slice(Math.max(0, from - anchor.prefix.length), from) === anchor.prefix) { at = from; break; }
+      from += 1;
     }
-    if (!items.length){ this.innerHTML = ''; return; }
-    const changed = items.some(a => a.kind === 'changed');
-    if (mode === 'dot'){ this.innerHTML = `<span class="atl-dot" title="${esc(items.length)} open"></span>`; return; }
-    if (mode === 'label'){ this.innerHTML = `<span class="atl-badge">${esc(this.slotted || items[0].label)}</span>`; return; }
-    // One marker per Region, showing the most urgent kind plus how many others wait behind it —
-    // a Region can carry a changed marker, an open Proposal and a verdict at the same time.
-    const leadItem = changed ? items.find(a => a.kind === 'changed') : items[0];
-    const lead = LEAD[leadItem.kind] || LEAD_AGENT;
-    const rest = items.length > 1 ? `<span class="atl-badge">+${items.length-1}</span>` : '';
-    this.innerHTML = `<span class="atl-badge atl-badge--${leadItem.owner} ${changed?'atl-badge--changed':''}" title="${esc(items.map(a=>a.kind).join(', '))}">${lead}</span>${rest}` +
-      (changed ? `<button class="atl-icon" data-ack aria-label="Mark as reviewed" title="Mark as reviewed">✓</button>` : '');
-    this.querySelector('[data-ack]')?.addEventListener('click', () => ack(key));
+    return at === -1 ? { el: root, root, detached: true } : { range: rangeAt(idx, at, at + anchor.quote.length), root };
   }
+  if (anchor?.selector) {
+    let el = null; try { el = root.querySelector(anchor.selector); } catch {}
+    return el ? { el, root, point: anchor.point } : { el: root, root, detached: true };
+  }
+  return { el: root, root };
 }
-customElements.define('atelier-attention', AtelierAttention);
+const topOf = res => (res.range ? res.range.getBoundingClientRect() : res.el.getBoundingClientRect()).top +
+  (res.point ? res.el.getBoundingClientRect().height * res.point.y : 0);
 
-export async function ack(region){ await post('/api/ack', { region }); await refresh(); }
-
-// ===== threads =======================================================================
-// Placement is the agent's call, and the test is whether the human must see the comment and its
-// context at the same time: `below` (default), `side` (gutter beside the content), `sheet`
-// (fixed bottom panel; the document keeps scrolling normally).
-const threadOf = (region) => (S.threads[region] ||= []);
-
-class AtelierComments extends HTMLElement {
-  connectedCallback(){
-    const region = this.region = this.getAttribute('for') || this.closest('atelier-region')?.regionKey || '';
-    this.className = 'atl-thread';
-    // Structure is built once; only the comment list re-renders, so the textarea keeps its value,
-    // its focus and the caret while the agent's replies stream in.
-    this.innerHTML = `<div class="atl-list"></div>
-      <form class="atl-compose">
-        <textarea class="atl-input" data-draft="${esc(region)}" rows="2" aria-label="Comment on this Region" placeholder="Comment on this Region…"></textarea>
-        <button class="atl-send" type="submit">Send</button>
-      </form>`;
-    this.list = this.querySelector('.atl-list');
-    this.input = this.querySelector('.atl-input');
-    wireEditors(this);
-    this.querySelector('.atl-compose').addEventListener('submit', event => { event.preventDefault(); this.send(); });
-    this.unsub = subscribe(()=>this.renderList());
-    this.renderList();
-  }
-  disconnectedCallback(){ this.unsub?.(); }
-  renderList(){
-    const active = captureEditor(this.list);
-    this.list.innerHTML = threadOf(this.region).map(c => commentHtml(this.region, c)).join('');
-    wireVerdicts(this.list, this.region, active);
-  }
-  async send(){
-    const text = this.input.value.trim(); if (!text) return;
-    const comment = { id: uid(), text };
-    threadOf(this.region).push(comment);
-    await saveNow();                                     // durable before dispatch, never the reverse
-    await post('/api/send', { region:this.region, id:comment.id });
-    this.input.value = '';
-    draftClear(this.region);
-    await refresh();
-  }
+// ===== opening a Thread =============================================================
+const regionFor = node => (node?.nodeType === 1 ? node : node?.parentElement)?.closest('atelier-region');
+function anchorFromSelection() {
+  const sel = getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0), container = range.commonAncestorContainer;
+  const region = regionFor(container);
+  if (!region || (container.nodeType === 1 ? container : container.parentElement).closest(CHROME)) return null;
+  const quote = sel.toString().trim();
+  if (quote.length < 2) return null;
+  const idx = textIndex(region), pre = document.createRange();
+  pre.setStart(region, 0); pre.setEnd(range.startContainer, range.startOffset);
+  const offset = idx.text.indexOf(quote, Math.max(0, pre.toString().length - 40));
+  return { region: region.regionKey, quote, prefix: offset > 0 ? idx.text.slice(Math.max(0, offset - 32), offset) : '' };
 }
-customElements.define('atelier-comments', AtelierComments);
-
-const CSTATE = { open:'Open', acknowledged:'Acknowledged', in_progress:'In progress',
-  implemented:'Implemented · your call', accepted:'Accepted', rejected:'Rejected · rework' };
-
-function commentHtml(region, c){
-  const sent = !!S.sent[c.id], state = S.commentState[c.id]?.value;
-  const replies = (S.replies[c.id]||[]).map(r =>
-    `<div class="atl-reply atl-reply--${esc(r.author)}"><b>${r.author==='agent'?'Agent':'You'}</b>${esc(r.msg)}</div>`).join('');
-  const verdict = state === 'implemented'
-    ? `<div class="atl-verdict"><button class="atl-btn" data-accept="${esc(c.id)}">Accept</button>
-       <button class="atl-btn" data-reject-open="${esc(c.id)}">Reject…</button></div>
-       <form class="atl-followup" data-editor="reject:${esc(c.id)}" data-reject="${esc(c.id)}" hidden>
-         <textarea class="atl-input" data-draft="reject:${esc(c.id)}" rows="2" aria-label="Reason for rejection" placeholder="What is still wrong?"></textarea>
-         <button class="atl-send" type="submit">Send changes</button>
-         <button class="atl-btn" type="button" data-cancel-editor>Cancel</button>
-       </form>` : '';
-  return `<div class="atl-comment ${sent?'atl-comment--sent':''}" data-comment="${esc(c.id)}">
-    ${c.anchor?.quote ? `<div class="atl-quote">${esc(c.anchor.quote)}</div>` : ''}
-    <div class="atl-text">${esc(c.text)}</div>
-    ${state ? `<div class="atl-state">${esc(CSTATE[state]||state)}</div>` : ''}
-    ${replies}${verdict}</div>`;
-}
-
-function wireVerdicts(root, region, active){
-  wireEditors(root, active);
-  root.querySelectorAll('[data-accept]').forEach(button => button.addEventListener('click', async () => {
-    await post('/api/comment-state', { region, id:button.dataset.accept, state:'accepted' }); await refresh();
-  }));
-  root.querySelectorAll('[data-reject-open]').forEach(button => button.addEventListener('click', () => {
-    openEditor(button.closest('.atl-comment').querySelector('form[data-reject]'));
-  }));
-  root.querySelectorAll('form[data-reject]').forEach(form => form.addEventListener('submit', async event => {
-    event.preventDefault();
-    const msg = form.querySelector('textarea').value.trim(); if (!msg) return;
-    await post('/api/comment-reject', { region, id:form.dataset.reject, msg });
-    draftClear(form.dataset.editor); await refresh();
-  }));
-  root.querySelectorAll('[data-cancel-editor]').forEach(button => button.addEventListener('click', () => closeEditor(button.closest('form'))));
-}
-
-// ===== proposals =====================================================================
-// A question with named options. This is how the agent asks instead of blocking on chat: the
-// question sits in the Region it is about, so the human answers with the evidence in front of them.
-class AtelierProposal extends HTMLElement {
-  connectedCallback(){
-    this.className = 'atl-proposals';
-    this.unsub = subscribe(()=>this.render());
-    this.render();
-  }
-  disconnectedCallback(){ this.unsub?.(); }
-  get target(){ return this.getAttribute('for') || this.closest('atelier-region')?.regionKey || ''; }
-  render(){
-    const active = captureEditor(this), key = this.target;
-    const list = Object.values(S.proposals)
-      .filter(pr => pr.region === key && pr.status !== 'superseded')
-      .sort((a,b) => a.ts < b.ts ? -1 : 1);
-    this.innerHTML = list.map(proposalHtml).join('');
-    this.wire(active);
-  }
-  wire(active){
-    wireEditors(this, active);
-    this.querySelectorAll('[data-choose]').forEach(button => button.addEventListener('click', async () => {
-      const [id, index] = button.dataset.choose.split('|');
-      await post('/api/decide', { id, choiceIndex:Number(index) });
-      clearDrafts(`proposal:${id}:`); await refresh();
-    }));
-    this.querySelectorAll('[data-why]').forEach(button => button.addEventListener('click', () => {
-      const [id, index] = button.dataset.why.split('|');
-      openEditor([...this.querySelectorAll('form[data-explain]')]
-        .find(form => form.dataset.explain === `${id}|${index}`));
-    }));
-    this.querySelectorAll('form[data-explain]').forEach(form => form.addEventListener('submit', async event => {
-      event.preventDefault();
-      const [id, index] = form.dataset.explain.split('|'), question = form.querySelector('textarea').value.trim();
-      if (!question) return;
-      await post('/api/explain-request', { id, optionIndex:Number(index), answer:question });
-      draftClear(form.dataset.editor); await refresh();
-    }));
-    this.querySelectorAll('[data-custom]').forEach(form => form.addEventListener('submit', async event => {
-      event.preventDefault();
-      const custom = form.querySelector('textarea').value.trim(); if (!custom) return;
-      await post('/api/decide', { id:form.dataset.custom, custom });
-      clearDrafts(`proposal:${form.dataset.custom}:`); await refresh();
-    }));
-    this.querySelectorAll('[data-cancel-editor]').forEach(button => button.addEventListener('click', () => closeEditor(button.closest('form'))));
-  }
-}
-customElements.define('atelier-proposal', AtelierProposal);
-
-function proposalHtml(pr){
-  if (pr.status === 'decided'){
-    const chosen = pr.custom || pr.options[pr.choiceIndex] || 'decided';
-    return `<div class="atl-proposal atl-proposal--decided" data-proposal="${esc(pr.id)}">
-      <div class="atl-proposal__q">${esc(pr.question)}</div>
-      <div class="atl-state">Decided · ${esc(chosen)}</div></div>`;
-  }
-  const options = pr.options.map((label, index) => {
-    const req = pr.explanationRequests?.[index], answer = pr.explanations?.[index];
-    // An option the human asked about carries the exchange with it, so the reason for the choice
-    // stays attached to the choice.
-    const aside = answer ? `<div class="atl-explain">${esc(answer.text)}</div>`
-      : req?.status === 'requested' ? `<div class="atl-explain atl-explain--waiting">Asked: ${esc(req.answer)}</div>` : '';
-    const draft = `proposal:${pr.id}:why:${index}`;
-    return `<div class="atl-option">
-      <button class="atl-btn" data-choose="${esc(pr.id)}|${index}">${esc(label)}</button>
-      <button class="atl-icon" data-why="${esc(pr.id)}|${index}" aria-label="Ask about this option" title="Ask about this option">?</button>
-      <form class="atl-followup" data-editor="${esc(draft)}" data-explain="${esc(pr.id)}|${index}" hidden>
-        <textarea class="atl-input" data-draft="${esc(draft)}" rows="2" aria-label="Question about this option" placeholder="What do you want explained?"></textarea>
-        <button class="atl-send" type="submit">Ask agent</button>
-        <button class="atl-btn" type="button" data-cancel-editor>Cancel</button>
-      </form>
-      ${aside}</div>`;
-  }).join('');
-  return `<div class="atl-proposal" data-proposal="${esc(pr.id)}">
-    <div class="atl-proposal__q">${esc(pr.question)}</div>
-    <div class="atl-options">${options}</div>
-    <form class="atl-custom" data-custom="${esc(pr.id)}">
-      <textarea class="atl-input" data-draft="proposal:${esc(pr.id)}:custom" rows="2" aria-label="Answer in your own words" placeholder="…or answer in your own words"></textarea>
-      <button class="atl-send" type="submit">Answer</button>
-    </form></div>`;
-}
-
-// ===== updates =======================================================================
-// A durable agent message. Unlike a toast it survives reload, and unlike a chat line it is
-// attached to the Region it is about and stays until the human dismisses it.
-class AtelierUpdate extends HTMLElement {
-  connectedCallback(){
-    this.className = 'atl-updates';
-    this.unsub = subscribe(()=>this.render());
-    this.render();
-  }
-  disconnectedCallback(){ this.unsub?.(); }
-  get target(){ return this.getAttribute('for') || this.closest('atelier-region')?.regionKey || ''; }
-  render(){
-    const key = this.target;
-    const list = Object.values(S.updates).filter(u => u.region === key && !u.dismissedAt);
-    this.innerHTML = list.map(u => `<div class="atl-update" data-update="${esc(u.id)}">
-      <div class="atl-update__body"><b>${esc(u.title)}</b>${u.body ? `<span>${esc(u.body)}</span>` : ''}</div>
-      <button class="atl-icon" data-dismiss="${esc(u.id)}" aria-label="Dismiss">✕</button></div>`).join('');
-    this.querySelectorAll('[data-dismiss]').forEach(b => b.addEventListener('click', async () => {
-      await post('/api/update-dismiss', { id:b.dataset.dismiss });
-      await refresh();
-    }));
-  }
-}
-customElements.define('atelier-update', AtelierUpdate);
-
-// ===== desktop notifications =========================================================
-// One switch for the whole Surface, and only two things ring it: an Update and a Ready. Anything
-// else would train the human to ignore it. Define this before Cockpit upgrades call notifyOn().
-const NOTIFY = 'atelier:notify';
-const notifyOn = () => { try { return localStorage.getItem(NOTIFY) === 'on' && Notification?.permission === 'granted'; } catch { return false; } };
-async function toggleNotifications(){
-  try {
-    if (notifyOn()){ localStorage.setItem(NOTIFY, 'off'); return; }
-    const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
-    localStorage.setItem(NOTIFY, permission === 'granted' ? 'on' : 'off');
-  } catch {}
-}
-function notify(title, body){
-  if (!notifyOn()) return;
-  try { new Notification(title, { body, tag:'atelier' }); } catch {}
-}
-
-// ===== cockpit =======================================================================
-// The whole Surface's open loops in one list, split by whose turn it is. Placed by the agent
-// (sidebar, header, wherever), never auto-mounted — a Surface with one Region does not need one.
-class AtelierCockpit extends HTMLElement {
-  connectedCallback(){
-    this.className = 'atl-cockpit';
-    this.filter = this.getAttribute('owner') || 'human';
-    this.innerHTML = `<div class="atl-cockpit__head">
-        <div class="atl-cockpit__filters">
-          <button class="atl-btn" data-filter="human">You</button>
-          <button class="atl-btn" data-filter="agent">Agent</button>
-          <button class="atl-btn" data-filter="">All</button>
-        </div>
-        <button class="atl-btn" data-notify></button>
-      </div><div class="atl-cockpit__list"></div>`;
-    this.list = this.querySelector('.atl-cockpit__list');
-    this.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
-      this.filter = b.dataset.filter; this.render();
-    }));
-    this.querySelector('[data-notify]').addEventListener('click', () => toggleNotifications().then(()=>this.render()));
-    this.unsub = subscribe(()=>this.render());
-    this.render();
-  }
-  disconnectedCallback(){ this.unsub?.(); }
-  render(){
-    const items = attention().filter(a => !this.filter || a.owner === this.filter);
-    this.querySelectorAll('[data-filter]').forEach(b =>
-      b.classList.toggle('atl-btn--on', b.dataset.filter === this.filter));
-    const toggle = this.querySelector('[data-notify]');
-    toggle.textContent = notifyOn() ? '🔔 Desktop on' : '🔕 Desktop off';
-    toggle.classList.toggle('atl-btn--on', notifyOn());
-    this.list.innerHTML = items.length
-      ? items.map(a => `<button class="atl-cockpit__row" data-goto="${esc(a.region)}" data-kind="${esc(a.kind)}" data-interaction-id="${esc(a.id)}">
-          <span class="atl-badge ${a.kind==='changed'?'atl-badge--changed':''}">${esc(a.kind)}</span>
-          <span class="atl-cockpit__label">${esc(a.label)}</span>
-          <span class="atl-cockpit__region">${esc(a.region)}</span></button>`).join('')
-      : `<div class="atl-state">Nothing waiting.</div>`;
-    this.list.querySelectorAll('[data-goto]').forEach(button => button.addEventListener('click', () => reveal({
-      region:button.dataset.goto, kind:button.dataset.kind, id:button.dataset.interactionId,
-    })));
-  }
-}
-customElements.define('atelier-cockpit', AtelierCockpit);
-
-// Dynamic Surfaces own filtering, selection and Region creation. Registering one resolver lets
-// them do that work before the kernel mounts chrome and locates the exact interaction.
-let revealResolver = null;
-export function setRevealResolver(resolver){ revealResolver = typeof resolver === 'function' ? resolver : null; }
-const THREAD_ATTENTION = new Set(['request', 'verdict', 'rework']);
-const exact = (root, attribute, id) => [...root.querySelectorAll(`[${attribute}]`)]
-  .find(el => el.getAttribute(attribute) === String(id)) || null;
-function interactionElements(region, item){
-  if (!item.kind) return { host:region, control:region };
-  let host = null, control = null;
-  if (item.kind === 'changed'){
-    host = region.querySelector(':scope > .atl-bar atelier-attention');
-    control = host?.querySelector('[data-ack]');
-  } else if (item.kind === 'update'){
-    host = exact(region, 'data-update', item.id);
-    control = host?.querySelector('[data-dismiss]');
-  } else if (item.kind === 'decision'){
-    host = exact(region, 'data-proposal', item.id);
-    control = host?.querySelector('[data-choose]');
-  } else if (item.kind === 'explanation'){
-    const split = String(item.id).lastIndexOf(':'), id = String(item.id).slice(0, split), index = Number(String(item.id).slice(split + 1));
-    const proposal = exact(region, 'data-proposal', id);
-    host = proposal?.querySelectorAll('.atl-option')[index] || null;
-    control = host;
-  } else if (THREAD_ATTENTION.has(item.kind)){
-    const comments = item.comments?.isConnected ? item.comments.querySelectorAll('[data-comment]') : document.querySelectorAll('[data-comment]');
-    host = [...comments].find(el =>
-      el.dataset.comment === String(item.id) && el.closest('atelier-comments')?.region === region.regionKey) || null;
-    control = item.kind === 'verdict' ? host?.querySelector('[data-accept]') : host;
-  }
-  return { host, control };
-}
-function focusControl(control){
-  const temporary = !control.matches('button, input, textarea, select, a, [tabindex]');
-  if (temporary){
-    control.tabIndex = -1;
-    control.addEventListener('blur', () => control.removeAttribute('tabindex'), { once:true });
-  }
-  control.focus({ preventScroll:true });
-  if (document.activeElement === control) return true;
-  if (temporary) control.removeAttribute('tabindex');
-  return false;
-}
-function focusInteraction(item){
-  if (item.cockpit?.isConnected){
-    const row = [...item.cockpit.querySelectorAll('.atl-cockpit__row')].find(el =>
-      el.dataset.goto === item.region && el.dataset.kind === item.kind && el.dataset.interactionId === String(item.id));
-    if (row){ row.focus({ preventScroll:true }); return true; }
-  }
-  const region = findRegion(item.region);
-  if (!region) return false;
-  const { control } = interactionElements(region, item);
-  if (!control) return false;
-  return focusControl(control);
-}
-function captureInteractionFocus(){
-  const active = document.activeElement;
-  if (!(active instanceof HTMLElement)) return null;
-  const row = active.closest('.atl-cockpit__row');
-  if (row) return { cockpit:row.closest('atelier-cockpit'), region:row.dataset.goto, kind:row.dataset.kind, id:row.dataset.interactionId };
-  const comments = active.closest('atelier-comments'), region = comments?.region || active.closest('atelier-region')?.regionKey;
+function anchorFromElement(el, event) {
+  const region = el.closest('atelier-region');
   if (!region) return null;
-  const update = active.closest('[data-update]');
-  if (update) return { region, kind:'update', id:update.dataset.update };
-  const proposal = active.closest('[data-proposal]');
-  if (proposal && active.matches('.atl-option')){
-    const options = [...proposal.querySelectorAll('.atl-option')], index = options.indexOf(active);
-    return { region, kind:'explanation', id:`${proposal.dataset.proposal}:${index}` };
+  if (el === region) return { region: region.regionKey };
+  const target = el.closest('svg') || el, a = { region: region.regionKey, selector: selectorFor(target, region) };
+  if (target.tagName === 'IMG' || target.tagName.toLowerCase() === 'svg') {
+    const r = target.getBoundingClientRect();
+    a.point = { x: +((event.clientX - r.left) / r.width).toFixed(3), y: +((event.clientY - r.top) / r.height).toFixed(3) };
   }
-  if (proposal && active.matches('[data-choose]')) return { region, kind:'decision', id:proposal.dataset.proposal };
-  const comment = active.closest('[data-comment]');
-  if (comment && (active === comment || active.matches('[data-accept]'))){
-    const value = S.commentState[comment.dataset.comment]?.value;
-    const kind = value === 'implemented' ? 'verdict' : value === 'rejected' ? 'rework'
-      : ['open','acknowledged','in_progress'].includes(value) ? 'request' : null;
-    return kind ? { region, kind, id:comment.dataset.comment, comments } : null;
-  }
-  if (active.matches('[data-ack]')) return { region, kind:'changed', id:region };
-  return null;
+  return a;
 }
-function revealFailure(item, error){
-  const reason = error ? `: ${error.message || error}` : '';
-  warn(`Could not reveal ${item.kind || 'Region'} ${item.id || item.region || ''} in ${item.region || 'this Surface'}${reason}`, 'reveal');
-  return false;
+function openNew(anchor) {
+  const id = 'c-' + Math.random().toString(36).slice(2, 10);
+  pending.set(id, { id, region: anchor.region, anchor, text: '' });
+  saveDrafts(); active = id; getSelection().removeAllRanges(); float.hidden = true; render();
+  requestAnimationFrame(() => $(`[data-card="${id}"] textarea`)?.focus({ preventScroll: true }));
 }
-function finishReveal(item){
-  mountAll();
-  const region = findRegion(item.region);
-  if (!region) return revealFailure(item);
-  if (THREAD_ATTENTION.has(item.kind) && region.placement === 'sheet' &&
-      sheet?.querySelector('atelier-comments')?.region !== region.regionKey)
-    openSheet(region.regionKey, region.label, region.querySelector(':scope > .atl-bar .atl-comment-btn'));
-  const { host, control } = interactionElements(region, item);
-  if (!host || !control || !host.getClientRects().length || !control.getClientRects().length) return revealFailure(item);
-  host.scrollIntoView({ behavior:'smooth', block:'center' });
-  host.classList.add('atl-flash');
-  setTimeout(()=>host.classList.remove('atl-flash'), 1200);
-  if (!focusControl(control)) return revealFailure(item);
-  warn('', 'reveal');
-  return true;
+function saveDrafts() {
+  const out = {};
+  for (const [id, p] of pending) out[id] = { ...p, text: $(`[data-card="${id}"] textarea`)?.value ?? p.text ?? '' };
+  try { localStorage.setItem(DRAFTS, JSON.stringify(out)); } catch {}
 }
-export function reveal(region, interaction = {}){
-  const item = region && typeof region === 'object' ? region : { ...interaction, region };
-  if (!item.region) return revealFailure(item);
-  let pending;
-  try { pending = revealResolver?.(item); }
-  catch (error){ return revealFailure(item, error); }
-  return pending?.then ? pending.then(() => finishReveal(item)).catch(error => revealFailure(item, error)) : finishReveal(item);
-}
+try { for (const [id, p] of Object.entries(JSON.parse(localStorage.getItem(DRAFTS) || '{}'))) pending.set(id, p); } catch {}
 
-// ===== chrome mounting ===============================================================
-// One pass after parse (and after every swap): give each Region its marker, comment affordance and
-// thread mount, without disturbing the agent's own markup.
-function mountRegion(el){
-  if (el._mounted) return;
-  el._mounted = true;
-  const bar = document.createElement('div');
-  bar.className = 'atl-bar';
-  bar.innerHTML = `<atelier-attention></atelier-attention>
-    <button class="atl-icon atl-comment-btn" aria-label="Comment on ${esc(el.label)}" title="Comment on ${esc(el.label)}">
-      <span aria-hidden="true">💬</span><span class="atl-count"></span></button>`;
-  el.prepend(bar);
-
-  // An agent message must never be invisible: every Region hosts its own Updates and Proposals
-  // above the content, and both render nothing at all when there is nothing pending.
-  const updates = document.createElement('atelier-update');
-  const proposals = document.createElement('atelier-proposal');
-  updates.setAttribute('for', el.regionKey);
-  proposals.setAttribute('for', el.regionKey);
-  bar.after(updates, proposals);
-
-  const placement = el.placement;
-  el.classList.add('atl-region', `atl-region--${placement}`);
-  if (placement !== 'sheet'){
-    const mount = document.createElement('atelier-comments');
-    mount.setAttribute('for', el.regionKey);
-    el.append(mount);
-    el._thread = mount;
-  }
-  bar.querySelector('.atl-comment-btn').addEventListener('click', event => {
-    if (placement === 'sheet') openSheet(el.regionKey, el.label, event.currentTarget);
-    else el._thread?.querySelector('.atl-compose .atl-input')?.focus();
+const float = document.createElement('button');
+float.className = 'atl-float'; float.type = 'button'; float.textContent = '💬 Thread'; float.hidden = true;
+float.addEventListener('mousedown', e => e.preventDefault());
+float.addEventListener('click', () => float._anchor && openNew(float._anchor));
+document.addEventListener('mouseup', e => {
+  if (e.target.closest?.(CHROME)) return;
+  setTimeout(() => {
+    const a = anchorFromSelection();
+    if (!a) { float.hidden = true; return; }
+    const r = getSelection().getRangeAt(0).getBoundingClientRect();
+    float._anchor = a; float.hidden = false;
+    float.style.top = `${scrollY + r.bottom + 6}px`; float.style.left = `${scrollX + Math.min(r.right, innerWidth - 120)}px`;
   });
-}
-function mountAll(){
-  regionEls().forEach(mountRegion);
-  renderCounts();
-}
-function renderCounts(){
-  for (const el of regionEls()){
-    const n = threadOf(el.regionKey).filter(c => S.sent[c.id]).length;
-    const badge = el.querySelector(':scope > .atl-bar .atl-count');
-    if (badge) badge.textContent = n ? String(n) : '';
+});
+
+let picking = false;
+function setPicking(on) { picking = on; document.documentElement.classList.toggle('atl-picking', on); renderActivity(); }
+document.addEventListener('mouseover', e => {
+  document.querySelectorAll('.atl-pick-hover').forEach(x => x.classList.remove('atl-pick-hover'));
+  if ((picking || e.altKey) && !e.target.closest?.(CHROME)) e.target.closest?.('atelier-region *, atelier-region')?.classList.add('atl-pick-hover');
+});
+const caretAt = (x, y) => {
+  const p = document.caretPositionFromPoint?.(x, y);
+  if (p) return [p.offsetNode, p.offset];
+  const r = document.caretRangeFromPoint?.(x, y);
+  return r ? [r.startContainer, r.startOffset] : null;
+};
+document.addEventListener('click', e => {
+  if (e.target.closest?.(CHROME)) return;
+  if (picking || e.altKey) {
+    const a = anchorFromElement(e.target, e);
+    if (a) { e.preventDefault(); e.stopPropagation(); setPicking(false); openNew(a); }
+    return;
   }
-}
+  if (getSelection().toString()) return;
+  const hit = cache.find(it => {                     // clicking anchored text or an anchored element opens its card
+    const res = it.res;
+    if (!res || res.detached || !it.anchor || (!res.range && res.el === res.root)) return false;
+    if (res.range) { const c = caretAt(e.clientX, e.clientY); return c && res.range.isPointInRange(...c); }
+    return res.el.contains(e.target);
+  });
+  if (hit) { active = hit.id; render(); }
+}, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && picking) setPicking(false); });
 
-// ===== sheet =========================================================================
-// One shared bottom panel for the whole Surface. A matching spacer keeps the page's last content
-// scrollable above it and follows textarea resizing.
-let sheet = null, sheetSpace = null, sheetOpener = null, sheetObserver = null;
-const sizeSheetSpace = () => { if (sheet && sheetSpace) sheetSpace.style.height = `${sheet.offsetHeight}px`; };
-function closeSheet(){
-  if (!sheet) return;
-  sheetObserver?.disconnect(); sheetObserver = null;
-  sheet.remove(); sheetSpace?.remove(); sheet = sheetSpace = null;
-  document.removeEventListener('keydown', onSheetKeydown);
-  const opener = sheetOpener; sheetOpener = null; if (opener?.isConnected) opener.focus();
-}
-function onSheetKeydown(event){
-  if (event.key === 'Escape' && sheet){ event.preventDefault(); closeSheet(); }
-}
-function openSheet(region, label, opener){
-  sheetOpener = opener;
-  if (!sheet){
-    sheetSpace = document.createElement('div'); sheetSpace.className = 'atl-sheet-space';
-    sheet = document.createElement('div'); sheet.className = 'atl-sheet';
-    document.body.append(sheetSpace, sheet);
-    sheetObserver = new ResizeObserver(sizeSheetSpace); sheetObserver.observe(sheet);
-    document.addEventListener('keydown', onSheetKeydown);
+// ===== what the margin shows ========================================================
+let cache = [];
+function items() {
+  const out = [], all = Object.values(S.threads || {}).flat();
+  for (const [region, list] of Object.entries(S.threads || {}))
+    for (const c of list) if (S.sent[c.id]) out.push({ kind: 'thread', id: c.id, region, anchor: c.anchor, c });
+  for (const p of pending.values()) out.push({ kind: 'new', id: p.id, region: p.region, anchor: p.anchor, c: p });
+  for (const pr of Object.values(S.proposals || {})) {
+    const owner = pr.threadId && all.find(c => c.id === pr.threadId);
+    out.push({ kind: 'proposal', id: pr.id, region: pr.region, anchor: pr.anchor || owner?.anchor, pr });
   }
-  sheet.innerHTML = `<div class="atl-sheet__head"><b></b><button class="atl-icon" data-close aria-label="Close">✕</button></div>`;
-  sheet.querySelector('b').textContent = label;
-  const mount = document.createElement('atelier-comments');
-  mount.setAttribute('for', region); sheet.append(mount);
-  sheet.querySelector('[data-close]').addEventListener('click', closeSheet);
-  requestAnimationFrame(sizeSheetSpace);
-  mount.querySelector('.atl-compose .atl-input')?.focus();
+  return out.map(it => ({ ...it, res: resolve(it.anchor, it.region) }));
 }
 
-// ===== live loop =====================================================================
-export async function refresh(){ await pull(); emit(); renderCounts(); }
+customElements.define('atelier-margin', class extends HTMLElement {
+  connectedCallback() { this.setAttribute('role', 'complementary'); if (!this.hasAttribute('aria-label')) this.setAttribute('aria-label', 'Threads'); }
+});
 
-let pollCursor = 0;
-async function pollLoop(){
-  for (;;){
+const STATE = { open: 'Sent', acknowledged: 'Seen by agent', in_progress: 'Agent working', implemented: 'Done — check it', accepted: 'Accepted', rejected: 'Reopened' };
+function where(it) {
+  if (!it.res) return '<div class="atl-detached">Its section is no longer on this page.</div>';
+  return it.res.detached ? '<div class="atl-detached">The part this pointed at has changed.</div>' : '';
+}
+function proposalHTML(it, open) {
+  const pr = it.pr, decided = pr.status === 'decided';
+  const choice = pr.custom || pr.options?.[pr.choiceIndex] || '';
+  if (decided && !open) return `<button class="atl-card atl-card--line atl-card--decided" data-open="${it.id}">✓ <b>Decided</b> · ${esc(String(choice).split(/[.:;(]/)[0])}</button>`;
+  const opt = (o, i) => {
+    const req = pr.explanationRequests?.[i], ex = pr.explanations?.[i];
+    return `<div class="atl-opt-row"><button class="atl-opt ${pr.choiceIndex === i ? 'is-chosen' : ''}" data-decide="${it.id}" data-i="${i}" ${decided ? 'disabled' : ''}>${i === 0 ? '<span class="atl-rec">Recommended</span> ' : ''}${esc(o)}</button>
+      ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? '<div class="atl-meta">Explanation requested</div>' : decided ? ''
+        : `<details class="atl-ask"><summary>Explain this option</summary><textarea data-explain-text="${it.id}:${i}" placeholder="What is unclear?"></textarea><button class="atl-btn" data-explain="${it.id}" data-i="${i}">Ask</button></details>`}</div>`;
+  };
+  return `<div class="atl-card atl-card--decision ${open ? 'is-open' : ''}" data-card="${it.id}">${where(it)}
+    <div class="atl-kicker">${decided ? 'Decided' : 'Decision needed'}</div>
+    <p class="atl-q">${esc(pr.question)}</p>
+    ${(pr.options || []).map(opt).join('')}
+    ${decided ? (pr.custom ? `<div class="atl-msg atl-msg--you">${esc(pr.custom)}</div>` : '') + '<button class="atl-link" data-open="">Collapse</button>'
+      : `<textarea placeholder="Or answer in your own words…" data-custom="${it.id}"></textarea><div class="atl-row"><button class="atl-btn atl-btn--primary" data-decide-custom="${it.id}">Send answer</button></div>`}
+  </div>`;
+}
+function cardHTML(it) {
+  const open = it.id === active;
+  if (it.kind === 'proposal') return proposalHTML(it, open);
+  const c = it.c, st = S.commentState[c.id]?.value, replies = S.replies[c.id] || [];
+  const quote = it.anchor?.quote ? `<blockquote>${esc(it.anchor.quote.slice(0, 140))}</blockquote>` : '';
+  if (it.kind === 'new') return `<div class="atl-card is-open" data-card="${it.id}">${quote}
+      <textarea data-new placeholder="Start a Thread…  (⌘+Enter sends)">${esc(c.text || '')}</textarea>
+      <div class="atl-row"><button class="atl-btn atl-btn--primary" data-send="${it.id}">Send</button><button class="atl-link" data-discard="${it.id}">Discard</button></div></div>`;
+  if (!open) return `<button class="atl-card atl-card--line ${st === 'implemented' ? 'is-yours' : ''}" data-open="${it.id}">
+      <span class="atl-first">${esc(c.text)}</span><span class="atl-meta">${replies.length ? replies.length + (replies.length > 1 ? ' replies' : ' reply') + ' · ' : ''}${STATE[st] || ''}</span></button>`;
+  return `<div class="atl-card is-open" data-card="${it.id}">${quote}${where(it)}
+      <div class="atl-msg atl-msg--you">${esc(c.text)}</div>
+      ${replies.map(r => `<div class="atl-msg ${r.author === 'human' ? 'atl-msg--you' : ''}"><span class="atl-who">${r.author === 'human' ? 'You' : 'Agent'}</span>${esc(r.msg)}</div>`).join('')}
+      <div class="atl-state">${STATE[st] || ''}</div>
+      <textarea data-reply-text="${it.id}" placeholder="${st === 'implemented' ? 'Reply, or say what is still wrong…' : 'Reply…'}  (⌘+Enter sends)"></textarea>
+      <div class="atl-row"><button class="atl-btn ${st === 'implemented' ? '' : 'atl-btn--primary'}" data-reply="${it.id}">Reply</button>
+      ${st === 'implemented' ? `<button class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}
+      <button class="atl-link" data-open="">Collapse</button></div></div>`;
+}
+
+const highlights = typeof Highlight !== 'undefined' && CSS.highlights;
+function render() {
+  const margin = $('atelier-margin');
+  cache = items();
+  document.querySelectorAll('.atl-el-anchor,.atl-el-active').forEach(e => e.classList.remove('atl-el-anchor', 'atl-el-active'));
+  if (highlights) {
+    CSS.highlights.set('atl-anchor', new Highlight(...cache.filter(i => i.res?.range && i.id !== active).map(i => i.res.range)));
+    CSS.highlights.set('atl-active', new Highlight(...cache.filter(i => i.res?.range && i.id === active).map(i => i.res.range)));
+  }
+  for (const it of cache) if (it.res?.el && !it.res.range && !it.res.detached && it.anchor && it.res.el !== it.res.root)
+    it.res.el.classList.add(it.id === active ? 'atl-el-active' : 'atl-el-anchor');
+  if (margin) {
+    const focused = margin.querySelector('textarea:focus');
+    const typed = [...margin.querySelectorAll('textarea')].map(t => [t.closest('[data-card]')?.dataset.card, textareaKind(t), t.value]);
+    margin.innerHTML = `<div class="atl-margin-head">Threads · select text or Alt+click anything</div>` +
+      cache.map(it => `<div class="atl-slot" data-slot="${it.id}">${cardHTML(it)}</div>`).join('');
+    for (const [id, kind, v] of typed) { const ta = findTextarea(margin, id, kind); if (ta && v) ta.value = v; }
+    const ta = focused && findTextarea(margin, focused.closest('[data-card]')?.dataset.card, textareaKind(focused));
+    // preventScroll: the card is not placed yet, and focusing it at its unplaced spot scrolls the page
+    if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(focused.selectionStart, focused.selectionEnd); }
+    layout();
+  }
+  renderActivity();
+}
+const textareaKind = t => t.dataset.replyText ? 'reply' : t.dataset.custom ? 'custom' : t.dataset.explainText ? 'explain:' + t.dataset.explainText : 'new';
+const findTextarea = (m, id, kind) => [...m.querySelectorAll(`[data-card="${id}"] textarea`)].find(t => textareaKind(t) === kind);
+
+// Each card sits level with its anchor, pushed down to avoid overlap; the active card is exact.
+function layout() {
+  const margin = $('atelier-margin');
+  if (!margin || getComputedStyle(margin).position === 'fixed') return;
+  const base = margin.getBoundingClientRect().top;
+  const slots = cache.map(it => ({ it, el: margin.querySelector(`[data-slot="${it.id}"]`), want: it.res ? topOf(it.res) - base : null }))
+    .filter(s => s.el).sort((a, b) => (a.want ?? Infinity) - (b.want ?? Infinity));
+  // The active card is exact; any other card that would overlap it moves below it.
+  const act = slots.find(s => s.it.id === active && s.want != null);
+  const A = act ? Math.max(36, act.want) : null, AEnd = act ? A + act.el.offsetHeight + 8 : null;
+  if (act) act.el.style.top = A + 'px';
+  let y = 36;
+  for (const s of slots) {
+    if (s === act) continue;
+    if (s.want != null) y = Math.max(y, s.want);
+    const h = s.el.offsetHeight + 8;
+    if (act && y < AEnd && y + h > A) y = AEnd;
+    s.el.style.top = y + 'px'; y += h;
+  }
+  y = Math.max(y, AEnd ?? 0);
+  margin.style.minHeight = y + 'px';
+}
+let raf = 0;
+const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(layout); };
+addEventListener('resize', schedule);
+document.addEventListener('scroll', e => { if (e.target !== document) schedule(); }, true);   // inner scrollers
+new ResizeObserver(schedule).observe(document.documentElement);
+
+// ===== margin actions ===============================================================
+const itemOf = id => cache.find(i => i.id === id);
+async function sendNew(id) {
+  const p = pending.get(id), text = $(`[data-card="${id}"] textarea`)?.value.trim();
+  if (!p || !text) return;
+  (S.threads[p.region] ||= []).push({ id, text, anchor: p.anchor });
+  await post('/api/state', { threads: S.threads });
+  await post('/api/send', { region: p.region, id });
+  pending.delete(id); saveDrafts(); await refresh();
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest?.('atelier-margin button'); if (!b) return;
+  const d = b.dataset, value = sel => $(sel)?.value.trim();
+  if ('open' in d) {
+    active = d.open || null; render();
+    const r = active && $(`[data-card="${active}"]`)?.getBoundingClientRect();
+    if (r && r.bottom > innerHeight - 12) scrollBy({ top: Math.min(r.bottom - innerHeight + 24, r.top - 80), behavior: 'smooth' });
+    return;
+  }
+  if (d.send) return sendNew(d.send);
+  if (d.discard) { pending.delete(d.discard); saveDrafts(); active = null; return render(); }
+  if (d.reply) { const msg = value(`[data-reply-text="${d.reply}"]`); if (!msg) return;
+    await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg }); $(`[data-reply-text="${d.reply}"]`).value = ''; return refresh(); }
+  if (d.accept) { await post('/api/comment-state', { region: itemOf(d.accept).region, id: d.accept, state: 'accepted' }); return refresh(); }
+  if (d.reject) { const ta = $(`[data-reply-text="${d.reject}"]`), msg = ta.value.trim();
+    if (!msg) { ta.placeholder = 'Say what is still wrong, then Reopen'; return ta.focus({ preventScroll: true }); }
+    await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); ta.value = ''; return refresh(); }
+  if (d.decide) { await post('/api/decide', { id: d.decide, choiceIndex: +d.i }); return refresh(); }
+  if (d.decideCustom) { const custom = value(`[data-custom="${d.decideCustom}"]`); if (!custom) return;
+    await post('/api/decide', { id: d.decideCustom, choiceIndex: null, custom }); return refresh(); }
+  if (d.explain) { const answer = value(`[data-explain-text="${d.explain}:${d.i}"]`); if (!answer) return;
+    await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); return refresh(); }
+});
+document.addEventListener('mouseover', e => {
+  const card = e.target.closest?.('atelier-margin [data-slot]');
+  document.querySelectorAll('.atl-el-hover').forEach(x => x.classList.remove('atl-el-hover'));
+  if (highlights) CSS.highlights.delete('atl-hover');
+  const it = card && itemOf(card.dataset.slot);
+  if (it?.res?.range && highlights) CSS.highlights.set('atl-hover', new Highlight(it.res.range));
+  else if (it?.res?.el && it.anchor && it.res.el !== it.res.root) it.res.el.classList.add('atl-el-hover');
+});
+document.addEventListener('keydown', e => {
+  const ta = e.target.closest?.('atelier-margin textarea'); if (!ta || e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+  e.preventDefault();
+  (ta.closest('details') || ta.closest('[data-card]')).querySelector('[data-send],[data-reply],[data-decide-custom],[data-explain]')?.click();
+});
+document.addEventListener('input', e => { if (e.target.closest?.('atelier-margin [data-new]')) saveDrafts(); });
+
+// ===== notifications: on by default, asked for on the first gesture ==================
+const NOTIFY = 'atelier:notify';
+const hasNotify = typeof Notification !== 'undefined';
+const notifyOn = () => { try { return localStorage.getItem(NOTIFY) !== 'off' && hasNotify && Notification.permission === 'granted'; } catch { return false; } };
+document.addEventListener('pointerdown', () => {
+  if (hasNotify && Notification.permission === 'default' && localStorage.getItem(NOTIFY) !== 'off') Notification.requestPermission().then(renderActivity);
+}, { once: true });
+const notify = (title, body) => { if (notifyOn() && document.hidden) new Notification(title, { body }); };
+
+// ===== <atelier-activity>: header tools + one drawer ================================
+customElements.define('atelier-activity', class extends HTMLElement {
+  connectedCallback() {
+    if (this._built) return; this._built = true;
+    this.innerHTML = `<div class="atl-tools"></div><div class="atl-drawer" id="atl-drawer" popover></div>`;
+    this.addEventListener('click', async e => {
+      const b = e.target.closest('button'); if (!b) return;
+      const d = b.dataset, drawer = $('#atl-drawer');
+      if ('pick' in d) return setPicking(!picking);
+      if ('notify' in d) { localStorage.setItem(NOTIFY, notifyOn() ? 'off' : 'on');
+        if (hasNotify && Notification.permission === 'default') await Notification.requestPermission(); return renderActivity(); }
+      if (d.dismiss) { await post('/api/update-dismiss', { id: d.dismiss }); return refresh(); }
+      if (d.ack) { await post('/api/ack', { region: d.ack }); return refresh(); }
+      if (d.go) { drawer.hidePopover(); regionEl(d.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      if (d.reveal) { drawer.hidePopover(); reveal(d.reveal); }
+    });
+  }
+});
+// Scroll to an interaction's anchor and expand its card.
+export function reveal(id) {
+  const it = itemOf(id); if (!it) return;
+  const target = it.res?.range ? it.res.range.startContainer.parentElement : it.res?.el;
+  target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  active = id; render();
+}
+function renderActivity() {
+  const el = $('atelier-activity'); if (!el?._built) return;
+  const ups = Object.values(S.updates || {}).filter(u => !u.dismissedAt);
+  const changed = Object.keys(S.changed || {}).filter(k => regionEl(k));
+  const waiting = cache.filter(i => i.kind === 'proposal' && i.pr.status === 'open' || i.kind === 'thread' && S.commentState[i.id]?.value === 'implemented');
+  const news = ups.length + changed.length;
+  el.querySelector('.atl-tools').innerHTML = `
+    <button class="atl-btn ${picking ? 'atl-btn--primary' : ''}" data-pick title="Or hold Alt and click">${picking ? 'Click anything… (Esc)' : '💬 Comment on…'}</button>
+    <button class="atl-btn ${waiting.length ? 'atl-btn--warn' : ''}" popovertarget="atl-drawer">${waiting.length ? `${waiting.length} waiting for you` : 'Activity'}${news ? ` · ${news} new` : ''}</button>`;
+  el.querySelector('.atl-drawer').innerHTML = `
+    <div class="atl-drawer-head"><b>Activity</b><button class="atl-link" popovertarget="atl-drawer" popovertargetaction="hide">Close</button></div>
+    ${waiting.length ? `<h4>Waiting for you</h4>${waiting.map(i => `<button class="atl-feed-item atl-feed-btn" data-reveal="${i.id}">${i.kind === 'proposal' ? '<b>Decide:</b> ' + esc(i.pr.question) : '<b>Check:</b> ' + esc(i.c.text)}<span>${esc(labelOf(i.anchor?.region || i.region))}</span></button>`).join('')}` : ''}
+    ${changed.length ? `<h4>Changed since you looked</h4>${changed.map(k => `<div class="atl-feed-item"><button class="atl-link" data-go="${esc(k)}">${esc(labelOf(k))}</button> <button class="atl-link" data-ack="${esc(k)}">✓ Seen</button></div>`).join('')}` : ''}
+    ${ups.length ? `<h4>Updates</h4>${ups.map(u => `<div class="atl-feed-item"><b>${esc(u.title)}</b>${u.body ? `<p>${esc(u.body)}</p>` : ''}<button class="atl-link" data-dismiss="${u.id}">Dismiss</button></div>`).join('')}` : ''}
+    ${waiting.length || news ? '' : '<p class="atl-hint">Nothing new.</p>'}
+    <button class="atl-link" data-notify>${notifyOn() ? '🔔 Desktop notifications on' : '🔕 Desktop notifications off'}</button>`;
+  document.querySelectorAll('atelier-region.atl-changed').forEach(r => r.classList.remove('atl-changed'));
+  changed.forEach(k => regionEl(k)?.classList.add('atl-changed'));
+}
+
+// ===== warnings =====================================================================
+// The server keeps no Region registry, so a mistyped key in a Ready can only be caught here.
+function warn(message) {
+  let stack = $('.atl-warnings');
+  if (!message) { stack?.remove(); return; }
+  if (!stack) { stack = document.createElement('div'); stack.className = 'atl-warnings'; stack.setAttribute('role', 'alert'); document.body.append(stack); }
+  stack.textContent = message;
+}
+
+// ===== Ready: swap only the named Regions into the open page ========================
+// The margin, header and drawer sit outside every Region, so drafts, open cards and focus survive;
+// the browser's scroll anchoring keeps the reading place.
+async function onReady(named) {
+  if (!named?.length) return;
+  let doc;
+  try { doc = new DOMParser().parseFromString(await (await fetch(location.pathname, { cache: 'no-store' })).text(), 'text/html'); }
+  catch { return; }
+  const path = el => { const ks = []; for (let e = el; e; e = e.parentElement?.closest('atelier-region')) ks.unshift(e.getAttribute('key')); return ks.join('/'); };
+  const incoming = new Map([...doc.querySelectorAll('atelier-region')].map(el => [path(el), el]));
+  // ponytail: a Region new to the page reloads rather than being inserted; insert it if Readys add Regions often
+  if (named.some(k => incoming.has(k) && !regionEl(k))) { saveDrafts(); return location.reload(); }
+  for (const key of named) { const cur = regionEl(key), next = incoming.get(key); if (cur && next) cur.replaceWith(document.importNode(next, true)); }
+  const unknown = named.filter(k => !incoming.has(k));
+  warn(unknown.length ? `Ready named ${unknown.length} Region(s) this page does not contain: ${unknown.join(', ')}` : '');
+  document.dispatchEvent(new CustomEvent('atelier:ready', { detail: { changed: named, unknown } }));
+}
+
+// ===== state + live loop ============================================================
+export async function refresh() { S = await fetch('/api/state', { cache: 'no-store' }).then(r => r.json()); render(); }
+async function loop() {
+  for (;;) {
     try {
-      const r = await fetch('/api/poll?cursor=' + encodeURIComponent(pollCursor));
-      const j = await r.json();
-      pollCursor = j.cursor || pollCursor;
-      if (j.events?.length){
-        await refresh();
-        for (const e of j.events){
-          if (e.kind === 'ready') onReady(e);
-          if (e.kind === 'update') notify(e.title || 'Update', e.region || '');
-        }
-        const ready = j.events.filter(e => e.kind === 'ready').pop();
-        if (ready) notify('Ready to review', `${(ready.changed||[]).length} Region(s) changed`);
-      }
+      const r = await fetch('/api/poll?cursor=' + S.seq).then(x => x.json());
       document.documentElement.removeAttribute('data-atl-offline');
+      if (!r.events?.length) continue;
+      for (const ev of r.events) {
+        if (ev.kind === 'ready') { await onReady(ev.changed); notify('Page updated', (ev.changed || []).map(labelOf).join(', ')); }
+        if (ev.kind === 'reply') notify('Agent replied', labelOf(ev.region));
+        if (ev.kind === 'proposal') notify('Decision needed', labelOf(ev.region));
+        if (ev.kind === 'update') notify(ev.title || 'Update', labelOf(ev.region));
+      }
+      await refresh();
     } catch {
       document.documentElement.setAttribute('data-atl-offline', '');
       await new Promise(res => setTimeout(res, 3000));
-      // A long-poll answers only when something happens, so waiting for one to succeed would leave
-      // a recovered Surface looking dead for up to 25 seconds. Probe with a cheap read instead, and
-      // leave the cursor alone so the next poll still delivers whatever was missed while offline.
+      // A long-poll answers only when something happens; probe with a cheap read so a recovered
+      // server does not look dead for 25 seconds. The cursor stays, so nothing missed is lost.
       try { await refresh(); document.documentElement.removeAttribute('data-atl-offline'); } catch {}
     }
   }
 }
-
-// Ready is the agent's turn boundary and the ONLY trigger that changes what is on screen.
-// Only the named Regions are replaced: everything else keeps its scroll position, and Threads are
-// separate elements whose content comes from the store, so nothing in flight is lost.
-async function onReady(event){
-  const named = event.changed || [];
-  if (!named.length) return;
-  let doc;
-  try {
-    const r = await fetch(location.pathname, { cache:'no-store' });
-    doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-  } catch { return; }
-
-  const incoming = new Map([...doc.querySelectorAll('atelier-region')].map(el => [regionPath(el), el]));
-  const unknown = named.filter(key => !incoming.has(key));
-  // A named Region that exists in the new document but not in the open page is a structural
-  // change, not a content change: reload rather than guess where it belongs.
-  const added = named.filter(key => incoming.has(key) && !findRegion(key));
-  if (added.length) return location.reload();
-
-  const focused = captureInteractionFocus();
-  for (const key of named){
-    const current = findRegion(key), next = incoming.get(key);
-    if (!current || !next) continue;
-    current.replaceWith(document.importNode(next, true));
-  }
-  mountAll();
-  emit(focused);
-  warn(unknown.length ? `Ready named ${unknown.length} Region(s) this Surface does not contain: ${unknown.join(', ')}` : '');
-  document.dispatchEvent(new CustomEvent('atelier:ready', { detail:{ changed:named, unknown } }));
+async function boot() {
+  document.body.append(float);
+  try { await refresh(); } catch { document.documentElement.setAttribute('data-atl-offline', ''); }
+  loop();
 }
+document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', boot) : boot();
 
-// The server keeps no Region registry, so a mistyped key in a Ready can only be caught here.
-function warn(message, kind = 'ready'){
-  let stack = document.querySelector('.atl-warnings');
-  let bar = stack?.querySelector(`.atl-warn[data-warning="${kind}"]`);
-  if (!message){ bar?.remove(); if (stack && !stack.children.length) stack.remove(); return; }
-  if (!stack){ stack = document.createElement('div'); stack.className = 'atl-warnings'; document.body.prepend(stack); }
-  if (!bar){
-    bar = document.createElement('div'); bar.className = 'atl-warn';
-    bar.dataset.warning = kind; bar.setAttribute('role', 'alert'); stack.append(bar);
-  }
-  bar.textContent = message;
+// For preflight: every stored Thread or Proposal whose anchor no longer finds its target.
+export function unresolvedAnchors() {
+  return items().filter(i => i.kind !== 'new' && (!i.res || i.res.detached))
+    .map(i => ({ id: i.id, region: i.anchor?.region || i.region, reason: i.res ? 'target changed' : 'Region missing' }));
 }
-
-async function boot(){
-  await pull();
-  mountAll();
-  emit();
-  pollCursor = S.seq;                                 // start live: history is already in the state
-  pollLoop();
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-else boot();

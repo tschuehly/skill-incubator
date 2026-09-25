@@ -1,169 +1,81 @@
-/* atelier chrome — every selector is .atl-* scoped.
-   No bare-tag rules: the content library (daisyUI/Tailwind) owns the agent's markup, this file
-   owns kernel chrome only, and neither can restyle the other by accident.
-   Colors derive from currentColor so any daisyUI theme carries through without configuration. */
-:root{
-  --atl-line: color-mix(in srgb, currentColor 18%, transparent);
-  --atl-soft: color-mix(in srgb, currentColor 6%, transparent);
-  --atl-accent: #f59e0b;
-  --atl-gutter: 320px;
-}
+/* atelier kernel chrome. Plain on purpose: it frames the content, it is not content.
+   Everything lives under .atl-* or the three kernel elements; authored content is never styled here. */
+atelier-region { display: block; }
+atelier-margin { position: relative; display: block; min-width: 0; font: 13px/1.45 system-ui, sans-serif; }
+.atl-margin-head { position: absolute; top: 0; left: 0; right: 0; color: #6b6f76; font-size: 12px; }
+.atl-slot { position: absolute; left: 0; right: 0; transition: top .12s ease-out; }
+.atl-card { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid #dcd8cc; border-radius: 8px;
+  padding: 8px 10px; color: #1d232a; font: inherit; box-shadow: 0 1px 2px #0000000d; }
+.atl-card--line { cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.atl-card--line:hover { border-color: #b98a3c; }
+.atl-card.is-open { border-color: #d2a24c; box-shadow: 0 4px 16px #0000001f; }
+.atl-card.is-yours { border-left: 3px solid #c37b10; }
+.atl-first { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.atl-meta, .atl-state, .atl-kicker { color: #6b6f76; font-size: 12px; }
+.atl-kicker { font-weight: 600; color: #8a5a00; }
+.atl-card blockquote { margin: 0 0 6px; padding: 2px 8px; border-left: 3px solid #f0c040; color: #4b5057; font-size: 12px; }
+.atl-msg { margin: 6px 0; padding: 6px 8px; background: #f4f2ec; border-radius: 6px; white-space: pre-wrap; }
+.atl-msg--you { background: #fff7e2; }
+.atl-who { display: block; font-size: 11px; font-weight: 600; color: #6b6f76; }
+.atl-card textarea { width: 100%; min-height: 56px; margin-top: 6px; padding: 6px; border: 1px solid #dcd8cc; border-radius: 6px; font: inherit; resize: vertical; }
+.atl-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.atl-btn { padding: 4px 10px; border: 1px solid #cfc9ba; border-radius: 6px; background: #fff; font: 13px system-ui, sans-serif; cursor: pointer; }
+.atl-btn--primary { background: #1d232a; color: #fff; border-color: #1d232a; }
+.atl-link { border: 0; background: none; padding: 2px 0; color: #8a5a00; font: 12px system-ui, sans-serif; cursor: pointer; }
+.atl-q { margin: 4px 0 6px; font-weight: 600; }
+.atl-opt { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 6px 8px; border: 1px solid #dcd8cc; border-radius: 6px; background: #fbfaf6; font: inherit; cursor: pointer; }
+.atl-opt:disabled { cursor: default; opacity: .6; }
+.atl-opt.is-chosen { opacity: 1; border-color: #3b7a4b; background: #eef6ee; }
+.atl-rec { font-size: 11px; font-weight: 700; color: #3b7a4b; }
+.atl-detached { color: #a33; font-size: 12px; }
 
-/* kernel element defaults — custom elements are inline until told otherwise */
-atelier-region, atelier-comments, atelier-cockpit{ display:block; }
-atelier-attention{ display:inline-flex; align-items:center; gap:4px; }
-/* An empty Updates or Proposals host must occupy nothing: every Region carries one, and most
-   Regions have neither pending. */
-atelier-update, atelier-proposal{ display:block; }
-atelier-update:empty, atelier-proposal:empty{ display:none; }
+::highlight(atl-anchor) { background-color: #fff0b8; }
+::highlight(atl-active) { background-color: #ffd462; }
+::highlight(atl-hover) { background-color: #ffd462; }
+.atl-el-anchor { outline: 2px solid #f3d27a; outline-offset: 3px; border-radius: 4px; }
+.atl-el-active, .atl-el-hover { outline: 2px solid #d49a1c; outline-offset: 3px; border-radius: 4px; }
+.atl-picking atelier-region *, .atl-picking atelier-region { cursor: crosshair; }
+.atl-pick-hover { outline: 2px dashed #d49a1c !important; outline-offset: 2px; }
+atelier-region.atl-changed { box-shadow: -4px 0 0 #d49a1c; }
 
-.atl-region{ position:relative; }
-.atl-region--side{ padding-right: calc(var(--atl-gutter) + 20px); }
-.atl-region--side > .atl-thread{
-  position:absolute; top:0; right:0; width:var(--atl-gutter);
-}
-/* Below the gutter's working width, side placement stacks. Squeezing the content to keep a
-   320px gutter costs more than the side-by-side view buys. */
-@media (max-width: 900px){
-  .atl-region--side{ padding-right:0; }
-  .atl-region--side > .atl-thread{ position:static; width:auto; }
-  .atl-region--side > .atl-bar{ right:0; }
-}
+.atl-float { position: absolute; z-index: 20; padding: 4px 10px; border: 0; border-radius: 999px; background: #1d232a; color: #fff;
+  font: 13px system-ui, sans-serif; box-shadow: 0 4px 14px #0003; cursor: pointer; }
+atelier-activity { display: block; font: 13px/1.45 system-ui, sans-serif; }
+.atl-tools { display: grid; gap: 6px; }
+.atl-waiting { color: #8a5a00; font-weight: 600; font-size: 12px; }
+.atl-feed { margin-top: 8px; padding: 8px; background: #fff; border: 1px solid #dcd8cc; border-radius: 8px; }
+.atl-feed-item { padding: 6px 0; border-bottom: 1px solid #eee9dd; }
+.atl-feed-item p { margin: 2px 0; color: #4b5057; font-size: 12px; }
+.atl-hint { color: #6b6f76; font-size: 12px; }
 
+/* narrow: the margin becomes a bottom drawer listing Threads in reading order */
+@media (max-width: 1100px) {
+  atelier-margin { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; max-height: 45vh; overflow: auto; padding: 8px;
+    background: #f7f5ef; border-top: 1px solid #dcd8cc; }
+  .atl-slot { position: static; margin-bottom: 6px; }
+  .atl-margin-head { position: static; margin-bottom: 6px; }
+}
+atelier-activity .atl-tools { display: flex; gap: 8px; align-items: center; }
+.atl-btn--warn { border-color: #c37b10; color: #8a5a00; font-weight: 600; }
+.atl-drawer[popover] { position: fixed; inset: var(--atl-header-height, 58px) 0 0 auto; width: 380px; max-width: 90vw; height: auto; margin: 0; padding: 12px 16px;
+  border: 0; border-left: 1px solid #dcd8cc; background: #fbfaf6; box-shadow: -8px 0 24px #0000001a; overflow: auto; font: 13px/1.45 system-ui, sans-serif; }
+.atl-drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.atl-drawer h4 { margin: 14px 0 4px; font-size: 12px; color: #6b6f76; text-transform: uppercase; letter-spacing: .05em; }
+.atl-feed-btn { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #eee9dd; background: none; font: inherit; cursor: pointer; }
+.atl-feed-btn:hover { background: #f3efe4; }
+.atl-feed-btn span { display: block; color: #6b6f76; font-size: 12px; }
+/* an open card never runs past the screen: its conversation scrolls inside it */
+.atl-card.is-open { max-height: calc(100vh - 90px); overflow: auto; }
 
-.atl-bar{ position:absolute; top:0; right:0; display:flex; align-items:center; gap:6px; min-height:26px; }
-.atl-region--side > .atl-bar{ right: calc(var(--atl-gutter) + 20px); }
-.atl-icon{
-  display:inline-grid; place-items:center; width:26px; height:26px; padding:0;
-  border:1px solid transparent; border-radius:7px; background:transparent; color:inherit;
-  opacity:.55; cursor:pointer; font-size:13px; line-height:1;
-}
-.atl-icon:hover, .atl-icon:focus-visible{ opacity:1; border-color:var(--atl-line); background:var(--atl-soft); }
-/* On a phone there is no free margin for the bar to sit in, so it stops floating over the heading
-   and takes its own right-aligned row above the content. */
-@media (max-width: 640px){
-  .atl-bar, .atl-region--side > .atl-bar{ position:static; justify-content:flex-end; margin-bottom:2px; }
-}
-.atl-count{ font-size:10px; font-variant-numeric:tabular-nums; opacity:.8; }
-.atl-badge{
-  display:inline-block; border:1px solid var(--atl-line); border-radius:999px;
-  padding:1px 8px; font-size:10.5px; letter-spacing:.04em; opacity:.75;
-}
-/* Whose turn it is, carried by the words first and this weight second, never by colour alone. */
-.atl-badge--human{ opacity:1; }
-.atl-badge--agent{ opacity:.6; }
-.atl-badge--changed{ border-color:var(--atl-accent); color:var(--atl-accent); opacity:1; }
-.atl-badge--zero{ opacity:.4; }
-.atl-dot{
-  display:inline-block; width:7px; height:7px; border-radius:50%;
-  background:var(--atl-accent); vertical-align:middle;
-}
-
-.atl-thread{ display:block; margin-top:12px; font-size:13px; }
-.atl-comment{ border-left:2px solid var(--atl-line); padding:6px 0 6px 10px; margin-bottom:8px; }
-.atl-comment--sent{ border-left-color:var(--atl-accent); }
-.atl-quote{
-  border-left:2px solid var(--atl-accent); padding-left:8px; margin-bottom:4px;
-  opacity:.7; font-style:italic;
-}
-.atl-text{ white-space:pre-wrap; }
-.atl-state{ margin-top:3px; font-size:11px; opacity:.6; }
-.atl-reply{ margin-top:6px; padding:6px 8px; border-radius:7px; background:var(--atl-soft); white-space:pre-wrap; }
-.atl-reply b{ display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; opacity:.6; }
-.atl-verdict{ display:flex; gap:6px; margin-top:6px; }
-.atl-followup, .atl-custom{ display:flex; gap:6px; align-items:flex-start; margin-top:8px; }
-.atl-followup[hidden]{ display:none; }
-.atl-btn, .atl-send{
-  border:1px solid var(--atl-line); border-radius:7px; background:transparent; color:inherit;
-  padding:3px 10px; font:inherit; font-size:12px; cursor:pointer;
-}
-.atl-btn:hover, .atl-send:hover{ background:var(--atl-soft); }
-.atl-compose{ display:flex; gap:6px; align-items:flex-start; margin-top:8px; }
-.atl-input{
-  flex:1; min-height:40px; border:1px solid var(--atl-line); border-radius:7px;
-  background:transparent; color:inherit; padding:6px 8px; font:inherit; font-size:13px; resize:vertical;
-}
-
-/* Agent → human messages. Both sit above the content of the Region they belong to: a question
-   about a diagram is useless three screens away from the diagram. */
-.atl-update{
-  display:flex; gap:10px; align-items:flex-start; justify-content:space-between;
-  border:1px solid var(--atl-line); border-left:3px solid var(--atl-accent); border-radius:7px;
-  padding:8px 10px; margin:0 0 8px; font-size:13px; background:var(--atl-soft);
-}
-.atl-update__body b{ display:block; }
-.atl-update__body span{ opacity:.75; }
-
-.atl-proposal{
-  border:1px solid var(--atl-line); border-left:3px solid var(--atl-accent); border-radius:7px;
-  padding:10px; margin:0 0 10px; font-size:13px;
-}
-.atl-proposal--decided{ border-left-color:var(--atl-line); opacity:.7; }
-.atl-proposal__q{ font-weight:600; margin-bottom:8px; }
-.atl-options{ display:flex; flex-direction:column; gap:6px; }
-.atl-option{ display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:start; gap:6px; }
-.atl-option > .atl-btn{ min-width:0; text-align:left; white-space:normal; }
-.atl-option > .atl-icon{ flex:none; }
-.atl-option > .atl-followup, .atl-option > .atl-explain{ grid-column:1 / -1; }
-.atl-explain{
-  padding:6px 8px; border-radius:7px; background:var(--atl-soft);
-  white-space:pre-wrap; opacity:.85;
-}
-.atl-explain--waiting{ opacity:.6; font-style:italic; }
-.atl-custom .atl-input{ min-height:40px; }
-
-/* Cockpit: every open loop on the Surface, split by whose turn it is. */
-.atl-cockpit{ font-size:13px; min-width:0; }
-.atl-cockpit__head{ display:flex; justify-content:space-between; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
-.atl-cockpit__filters{ display:flex; gap:4px; }
-.atl-btn--on{ border-color:var(--atl-accent); color:var(--atl-accent); }
-.atl-cockpit__list{ display:flex; flex-direction:column; gap:4px; }
-/* Two lines on purpose: the label is a whole question and the Region Key is long. Competing for one
-   row in a sidebar clamps both into fragments. */
-.atl-cockpit__row{
-  display:flex; flex-wrap:wrap; align-items:flex-start; gap:4px 8px; width:100%; min-width:0; text-align:left;
-  border:1px solid transparent; border-radius:7px; background:transparent; color:inherit;
-  padding:5px 6px; font:inherit; font-size:12.5px; cursor:pointer;
-}
-.atl-cockpit__row:hover{ border-color:var(--atl-line); background:var(--atl-soft); }
-/* A Cockpit label is a whole question, and a Cockpit often sits in a narrow column. Clamping two
-   wrapped lines keeps its minimum width at one word; a nowrap ellipsis instead reports the entire
-   sentence as the element's minimum and drags the whole page wider than the viewport. */
-.atl-cockpit__label{
-  flex:1; min-width:0; overflow:hidden;
-  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
-}
-.atl-cockpit__region{ flex-basis:100%; opacity:.5; font-size:11px; word-break:break-word; }
-
-/* A jump has to announce where it landed. */
-.atl-flash{ animation: atl-flash 1.2s ease-out; }
-@keyframes atl-flash{
-  from{ box-shadow:0 0 0 3px var(--atl-accent); }
-  to{ box-shadow:0 0 0 3px transparent; }
-}
-
-/* Bottom sheet: overlays the lower viewport rather than reflowing the document, so the content
-   above keeps scrolling normally and the human can line up context and comment. */
-.atl-sheet{
-  position:fixed; left:0; right:0; bottom:0; z-index:60; max-height:45vh; overflow:auto;
-  padding:12px 16px 16px; border-top:1px solid var(--atl-line);
-  /* Theme token when the content library supplies one, system surface when it does not. */
-  background:var(--color-base-200, Canvas); color:var(--color-base-content, CanvasText);
-  box-shadow:0 -8px 24px rgb(0 0 0 / .18);
-}
-.atl-sheet__head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
-.atl-sheet-space{ height:0; pointer-events:none; }
-
-.atl-warnings{ position:sticky; top:0; z-index:65; }
-.atl-warn{
-  padding:6px 14px; font-size:12.5px; border-bottom:1px solid var(--atl-accent);
-  background:color-mix(in srgb, var(--atl-accent) 20%, Canvas); color:CanvasText;
-}
-
-html[data-atl-offline] .atl-thread{ opacity:.55; }
-html[data-atl-offline] body::after{
-  content:"offline — the atelier server is not responding";
-  position:fixed; left:50%; bottom:12px; transform:translateX(-50%); z-index:70;
-  padding:4px 12px; border-radius:999px; font-size:12px;
-  background:var(--atl-accent); color:#000;
-}
+.atl-opt-row { margin: 4px 0; }
+.atl-opt-row .atl-opt { margin: 0; }
+.atl-ask summary { cursor: pointer; color: #8a5a00; font-size: 12px; padding: 2px 0; }
+.atl-ask textarea { min-height: 40px; }
+.atl-explain { margin: 2px 0 0 8px; padding: 4px 8px; border-left: 2px solid #3b7a4b; color: #33483a; font-size: 12px; }
+.atl-card--decided { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.atl-warnings { position: fixed; z-index: 40; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: min(720px, 92vw);
+  padding: 8px 14px; border-radius: 8px; background: #7a1f1f; color: #fff; font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 6px 20px #0004; }
+html[data-atl-offline] atelier-activity .atl-tools::after { content: 'Offline — reconnecting'; color: #a33; font-size: 12px; font-weight: 600; }
+/* kernel chrome keeps its own ink so a dark Surface theme cannot put light text on its light cards */
+.atl-btn, .atl-drawer, .atl-opt, .atl-card textarea { color: #1d232a; }
+.atl-btn--primary { color: #fff; }

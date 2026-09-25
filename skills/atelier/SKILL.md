@@ -15,8 +15,8 @@ A **Surface** is an ordinary HTML document you write, wrapped around a kernel th
 parts a document cannot have on its own: durable identity, shared state, and an event loop between
 you and the human. You own every pixel of the content. The kernel owns the protocol.
 
-The capitalized terms — Surface, Region, Region Key, Ready, Attention, Thread, Proposal, Update,
-Cockpit — are defined in [CONTEXT.md](CONTEXT.md). Read it once; everything below assumes it.
+The capitalized terms — Surface, Region, Region Key, Anchor, Margin, Ready, Attention, Thread,
+Proposal, Update, Activity — are defined in [CONTEXT.md](CONTEXT.md). Read it once; everything below assumes it.
 When changing Atelier itself, apply [the Atelier principles](docs/principles.md).
 `<skill-dir>` is the directory containing this file.
 
@@ -26,9 +26,10 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    its current facts, recommendations, unresolved questions, disagreements, and source anchors.
    Present the synthesized current state; keep the raw transcript available only as evidence.
 
-2. **Choose the composition** with [references/composition.md](references/composition.md): what job
-   the human is doing, how the material divides into Regions, and where each Thread belongs. Never
-   ask the human to invent the interface. Ask once, without blocking, when the choice would change
+2. **Choose the composition and the form** with [references/composition.md](references/composition.md):
+   what job the human is doing, how the material divides into Regions, and what shows it best — a
+   diagram, table, diff, image, or click-through prototype before prose. Never ask the human to
+   invent the interface. Ask once, without blocking, when the choice would change
    their workflow; if no answer arrives in the same turn, build the recommendation and label the
    assumption on the Surface.
 
@@ -56,26 +57,29 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
    ```
 
-   Then wrap each thing the human reasons about in a Region with a stable key:
+   Author [the frame](references/composition.md#lay-out-the-frame): a sticky header holding
+   `<atelier-activity>`, the content, and one `<atelier-margin>` beside it — both outside every
+   Region. Then wrap each thing the human reasons about in a Region with a stable key:
 
    ```html
-   <atelier-region key="onboarding">
-     <h1>Appliance onboarding</h1>
-     <atelier-region key="provider" comments="side">
-       <h2>Provider step <atelier-attention mode="dot"></atelier-attention></h2>
-       <p>…the material the human is judging…</p>
-     </atelier-region>
-   </atelier-region>
+   <header class="top"><b>Appliance onboarding</b><atelier-activity></atelier-activity></header>
+   <div class="page">
+     <main><atelier-region key="onboarding">
+       <atelier-region key="provider" label="Provider step">
+         <h2>Provider step</h2>
+         <p>…the material the human is judging…</p>
+       </atelier-region>
+     </atelier-region></main>
+     <atelier-margin></atelier-margin>
+   </div>
    ```
 
    Nesting builds the Region Key: that inner Region is `onboarding/provider`, and that is the
-   address you use in every API call about it. Make each Region one task-shaped judgment; if one
-   part can change while several other judgments stay stable, split that part into a nested Region.
-   Choose `below`, `side`, or `sheet` separately for every Region so its Thread remains usable with
-   the evidence it discusses. Follow [the Cockpit placement rule](references/composition.md#place-attention)
-   whenever the reading path is long or dynamic. Everything else the kernel offers —
-   `<atelier-comments>`, `<atelier-attention>`, `<atelier-proposal>`, `<atelier-update>`,
-   `<atelier-cockpit>` — is in [references/protocol.md](references/protocol.md).
+   address you use in every API call about it. Make each Region one task-shaped judgment, and each
+   item the human can answer on its own — a setting value, an option, a step — its own Region. The
+   human opens Threads on any sentence, element, or image point; the kernel places them in the
+   Margin. Post open choices as anchored Proposals rather than writing them as a list. Elements,
+   Anchors, and endpoints are in [references/protocol.md](references/protocol.md).
 
 5. **Build once from the evidence.** Do not run speculative presentation rounds. Re-open the
    authoritative sources as they exist now and trace every factual claim, recommendation, and
@@ -85,9 +89,9 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    their browser. Source fidelity and cold-reader comprehension are separate checks; neither
    replaces the other.
 
-`examples/` holds runnable Surfaces: `grill-session.html` (Proposal-driven, a composer visible under
-every question) and `placements.html` (the three Thread placements side by side, with `side` on a
-comparison). Serve one and click it before writing your own.
+`examples/` holds runnable Surfaces: `anchored-document.html` (the frame, small Regions, and an SVG
+diagram to open Threads on) and `grill-session.html` with `grill-session.sh` (a frontier of anchored
+Proposals). Serve one and click it before writing your own.
 
 The first browser load needs no Ready. Ready begins only after the human could have seen the
 Surface.
@@ -122,9 +126,10 @@ expandable context — without the session transcript.
    ```
 
    It fails silent handoff defects: the store is unreachable, the poller is missing or duplicated,
-   this Surface's copied kit differs from the canonical one, Region identity or references are
-   invalid, the page throws a browser error or kernel warning, content overflows horizontally, or a
-   diagram did not render. Re-copy a drifted kit rather than patching it in place; pass
+   this Surface's copied kit differs from the canonical one, Region keys are missing or duplicated,
+   the Margin or Activity is missing, doubled, or inside a Region, a stored Anchor no longer finds
+   its target, the page throws a browser error or kernel warning, content overflows horizontally, or
+   a diagram did not render. Re-copy a drifted kit rather than patching it in place; pass
    `--allow-kit-drift` only when the local change is deliberate and written down. `--skip-render`
    and `--skip-poller` are for kernel tests, never a human handoff.
 5. After preflight passes, run one cold-reader pass yourself: follow the primary reading path, jump
@@ -148,11 +153,12 @@ first handoff, the cold-reader pass also has no actionable finding.
 Treat the Surface as the primary channel while the review is live. Chat carries the URL, a failure,
 and the final handback — not questions the Surface already represents.
 
-- **Answer a comment where it was written.** On every `sent` event, reply in its Thread with what
-  you picked up and set `acknowledged` within seconds, then work. Move it through `in_progress` and
+- **Answer a comment where it was written.** On every `sent` event — including a `followUp` in an
+  existing Thread — reply in its Thread with what you picked up and set `acknowledged` within
+  seconds, then work. Read its `anchor` to see exactly what the human pointed at. Move it through `in_progress` and
   `implemented`; the human accepts or rejects it in place. A non-blocking follow-up is Accept, then
   a new Thread—not a third verdict state.
-- **Ask with a Proposal, never with prose.** A genuine choice goes beside the material it changes,
+- **Ask with a Proposal, never with prose.** Anchor a genuine choice to the material it changes,
   recommendation first, with the consequence of each option stated. Facts you can discover yourself
   are evidence, not questions. Anything that needs no answer is an Update.
 - **Publish changes with Ready, not by reloading.** Rewrite the HTML file, then post only the
@@ -172,7 +178,9 @@ and the final handback — not questions the Surface already represents.
 
 Run one active browser per Surface. Browser autosave replaces the complete Thread collection, so a
 second active browser can overwrite Thread changes. The event log is bounded observation history,
-not a backup. Quote anchors already present in state render, but the browser cannot create them.
+not a backup. Below 1100px the Margin is a plain bottom list without anchoring. The kernel cannot
+pick inside an iframe; see [Extending](references/protocol.md#extending). When a Ready removes the
+text an Anchor quoted, restore it or say in that Thread where it went; preflight fails meanwhile.
 
 When a Region or Thread already has an open Proposal, keep it visible. If its context changed, post
 an Update; ask the next Proposal only after the first resolves.

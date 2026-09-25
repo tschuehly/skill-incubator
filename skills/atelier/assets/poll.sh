@@ -129,7 +129,7 @@ parse_events_jq() {
       ((.comment.tags // []) | join(",")),
       (if .choiceIndex == null then "" else (.choiceIndex | tostring) end),
       (.custom // ""),
-      (.comment.text // .msg // .text // .answer // .action // .status // "")
+      (if (.followUp // "") != "" then ("(follow-up) " + .followUp) else (.comment.text // .msg // .text // .answer // .action // .status // "") end)
     ] | map(tostring | gsub("\n"; " ") | gsub(""; " ")) | join("")
   '
 }
@@ -154,7 +154,7 @@ for ev in data.get("events") or []:
         ",".join(c.get("tags") or []),
         "" if ci is None else str(ci),
         str(ev.get("custom", "") or ""),
-        str(c.get("text", ev.get("msg", ev.get("text", ev.get("answer", ev.get("action", ev.get("status", "")))))) or ""),
+        ("(follow-up) " + ev["followUp"]) if ev.get("followUp") else str(c.get("text", ev.get("msg", ev.get("text", ev.get("answer", ev.get("action", ev.get("status", "")))))) or ""),
     ]
     print("\x1f".join(f.replace("\x1f", " ").replace("\n", " ") for f in row))
 ' "$1"
@@ -173,7 +173,8 @@ parse_wake_jq() {
       (.kind // ""),
       (.region // ""),
       (.id // ""),
-      (if (.comment.text // "") != "" then .comment.text
+      (if (.followUp // "") != "" then ("(follow-up) " + .followUp)
+       elif (.comment.text // "") != "" then .comment.text
        elif (.text // "") != "" then .text
        elif (.msg // "") != "" then .msg
        elif (.answer // "") != "" then .answer
@@ -198,7 +199,7 @@ for ev in data.get("events") or []:
     if kind not in wk:
         continue
     c = ev.get("comment") or {}
-    detail = c.get("text") or ev.get("text") or ev.get("msg") or ev.get("answer") or ev.get("custom") or ev.get("action") or ""
+    detail = ("(follow-up) " + ev["followUp"]) if ev.get("followUp") else c.get("text") or ev.get("text") or ev.get("msg") or ev.get("answer") or ev.get("custom") or ev.get("action") or ""
     if not detail and ev.get("choiceIndex") is not None:
         detail = "Option " + str(ev.get("choiceIndex"))
     if not detail:

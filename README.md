@@ -81,5 +81,5 @@ Workbench.
 | `production-ready-pr` | incubating | Human-invoked delivery loop for local and adversarial review, PR creation, CI and Copilot observation, feedback handling, and a decision-ready handoff without merging. |
 | `agent-orchestration` | incubating | Coordinate a thin lead and bounded collaborators through validated model bindings, persistent/fresh/disposable lifecycles, durable checkpoints, and atomically acquired workspace/process leases. |
 | `quota-axi` | incubating | Read raw Claude and Codex subscription windows with `quota-axi --json`; model orchestration interprets duration, reset time, model scope, and freshness. Read-only and policy-free. |
-| `atelier` | incubating | Copy-owned HTML interaction kit with a complete shell, selectable context/decision/annotation/queue capabilities, durable feedback state, a monitor-owned live loop, and compact desktop/narrow verification. |
+| `atelier` | incubating | Copy-owned HTML interaction kit: Threads anchored to any sentence, element, or image point in a margin, anchored Proposals, an Activity drawer, live Ready swaps, a monitor-owned live loop, and browser verification. |
 | `write-for-humans` | incubating | Makes documentation and other human-facing prose clear while preserving technical meaning, conditions, and uncertainty. |

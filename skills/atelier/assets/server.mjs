@@ -31,9 +31,10 @@ const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.mj
 
 // ---- durable store ----
 // Every address is ONE Region key (a path like "onboarding/provider"). There is no Card/Section split.
-// { name, threads:{[region]:[{id,text,tags,sev,anchor?}]},          ← human drafts, client-owned
-//   sent:{[commentId]:iso}, replies:{[commentId]:[{ts,msg,author}]}, commentState:{[commentId]:{value,ts}},
-//   proposals:{[id]:{id,region,threadId,question,options,explanationRequests,explanations,status,choiceIndex,custom,ts,decidedAt}},
+// { name, threads:{[region]:[{id,text,tags,sev,anchor?}]},          ← human Threads, client-owned
+//   anchor = {region, quote?, prefix?, selector?, point?:{x,y}}; only region = the whole Region
+//   sent:{[commentId]:iso}, replies:{[commentId]:[{ts,msg,author:'agent'|'human'}]}, commentState:{[commentId]:{value,ts}},
+//   proposals:{[id]:{id,region,threadId,anchor,question,options,explanationRequests,explanations,status,choiceIndex,custom,ts,decidedAt}},
 //   updates:{[id]:{id,region,title,body,ts,dismissedAt}},
 //   changed:{[region]:{ts}},                                        ← named by Ready, cleared by ack
 //   log:[{seq,kind,region,id,ts,...}], seq }
@@ -93,6 +94,14 @@ const sendJSON = (res, code, obj) => { const b = JSON.stringify(obj); res.writeH
 const readBody = (req) => new Promise((resolve) => { let d=''; req.on('data',c=>d+=c); req.on('end',()=>{ try{resolve(JSON.parse(d||'{}'));}catch{resolve({});} }); });
 const commentBody = (c) => { const { id, ...rest } = c; return rest; };
 const findComment = (region, id) => (store.threads[region]||[]).find(c=>c.id===id);
+// An anchor points inside its Region; anything else is dropped rather than stored half-valid.
+function cleanAnchor(a, region){
+  if (!a || typeof a !== 'object') return null;
+  const out = { region: str(a.region, 300) || region };
+  for (const f of ['quote','prefix','selector']) if (str(a[f], 1000)) out[f] = str(a[f], 1000);
+  if (a.point && Number.isFinite(a.point.x) && Number.isFinite(a.point.y)) out.point = { x:+a.point.x, y:+a.point.y };
+  return out;
+}
 const str = (v, max) => { const s = typeof v==='string' ? v.trim() : ''; return s.length && s.length<=max ? s : null; };
 
 function resolveStatic(urlPath){
@@ -242,9 +251,21 @@ async function handle(req, res){
     return sendJSON(res, 200, { ok: !!id, state, cursor: store.seq });
   }
 
+  // A Thread is a conversation: the human writes into it after the first message. It wakes the
+  // agent like a first comment does, marked as a follow-up.
+  if (p === '/api/thread-message' && req.method === 'POST'){ // { region, id, msg }
+    const { region, id, msg } = await readBody(req);
+    const text = str(msg, 4000);
+    if (!findComment(region, id) || !store.sent[id]) return sendJSON(res, 404, { ok:false, error:'unknown sent comment' });
+    if (!text) return sendJSON(res, 400, { ok:false, error:'need a msg of at most 4000 characters' });
+    (store.replies[id] ||= []).push({ ts:new Date().toISOString(), msg:text, author:'human' });
+    appendLog('sent', region, id, { followUp:text }); persist();
+    return sendJSON(res, 200, { ok:true, cursor: store.seq });
+  }
+
   // ---- Proposals: every question the agent has takes this shape -------------------------
-  if (p === '/api/propose' && req.method === 'POST'){    // { region, question, options[], threadId? }
-    const { region, question, options, threadId } = await readBody(req);
+  if (p === '/api/propose' && req.method === 'POST'){    // { region, question, options[], threadId?, anchor? }
+    const { region, question, options, threadId, anchor } = await readBody(req);
     const key = str(region, 300), q = str(question, 2000);
     if (!key || !q || !Array.isArray(options) || !options.length)
       return sendJSON(res, 400, { ok:false, error:'need region, question, options[]' });
@@ -252,7 +273,7 @@ async function handle(req, res){
       && (pr.region===key || (threadId && pr.threadId===threadId)));
     if (open) return sendJSON(res, 409, { ok:false, error:'resolve the existing open Proposal before asking another', proposalId:open.id });
     const id = `prop-${++store.seq}`;
-    store.proposals[id] = { id, region:key, threadId:threadId||null, question:q, options,
+    store.proposals[id] = { id, region:key, threadId:threadId||null, anchor:cleanAnchor(anchor, key), question:q, options,
       explanationRequests:{}, explanations:{}, status:'open', choiceIndex:null, custom:null,
       ts:new Date().toISOString(), decidedAt:null };
     appendLog('proposal', key, threadId||null, { proposalId:id }); persist();

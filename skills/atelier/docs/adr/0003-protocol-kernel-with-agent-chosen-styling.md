@@ -1,5 +1,8 @@
 # Protocol kernel, agent-chosen styling
 
+Partly superseded by [ADR 0005](0005-anchored-threads-replace-region-threads.md): kernel chrome is
+now the margin, Activity, and the floating Thread button, and nothing mounts inside Regions.
+
 The seed shipped a fixed renderer that owned both protocol behavior and content layout, so
 "customize the surface" meant editing 1280 lines of someone else's renderer. The kernel now ships
 only identity, durable state, the event loop, and behavior as light-DOM custom elements; the agent

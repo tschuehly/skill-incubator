@@ -1,5 +1,8 @@
 # Updates replace notifications
 
+Amended by [ADR 0005](0005-anchored-threads-replace-region-threads.md): Updates live in the Activity
+drawer, and desktop notifications are on unless the human turns them off.
+
 The kernel had a separate `/api/notify` endpoint whose only purpose was to raise a desktop popup,
 so the agent chose how loudly to interrupt by picking an endpoint. Desktop notification is now a
 *delivery choice made by the page*: the agent posts a durable **Update** anchored to a Region, and

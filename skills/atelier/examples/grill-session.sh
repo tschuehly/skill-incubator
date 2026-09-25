@@ -5,13 +5,15 @@
 #   bash examples/grill-session.sh [base-url]
 #
 # The whole frontier goes up in one wave, followed by one Ready: the human sees five questions
-# appear together, not five interruptions.
+# appear together, not five interruptions. An anchor places a question beside the exact evidence
+# it depends on; without one it sits at the top of its Region.
 set -euo pipefail
 BASE="${1:-${BASE_URL:-http://127.0.0.1:4747}}"
 ask() { curl -fsS -X POST "$BASE/api/propose" -H 'Content-Type: application/json' -d "$1" >/dev/null; }
 
 ask '{"region":"grill/sync-model","question":"Which sync model do we build against?",
-      "options":["Per-field merge (recommended)","CRDT document","Last-write-wins with a warning banner"]}'
+      "options":["Per-field merge (recommended)","CRDT document","Last-write-wins with a warning banner"],
+      "anchor":{"region":"grill/sync-model","selector":":scope > div > table"}}'
 
 ask '{"region":"grill/conflict-policy","question":"When two offline edits disagree, who decides?",
       "options":["Server merges, technician sees what changed (recommended)","Technician resolves on next sync","Newest device wins silently"]}'
@@ -23,7 +25,8 @@ ask '{"region":"grill/cost","question":"Is seven weeks acceptable if it removes 
       "options":["No — three weeks and reversible wins (recommended)","Yes, if reporting stays SQL-queryable","Need the reporting owner in the room first"]}'
 
 ask '{"region":"grill/premise","question":"Is the 38% dropout figure the right basis, or should this be scoped to the p95 sessions?",
-      "options":["Use the 38% figure (recommended)","Scope to p95 dropouts only","Re-measure after the June firmware rollout"]}'
+      "options":["Use the 38% figure (recommended)","Scope to p95 dropouts only","Re-measure after the June firmware rollout"],
+      "anchor":{"region":"grill/premise","quote":"Sessions with a dropout"}}'
 
 curl -fsS -X POST "$BASE/api/update" -H 'Content-Type: application/json' \
   -d '{"region":"grill","title":"Round one is up","body":"Five questions, all open at once. Answering the conflict policy changes the rollout question, so start there if you want the shortest path."}' >/dev/null

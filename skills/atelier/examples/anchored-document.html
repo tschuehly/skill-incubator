@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier — anchored document</title>
+<!--
+  Runnable, and library-free. From the skill directory:
+
+    env PORT=4748 UI=examples/anchored-document.html ROOT=. STORE=anchored node assets/server.mjs
+
+  The Surface owns every pixel: a fixed header holding <atelier-activity>, the content, and one
+  <atelier-margin> outside every Region. Select any sentence, or Alt+click a list item or a point on
+  the diagram, to open a Thread there. Each rollout step is its own small Region, so a
+  Thread or a Ready can name exactly one step.
+-->
+<link rel="stylesheet" href="/atelier.css">
+<script type="module" src="/atelier.mjs"></script>
+<style>
+  :root { --atl-header-height: 52px; color-scheme: light; font-family: system-ui, sans-serif; }
+  body { margin: 0; background: #f7f5ef; color: #17202a; line-height: 1.55; }
+  .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 20px; padding: 8px 24px;
+    background: #f7f5efee; backdrop-filter: blur(6px); border-bottom: 1px solid #d9d6cc; }
+  .top nav { display: flex; gap: 4px; flex: 1; overflow-x: auto; } .top nav a { padding: 4px 10px; color: #774019; text-decoration: none; }
+  .page { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; max-width: 1280px; margin: 24px auto; padding: 0 24px 80px; }
+  @media (max-width: 1100px) { .page { grid-template-columns: minmax(0, 1fr); } }
+  atelier-region { scroll-margin-top: 64px; }
+  section { background: #fff; border: 1px solid #d9d6cc; border-radius: 8px; padding: 18px 22px; margin-bottom: 20px; }
+  figure { margin: 12px 0; overflow-x: auto; }
+  .step { border-top: 1px solid #e6e2d6; padding: 10px 0; }
+  .step h3 { margin: 0 0 4px; font-size: 1rem; }
+</style>
+</head>
+<body>
+<header class="top">
+  <b>Search index migration</b>
+  <nav><a href="#flow">Flow</a><a href="#steps">Steps</a><a href="#risks">Risks</a></nav>
+  <atelier-activity></atelier-activity>
+</header>
+
+<div class="page">
+<main>
+<atelier-region key="migration" label="Search index migration">
+
+  <atelier-region key="flow" label="Data flow">
+  <section id="flow">
+    <h2>Data flow</h2>
+    <p>Writes go to both indexes for two weeks. Reads switch only after the shadow comparison stays under 0.5% mismatch for seven days.</p>
+    <figure data-diagram="flow" data-diagram-ready="true">
+      <svg viewBox="0 0 640 150" width="640" height="150" role="img" aria-labelledby="flow-title">
+        <title id="flow-title">Writes fan out to the old and new index; a comparer reads both</title>
+        <g font-size="13" font-family="system-ui">
+          <rect x="10" y="55" width="110" height="40" rx="6" fill="#fff1d6" stroke="#774019"/><text x="65" y="80" text-anchor="middle">API writes</text>
+          <rect x="230" y="10" width="140" height="40" rx="6" fill="#eef6ee" stroke="#39734a"/><text x="300" y="35" text-anchor="middle">Old index</text>
+          <rect x="230" y="100" width="140" height="40" rx="6" fill="#e8f0fb" stroke="#2b5c9e"/><text x="300" y="125" text-anchor="middle">New index</text>
+          <rect x="480" y="55" width="150" height="40" rx="6" fill="#f4f2ec" stroke="#555"/><text x="555" y="80" text-anchor="middle">Shadow comparer</text>
+          <path d="M120 75 L230 30 M120 75 L230 120 M370 30 L480 75 M370 120 L480 75" stroke="#555" fill="none" marker-end="url(#arrow)"/>
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#555"/></marker></defs>
+        </g>
+      </svg>
+      <figcaption data-diagram-fallback>API writes go to the old and the new index; a shadow comparer reads both and reports mismatches.</figcaption>
+    </figure>
+  </section>
+  </atelier-region>
+
+  <section id="steps">
+    <h2>Rollout steps</h2>
+    <atelier-region key="dual-write" label="Step 1 · Dual write">
+      <div class="step"><h3>1 · Dual write</h3><p>Every write lands in both indexes. Cost: about 18% more write latency at p95.</p></div>
+    </atelier-region>
+    <atelier-region key="shadow-read" label="Step 2 · Shadow read">
+      <div class="step"><h3>2 · Shadow read</h3><p>1% of reads also query the new index; the comparer logs every differing result.</p></div>
+    </atelier-region>
+    <atelier-region key="cutover" label="Step 3 · Cutover">
+      <div class="step"><h3>3 · Cutover</h3><p>Reads switch region by region. Rollback is a flag flip while dual write is still on.</p></div>
+    </atelier-region>
+  </section>
+
+  <atelier-region key="risks" label="Risks">
+  <section id="risks">
+    <h2>Risks</h2>
+    <ul>
+      <li>Ranking changes are visible to customers even when every document matches.</li>
+      <li>Dual write doubles indexing cost for two weeks.</li>
+      <li>The comparer samples only 1% of reads, so rare queries may never be compared.</li>
+    </ul>
+  </section>
+  </atelier-region>
+
+</atelier-region>
+</main>
+<atelier-margin></atelier-margin>
+</div>
+</body>
+</html>

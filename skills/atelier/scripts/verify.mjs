@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Atelier kernel verification — every claim in docs/rebuild-plan.md, checked in a real browser.
+// Atelier kernel verification — every kernel behavior, checked in a real browser.
 //
 //   node scripts/verify.mjs            all checks
 //   node scripts/verify.mjs ready      only checks whose name contains "ready"
@@ -20,45 +20,30 @@ const SESSION = 'atelier-verify';
 const FILTER = process.argv[2] || '';
 
 // ---- fixture -------------------------------------------------------------------------
-// Deliberately library-free: verification must not depend on a CDN being reachable.
-const surface = (alpha = 'alpha body v1', extra = '') => `<!doctype html>
+// Deliberately library-free: verification must not depend on a CDN being reachable. The layout
+// is the contract every Surface follows: a header holding <atelier-activity>, the content, and one
+// <atelier-margin> outside every Region.
+const surface = (alpha = 'the quick brown fox jumps over the lazy dog', extra = '') => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>verify</title>
 <link rel="stylesheet" href="/atelier.css">
 <script type="module" src="/atelier.mjs"></script>
 <style>
-  body{font-family:system-ui;margin:0;padding:24px}
-  #attention-host{position:fixed;right:8px;bottom:8px;z-index:10;width:min(340px,calc(100vw - 16px));max-height:28vh;overflow:auto;background:Canvas;padding:6px}
+  body{font-family:system-ui;margin:0}
+  header{position:sticky;top:0;z-index:20;display:flex;gap:12px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #ccc}
+  .page{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;padding:16px 24px}
+  @media (max-width:1100px){.page{grid-template-columns:minmax(0,1fr)}}
 </style>
 </head><body>
-<aside id="attention-host"><atelier-cockpit></atelier-cockpit></aside>
+<header><b>Verify</b><atelier-activity></atelier-activity></header>
+<div class="page"><main>
 <atelier-region key="v">
   <h1>Verify</h1>
-  <p>human: <atelier-attention for="v" mode="count" owner="human"></atelier-attention>
-     agent: <atelier-attention for="v" mode="count" owner="agent"></atelier-attention></p>
-  <atelier-region key="alpha">
-    <h2>Alpha <atelier-attention mode="dot"></atelier-attention>
-    <atelier-attention mode="label">Alpha label</atelier-attention></h2>
-    <p id="alpha-body">${alpha}</p>
-    <div style="height:1400px"></div>
-  </atelier-region>
-  <atelier-region key="beta" comments="side"><h2>Beta</h2><p>beta body</p></atelier-region>
-  <atelier-region key="gamma" comments="sheet"><h2>Gamma</h2><p>gamma body</p></atelier-region>
-  <div id="dynamic-region" data-filter="open"></div>
-  <atelier-comments id="pinned-beta" for="v/beta"></atelier-comments>
+  <atelier-region key="alpha" label="Alpha"><h2>Alpha</h2><p id="alpha-body">${alpha}</p><div style="height:900px"></div></atelier-region>
+  <atelier-region key="list" label="List"><ul><li>first item</li><li>second item</li><li>third item</li></ul><div style="height:600px"></div></atelier-region>
+  <atelier-region key="fig" label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg><div style="height:600px"></div></atelier-region>
+  <atelier-region key="beta" label="Beta"><h2>Beta</h2><p>beta body</p><div style="height:600px"></div></atelier-region>
 ${extra}</atelier-region>
-<script type="module">
-  import { reveal, setRevealResolver } from '/atelier.mjs';
-  window.fixtureReveal = reveal;
-  window.setFixtureResolver = setRevealResolver;
-  window.installFixtureResolver = () => setRevealResolver(({ region }) => {
-    if (region !== 'v/hidden') return;
-    const host = document.querySelector('#dynamic-region');
-    host.dataset.filter = 'all';
-    host.dataset.selected = region;
-    host.innerHTML ||= '<atelier-region key="hidden"><h2>Hidden</h2><p>conditionally mounted body</p></atelier-region>';
-  });
-  window.installFixtureResolver();
-</script>
+</main><atelier-margin></atelier-margin></div>
 </body></html>`;
 
 // ---- harness -------------------------------------------------------------------------
@@ -130,6 +115,17 @@ const api = async (route, body) => {
 };
 const writeSurface = (...args) => fs.writeFileSync(path.join(dir, 'surface.html'), surface(...args));
 const state = async () => (await fetch(base + '/api/state')).json();
+const threadOf = async (region, text) => ((await state()).threads[region] || []).find(c => c.text === text);
+// Top of a margin card and of its anchor, in page coordinates.
+const tops = (id, anchorJs) => probe(`JSON.stringify({ card: Math.round(document.querySelector('[data-slot="${id}"]').getBoundingClientRect().top),
+  anchor: Math.round((${anchorJs}).getBoundingClientRect().top) })`);
+const level = (t, what) => assert(Math.abs(t.card - t.anchor) <= 2, `${what}: card at ${t.card}, anchor at ${t.anchor}`);
+const typeNewAndSend = async (text) => {
+  act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value=${JSON.stringify(text)}; t.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('atelier-margin [data-send]').click()})()`);
+  await sleep(700);
+};
+const altClick = (js, fx = 0.5, fy = 0.5) => act(`(()=>{const el=${js}; el.scrollIntoView({block:'center'}); const r=el.getBoundingClientRect();
+  el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,altKey:true,clientX:r.left+r.width*${fx},clientY:r.top+r.height*${fy}}))})()`);
 
 writeSurface();
 startServer(port, dir);
@@ -152,534 +148,285 @@ try {
 
   // ---- regions ----
   await check('regions: path keys come from ancestors', async () => {
-    const keys = probe(`JSON.stringify([...document.querySelectorAll('atelier-region')].map(e=>e.regionKey))`);
-    eq(keys, ['v','v/alpha','v/beta','v/gamma'], 'region keys');
+    eq(probe(`JSON.stringify([...document.querySelectorAll('atelier-region')].map(e=>e.regionKey))`),
+      ['v','v/alpha','v/list','v/fig','v/beta'], 'region keys');
   });
 
-  await check('regions: chrome mounts exactly once per Region', async () => {
-    const counts = probe(`JSON.stringify([...document.querySelectorAll('atelier-region')].map(e=>[
-      e.querySelectorAll(':scope > .atl-bar').length,
-      e.querySelectorAll(':scope > atelier-update').length,
-      e.querySelectorAll(':scope > atelier-proposal').length]))`);
-    for (const [bars, updates, proposals] of counts) eq([bars, updates, proposals], [1,1,1], 'bar/update/proposal per Region');
+  await check('regions: the kernel inserts nothing into authored content', async () => {
+    const injected = probe(`JSON.stringify([...document.querySelectorAll('atelier-region *')]
+      .filter(e => /^ATELIER-(?!REGION)/.test(e.tagName) || [...e.classList].some(c => /^atl-(bar|card|slot|compose|input|float)/.test(c)))
+      .map(e => e.tagName + '.' + e.className))`);
+    eq(injected, [], 'kernel nodes inside Regions');
   });
 
-  await check('regions: sheet placement mounts no inline thread', async () => {
-    const mounted = probe(`JSON.stringify({
-      alpha:!!document.querySelector('atelier-region[key=alpha] > atelier-comments'),
-      beta:!!document.querySelector('atelier-region[key=beta] > atelier-comments'),
-      gamma:!!document.querySelector('atelier-region[key=gamma] > atelier-comments')})`);
-    eq(mounted, { alpha:true, beta:true, gamma:false }, 'inline thread mounts');
-  });
-
-  // ---- thread ----
-  await check('thread: send enters the open lifecycle and counts on the icon', async () => {
-    act(`const t=document.querySelector('atelier-region[key=alpha] atelier-comments');
-         t.input.value='first comment'; t.send()`);
-    await sleep(900);
-    const store = await state();
-    const [comment] = store.threads['v/alpha'] || [];
-    assert(comment?.text === 'first comment', 'comment not stored');
-    eq(store.commentState[comment.id]?.value, 'open', 'lifecycle');
-    const count = probe(`JSON.stringify(document.querySelector('atelier-region[key=alpha] .atl-count').textContent)`);
-    eq(count, '1', 'icon count');
-  });
-
-  await check('thread: ⌘+Enter sends and Enter inserts a newline', async () => {
-    const before = (await state()).threads['v/beta']?.length || 0;
-    act(`(()=>{const i=document.querySelector('atelier-region[key=beta] .atl-input');
-         i.value='line one'; i.dispatchEvent(new Event('input')); i.focus()})()`);
-    browser(['press', 'Enter']);
+  // ---- anchors ----
+  await check('anchor: a text selection opens a Thread on that exact text', async () => {
+    act(`(()=>{const t=document.querySelector('#alpha-body').firstChild, i=t.data.indexOf('brown fox'), r=document.createRange();
+      r.setStart(t,i); r.setEnd(t,i+9); getSelection().removeAllRanges(); getSelection().addRange(r);
+      document.querySelector('#alpha-body').dispatchEvent(new MouseEvent('mouseup',{bubbles:true}))})()`);
+    await sleep(150);
+    eq(probe(`JSON.stringify(document.querySelector('.atl-float').hidden)`), false, 'Thread button hidden after selecting');
+    act(`document.querySelector('.atl-float').click()`);
     await sleep(200);
-    const newline = probe(`JSON.stringify(document.querySelector('atelier-region[key=beta] .atl-input').value)`);
-    assert(newline.includes('\n'), 'Enter did not insert a newline');
-    eq((await state()).threads['v/beta']?.length || 0, before, 'Enter sent the comment');
-    act(`(()=>{const i=document.querySelector('atelier-region[key=beta] .atl-input');
-      i.setRangeText('line two', i.selectionStart, i.selectionEnd, 'end'); i.dispatchEvent(new Event('input')); i.focus()})()`);
-    browser(['press', 'Meta+Enter']);
-    await sleep(900);
-    const store = await state(), comments = store.threads['v/beta'] || [];
-    eq(comments.length, before + 1, '⌘+Enter comment count');
-    assert(comments.at(-1).text.includes('\n'), 'multiline comment was flattened');
+    await typeNewAndSend('selection thread');
+    const c = await threadOf('v/alpha', 'selection thread');
+    assert(c && (await state()).sent[c.id], 'thread not sent');
+    eq([c.anchor.region, c.anchor.quote], ['v/alpha', 'brown fox'], 'anchor');
   });
 
-  await check('thread: an agent reply arrives with no reload', async () => {
-    const store = await state();
-    const id = store.threads['v/alpha'][0].id;
-    await api('/api/reply', { region:'v/alpha', id, msg:'rewrote it', state:'implemented' });
-    await sleep(1200);
-    const seen = probe(`JSON.stringify({
-      text:document.querySelector('atelier-region[key=alpha] .atl-reply')?.textContent||'',
-      verdicts:document.querySelectorAll('atelier-region[key=alpha] [data-accept],atelier-region[key=alpha] [data-reject]').length})`);
-    assert(seen.text.includes('rewrote it'), 'reply not rendered');
-    eq(seen.verdicts, 2, 'verdict buttons');
+  await check('anchor: the margin card sits level with its text', async () => {
+    const c = await threadOf('v/alpha', 'selection thread');
+    const t = probe(`JSON.stringify((()=>{const r=[...CSS.highlights.get('atl-anchor'), ...CSS.highlights.get('atl-active')].find(r=>r.toString()==='brown fox');
+      return { card: Math.round(document.querySelector('[data-slot="${c.id}"]').getBoundingClientRect().top), anchor: Math.round(r.getBoundingClientRect().top) }})())`);
+    level(t, 'selection card');
   });
 
-  await check('thread: rejection uses a multiline in-Surface editor', async () => {
-    viewport(390, 844);
-    try {
-      act(`document.querySelector('atelier-region[key=alpha] [data-reject-open]').click()`);
-      const editor = probe(`JSON.stringify((()=>{const i=document.querySelector('atelier-region[key=alpha] form[data-reject] textarea');
-        return {tag:i?.tagName, focused:document.activeElement===i, visible:!i?.closest('form').hidden};})())`);
-      eq(editor, { tag:'TEXTAREA', focused:true, visible:true }, 'rejection editor');
-      act(`(()=>{const i=document.querySelector('atelier-region[key=alpha] form[data-reject] textarea');
-        i.value='still\\nwrong'; i.dispatchEvent(new Event('input')); i.focus()})()`);
-      browser(['press', 'Meta+Enter']);
-      await sleep(900);
-      const store = await state();
-      const id = store.threads['v/alpha'][0].id;
-      eq(store.commentState[id]?.value, 'rejected', 'state after reject');
-      assert((store.replies[id] || []).some(r => r.msg === 'still\nwrong'), 'rejection reason not recorded');
-    } finally { viewport(1440, 900); }
+  await check('anchor: Alt+click anchors an element', async () => {
+    altClick(`document.querySelectorAll('atelier-region[key=list] li')[1]`);
+    await sleep(200);
+    await typeNewAndSend('element thread');
+    const c = await threadOf('v/list', 'element thread');
+    assert(c?.anchor?.selector, 'no selector stored');
+    eq(probe(`JSON.stringify(document.querySelector('atelier-region[key=list]').querySelector(${JSON.stringify(c.anchor.selector)}).textContent)`), 'second item', 'selector target');
+    level(tops(c.id, `document.querySelectorAll('atelier-region[key=list] li')[1]`), 'element card');
   });
 
-  await check('thread: accept closes the loop', async () => {
-    const store = await state();
-    const id = store.threads['v/alpha'][0].id;
-    await api('/api/reply', { region:'v/alpha', id, msg:'again', state:'implemented' });
-    await sleep(900);
-    act(`document.querySelector('atelier-region[key=alpha] [data-accept]').click()`);
-    await sleep(900);
-    eq((await state()).commentState[id]?.value, 'accepted', 'state after accept');
+  await check('anchor: Pick mode anchors without Alt, and Escape leaves it', async () => {
+    act(`document.querySelector('atelier-activity [data-pick]').click()`);
+    eq(probe(`JSON.stringify(document.documentElement.classList.contains('atl-picking'))`), true, 'pick mode on');
+    act(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
+    eq(probe(`JSON.stringify(document.documentElement.classList.contains('atl-picking'))`), false, 'Escape left pick mode');
+    act(`document.querySelector('atelier-activity [data-pick]').click()`);
+    act(`document.querySelectorAll('atelier-region[key=list] li')[2].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}))`);
+    await sleep(200);
+    eq(probe(`JSON.stringify(!!document.querySelector('atelier-margin [data-new]'))`), true, 'composer opened');
+    act(`document.querySelector('atelier-margin [data-discard]').click()`);
   });
 
-  await check('thread: an unsent draft survives a reload', async () => {
-    act(`const i=document.querySelector('atelier-region[key=beta] .atl-input');
-         i.value='draft in progress'; i.dispatchEvent(new Event('input'))`);
+  await check('anchor: a point on an image or SVG is stored relative to it', async () => {
+    altClick(`document.querySelector('#fig-svg')`, 0.25, 0.5);
+    await sleep(200);
+    await typeNewAndSend('point thread');
+    const c = await threadOf('v/fig', 'point thread');
+    assert(c?.anchor?.point, 'no point stored');
+    assert(Math.abs(c.anchor.point.x - 0.25) < 0.02 && Math.abs(c.anchor.point.y - 0.5) < 0.02, `point ${JSON.stringify(c.anchor.point)}`);
+    level(tops(c.id, `({getBoundingClientRect(){const r=document.querySelector('#fig-svg').getBoundingClientRect();return {top:r.top+r.height*0.5}}})`), 'point card');
+  });
+
+  await check('anchor: ⌘+Enter sends a new Thread', async () => {
+    altClick(`document.querySelector('atelier-region[key=beta] p')`);
     await sleep(300);
-    open(base + '/');
-    await sleep(1200);
-    eq(probe(`JSON.stringify(document.querySelector('atelier-region[key=beta] .atl-input').value)`),
-      'draft in progress', 'restored draft');
+    act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value='keyboard thread'; t.focus()})()`);
+    browser(['press', 'Meta+Enter']);
+    await sleep(800);
+    assert(await threadOf('v/beta', 'keyboard thread'), 'not sent by ⌘+Enter');
   });
 
-  await check('thread: a store update mid-typing does not clobber the textarea', async () => {
-    act(`const i=document.querySelector('atelier-region[key=beta] .atl-input');
-         i.value='half a sentence'; i.dispatchEvent(new Event('input')); i.focus()`);
-    await api('/api/update', { region:'v', title:'agent did something' });
-    await sleep(1300);
-    const after = probe(`JSON.stringify({value:document.querySelector('atelier-region[key=beta] .atl-input').value,
-      focused:document.activeElement===document.querySelector('atelier-region[key=beta] .atl-input')})`);
-    eq(after.value, 'half a sentence', 'textarea value');
-    assert(after.focused, 'focus lost while the agent wrote to the store');
-  });
-
-  // ---- updates ----
-  await check('update: appears in its Region and dismisses', async () => {
-    const shown = probe(`JSON.stringify(document.querySelector('atelier-region[key=v] > atelier-update').textContent)`);
-    assert(shown.includes('agent did something'), 'update not rendered');
-    act(`document.querySelector('[data-dismiss]').click()`);
+  // ---- thread conversation ----
+  await check('thread: an agent reply arrives with no reload', async () => {
+    const c = await threadOf('v/alpha', 'selection thread');
+    act(`window.__noReload = true`);
+    await api('/api/reply', { region:'v/alpha', id:c.id, msg:'agent answer one', state:'acknowledged' });
     await sleep(900);
-    eq(probe(`JSON.stringify(document.querySelector('atelier-region[key=v] > atelier-update').textContent.trim())`), '', 'dismissed update still visible');
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    const card = probe(`JSON.stringify({ reload: !window.__noReload, text: document.querySelector('[data-card="${c.id}"]').innerText })`);
+    eq(card.reload, false, 'page reloaded');
+    assert(card.text.includes('agent answer one') && card.text.includes('Seen by agent'), `card: ${card.text}`);
   });
 
-  await check('update: stays dismissed across a reload', async () => {
-    open(base + '/');
-    await sleep(1200);
-    eq(probe(`JSON.stringify(document.querySelector('atelier-region[key=v] > atelier-update').textContent.trim())`), '', 'dismissal did not persist');
+  await check('thread: the human follows up and the agent is woken', async () => {
+    const c = await threadOf('v/alpha', 'selection thread');
+    act(`(()=>{document.querySelector('[data-reply-text="${c.id}"]').value='human follow-up'; document.querySelector('[data-reply="${c.id}"]').click()})()`);
+    await sleep(700);
+    const s = await state();
+    eq(s.replies[c.id].at(-1), { ...s.replies[c.id].at(-1), msg:'human follow-up', author:'human' }, 'stored follow-up');
+    const ev = s.log.at(-1);
+    eq([ev.kind, ev.id, ev.followUp], ['sent', c.id, 'human follow-up'], 'wake event');
   });
 
-  // ---- attention ----
-  await check('attention: changed marker, +N rollup, and count by owner', async () => {
-    await api('/api/ready', { changed:['v/alpha','v/beta'] });
-    await api('/api/update', { region:'v/alpha', title:'also this' });
-    await sleep(1300);
-    const seen = probe(`JSON.stringify({
-      badges:[...document.querySelectorAll('atelier-region[key=alpha] > .atl-bar .atl-badge')].map(b=>b.textContent),
-      dot:!!document.querySelector('atelier-region[key=alpha] .atl-dot'),
-      label:document.querySelector('atelier-attention[mode=label]').textContent,
-      human:document.querySelector('atelier-attention[owner=human]').textContent})`);
-    eq(seen.badges[0], 'Changed', 'lead badge');
-    assert(seen.badges[1]?.startsWith('+'), 'no +N badge for a second item');
-    assert(seen.dot, 'dot mode did not render');
-    eq(seen.label, 'Alpha label', 'label mode lost its slotted text');
-    eq(seen.human, '3', 'human count rollup (2 changed + 1 update)');
-  });
-
-  // The marker's whole job is whose turn it is. Every agent-owned kind shares one label because the
-  // store records an asserted state and a timestamp, never that work is under way.
-  await check('attention: the marker names whose turn it is', async () => {
-    const badge = (key) => probe(`JSON.stringify({
-      text:document.querySelector('atelier-region[key=${key}] > .atl-bar .atl-badge')?.textContent||'',
-      human:!!document.querySelector('atelier-region[key=${key}] > .atl-bar .atl-badge--human'),
-      agent:!!document.querySelector('atelier-region[key=${key}] > .atl-bar .atl-badge--agent')})`);
-
-    const proposal = await api('/api/propose', { region:'v/gamma', question:'Whose turn?', options:['A','B'] });
-    await sleep(1300);
-    const decide = badge('gamma');
-    eq(decide.text, 'Decide', 'an open Proposal should read as the human\'s turn');
-    assert(decide.human && !decide.agent, 'open Proposal is not marked human-owned');
-    await api('/api/decide', { id:proposal.body.id, choiceIndex:0 });   // leave no open Proposal behind
-
-    // The agent side is reached the way a human reaches it: their comment, then the agent's reply.
-    // acknowledged and in_progress must read identically — the store never records live work.
-    const id = 'c-whose-turn', before = await state();
-    await api('/api/state', { threads:{ ...before.threads, 'v/gamma':[...(before.threads['v/gamma']||[]), { id, text:'whose turn' }] } });
-    await api('/api/send', { region:'v/gamma', id });
-    for (const value of ['acknowledged', 'in_progress']){
-      await api('/api/reply', { region:'v/gamma', id, msg:`now ${value}`, state:value });
-      await sleep(1300);
-      const seen = badge('gamma');
-      eq(seen.text, 'With agent', `${value} should read as the agent's turn`);
-      assert(seen.agent && !seen.human, `${value} is not marked agent-owned`);
-    }
-    await api('/api/comment-state', { region:'v/gamma', id, state:'accepted' });   // clear it again
-  });
-
-  await check('attention: the checkmark clears the Region', async () => {
-    act(`document.querySelector('atelier-region[key=beta] [data-ack]').click()`);
+  await check('thread: Accept closes an implemented Thread', async () => {
+    const c = await threadOf('v/alpha', 'selection thread');
+    await api('/api/reply', { region:'v/alpha', id:c.id, msg:'done', state:'implemented' });
     await sleep(900);
-    assert(!(await state()).changed['v/beta'], 'ack did not clear the changed marker');
-    eq(probe(`JSON.stringify(!!document.querySelector('atelier-region[key=beta] .atl-badge--changed'))`), false, 'changed marker still on screen');
+    act(`document.querySelector('[data-card="${c.id}"] [data-accept]').click()`);
+    await sleep(500);
+    eq((await state()).commentState[c.id].value, 'accepted', 'state');
   });
 
-  await check('attention: sending a comment acknowledges only its changed Region', async () => {
-    await api('/api/ready', { changed:['v/beta','v/gamma'] });
-    await sleep(1300);
-    const cursor = (await state()).seq;
-    act(`const t=document.querySelector('atelier-region[key=beta] atelier-comments');
-         t.input.value='reviewed beta'; t.send()`);
+  await check('thread: Reopen requires what is still wrong, then rejects', async () => {
+    const c = await threadOf('v/list', 'element thread');
+    await api('/api/comment-state', { region:'v/list', id:c.id, state:'implemented' });
     await sleep(900);
-    const store = await state();
-    assert(!store.changed['v/beta'], 'comment did not clear its Region marker');
-    assert(store.changed['v/gamma'], 'comment cleared a different Region marker');
-    assert(store.log.some(e => e.seq > cursor && e.kind === 'ack' && e.region === 'v/beta'), 'comment did not log ack');
-    const badges = probe(`JSON.stringify({
-      beta:!!document.querySelector('atelier-region[key=beta] .atl-badge--changed'),
-      gamma:!!document.querySelector('atelier-region[key=gamma] .atl-badge--changed')})`);
-    eq(badges, { beta:false, gamma:true }, 'changed badges after comment');
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    act(`document.querySelector('[data-card="${c.id}"] [data-reject]').click()`);
+    await sleep(400);
+    eq((await state()).commentState[c.id].value, 'implemented', 'empty Reopen changed state');
+    act(`(()=>{document.querySelector('[data-reply-text="${c.id}"]').value='still wrong'; document.querySelector('[data-card="${c.id}"] [data-reject]').click()})()`);
+    await sleep(600);
+    const s = await state();
+    eq([s.commentState[c.id].value, s.replies[c.id].at(-1).msg], ['rejected', 'still wrong'], 'rejection');
   });
 
-  await check('attention: deciding a Proposal acknowledges only its changed Region', async () => {
-    await api('/api/ready', { changed:['v/beta','v/gamma'] });
-    const { body } = await api('/api/propose', { region:'v/gamma', question:'Reviewed Gamma?', options:['Yes'] });
-    await sleep(1300);
-    const cursor = (await state()).seq;
-    act(`document.querySelector('atelier-region[key=gamma] [data-choose]').click()`);
-    await sleep(900);
-    const store = await state();
-    assert(store.proposals[body.id]?.status === 'decided', 'Proposal was not decided');
-    assert(!store.changed['v/gamma'], 'decision did not clear its Region marker');
-    assert(store.changed['v/beta'], 'decision cleared a different Region marker');
-    assert(store.log.some(e => e.seq > cursor && e.kind === 'ack' && e.region === 'v/gamma'), 'decision did not log ack');
-    const badges = probe(`JSON.stringify({
-      beta:!!document.querySelector('atelier-region[key=beta] .atl-badge--changed'),
-      gamma:!!document.querySelector('atelier-region[key=gamma] .atl-badge--changed')})`);
-    eq(badges, { beta:true, gamma:false }, 'changed badges after decision');
-  });
-
-  // ---- cockpit ----
-  await check('cockpit: lists open loops, filters by owner, and activates the exact row', async () => {
-    const { body } = await api('/api/update', { region:'v/alpha', title:'cockpit baseline' }); await sleep(1300);
-    const rows = probe(`JSON.stringify({
-      human:document.querySelectorAll('.atl-cockpit__row').length,
-      all:(document.querySelector('[data-filter=""]').click(), document.querySelectorAll('.atl-cockpit__row').length)})`);
-    assert(rows.human > 0, 'cockpit listed nothing for the human');
-    assert(rows.all >= rows.human, 'the all filter showed fewer rows than the human filter');
-    act(`document.querySelector('[data-interaction-id="${body.id}"]').click()`); await sleep(300);
-    eq(probe(`JSON.stringify(document.activeElement===document.querySelector('[data-update="${body.id}"] [data-dismiss]'))`),
-      true, 'clicking a Cockpit row did not focus its exact interaction');
-    act(`document.querySelector('[data-interaction-id="${body.id}"]').focus()`);
-    await api('/api/update', { region:'v/beta', title:'event while navigating Cockpit' }); await sleep(1300);
-    eq(probe(`JSON.stringify(document.activeElement===document.querySelector('[data-interaction-id="${body.id}"]'))`),
-      true, 'Cockpit row focus did not survive a store event');
-  });
-
-  await check('cockpit: an offscreen Update returns to its exact control', async () => {
-    const { body } = await api('/api/update', { region:'v/alpha', title:'offscreen exact update' });
-    await sleep(1300);
-    act(`window.scrollTo(0, document.documentElement.scrollHeight)`); await sleep(300);
-    const before = probe(`JSON.stringify((()=>{const update=document.querySelector('[data-update="${body.id}"]').getBoundingClientRect(),
-      cockpit=document.querySelector('#attention-host').getBoundingClientRect();
-      return {offscreen:update.bottom<0, cockpit:cockpit.top<innerHeight && cockpit.bottom>0};})())`);
-    eq(before, { offscreen:true, cockpit:true }, 'persistent Cockpit with offscreen Update');
-    const row = probe(`JSON.stringify((()=>{const r=document.querySelector('[data-interaction-id="${body.id}"]');
-      return r && {region:r.dataset.goto, kind:r.dataset.kind, id:r.dataset.interactionId};})())`);
-    eq(row, { region:'v/alpha', kind:'update', id:body.id }, 'Cockpit row identity');
-    act(`document.querySelector('[data-interaction-id="${body.id}"]').click()`); await sleep(1000);
-    const arrived = probe(`JSON.stringify((()=>{const u=document.querySelector('[data-update="${body.id}"]'), r=u.getBoundingClientRect();
-      return {visible:r.top>=0 && r.bottom<=innerHeight, focused:document.activeElement===u.querySelector('[data-dismiss]'),
-        flashed:u.classList.contains('atl-flash')};})())`);
-    eq(arrived, { visible:true, focused:true, flashed:true }, 'exact Update return');
-    await api('/api/update', { region:'v/beta', title:'unrelated after reveal' }); await sleep(1300);
-    eq(probe(`JSON.stringify(document.activeElement===document.querySelector('[data-update="${body.id}"] [data-dismiss]'))`),
-      true, 'exact focus did not survive an unrelated event');
-  });
-
-  await check('cockpit: changed, decision, explanation, and request rows focus exactly', async () => {
-    const id = 'c-exact-request', store = await state();
-    await api('/api/state', { threads:{ ...store.threads, 'v/beta':[...(store.threads['v/beta']||[]), { id, text:'exact request' }] } });
-    await api('/api/send', { region:'v/beta', id });
-    await api('/api/ready', { changed:['v/alpha'] });
-    const { body } = await api('/api/propose', { region:'v/gamma', question:'Exact Proposal?', options:['First','Second'] });
-    await api('/api/explain-request', { id:body.id, optionIndex:0, answer:'Explain first' });
-    await sleep(1300);
-    act(`document.querySelector('[data-kind="changed"][data-interaction-id="v/alpha"]').click()`); await sleep(100);
-    eq(probe(`JSON.stringify(document.activeElement.matches('[data-ack]'))`), true, 'changed focus');
-    act(`document.querySelector('[data-kind="decision"][data-interaction-id="${body.id}"]').click()`); await sleep(100);
-    eq(probe(`JSON.stringify(document.activeElement.matches('[data-choose]'))`), true, 'decision focus');
-    act(`document.querySelector('[data-kind="explanation"][data-interaction-id="${body.id}:0"]').click()`); await sleep(100);
-    eq(probe(`JSON.stringify(document.activeElement===document.querySelector('[data-proposal="${body.id}"] .atl-option'))`), true, 'explanation focus');
-    act(`document.querySelector('[data-kind="request"][data-interaction-id="${id}"]').click()`); await sleep(100);
-    eq(probe(`JSON.stringify(document.activeElement.dataset.comment)`), id, 'request focus');
-    eq(probe(`JSON.stringify(window.fixtureReveal('v/beta'))`), true, 'Region shorthand result');
-    eq(probe(`JSON.stringify(document.activeElement.regionKey)`), 'v/beta', 'Region shorthand focus');
-  });
-
-  await check('cockpit: pinned Thread focus survives an unrelated event', async () => {
-    const id = 'c-exact-request';
-    await api('/api/reply', { region:'v/beta', id, msg:'implemented in pinned Thread', state:'implemented' }); await sleep(1300);
-    act(`document.querySelector('#pinned-beta [data-comment="${id}"] [data-accept]').focus()`);
-    await api('/api/update', { region:'v/gamma', title:'unrelated to pinned Thread' }); await sleep(1300);
-    eq(probe(`JSON.stringify(document.activeElement===document.querySelector('#pinned-beta [data-comment="${id}"] [data-accept]'))`),
-      true, 'pinned Thread focus');
-  });
-
-  await check('cockpit: a resolver mounts an implemented Thread and focuses its verdict', async () => {
-    const id = 'c-conditionally-mounted';
-    const store = await state();
-    await api('/api/state', { threads:{ ...store.threads, 'v/hidden':[{ id, text:'review hidden work' }] } });
-    await api('/api/send', { region:'v/hidden', id });
-    await api('/api/reply', { region:'v/hidden', id, msg:'implemented while unmounted', state:'implemented' });
-    await sleep(1300);
-    eq(probe(`JSON.stringify(!!document.querySelector('atelier-region[key=hidden]'))`), false, 'hidden Region mounted before reveal');
-    const row = probe(`JSON.stringify((()=>{const r=document.querySelector('[data-interaction-id="${id}"]');
-      return r && {region:r.dataset.goto, kind:r.dataset.kind, id:r.dataset.interactionId};})())`);
-    eq(row, { region:'v/hidden', kind:'verdict', id }, 'implemented Thread row identity');
-    act(`document.querySelector('[data-interaction-id="${id}"]').click()`); await sleep(500);
-    const arrived = probe(`JSON.stringify((()=>{const host=document.querySelector('#dynamic-region'), c=document.querySelector('[data-comment="${id}"]');
-      return {filter:host.dataset.filter, selected:host.dataset.selected, region:!!document.querySelector('atelier-region[key=hidden]'),
-        exact:!!c, focused:document.activeElement===c?.querySelector('[data-accept]'), flashed:c?.classList.contains('atl-flash')||false};})())`);
-    eq(arrived, { filter:'all', selected:'v/hidden', region:true, exact:true, focused:true, flashed:true }, 'resolved Thread return');
-  });
-
-  await check('cockpit: a sheet Thread opens at its exact verdict', async () => {
-    const id = 'c-sheet-verdict', store = await state();
-    await api('/api/state', { threads:{ ...store.threads, 'v/gamma':[...(store.threads['v/gamma']||[]), { id, text:'review sheet work' }] } });
-    await api('/api/send', { region:'v/gamma', id });
-    await api('/api/reply', { region:'v/gamma', id, msg:'sheet work implemented', state:'implemented' });
-    await sleep(1300);
-    act(`document.querySelector('[data-interaction-id="${id}"]').click()`); await sleep(400);
-    const arrived = probe(`JSON.stringify((()=>{const c=document.querySelector('.atl-sheet [data-comment="${id}"]');
-      return {region:document.querySelector('.atl-sheet atelier-comments')?.region, exact:!!c,
-        focused:document.activeElement===c?.querySelector('[data-accept]'), flashed:c?.classList.contains('atl-flash')||false};})())`);
-    eq(arrived, { region:'v/gamma', exact:true, focused:true, flashed:true }, 'sheet verdict return');
-    browser(['press', 'Escape']); await sleep(200);
-  });
-
-  await check('cockpit: a failed resolver or missing interaction fails visibly', async () => {
-    const missing = probe(`JSON.stringify(window.fixtureReveal({region:'v/alpha',kind:'update',id:'missing-update'}))`);
-    eq(missing, false, 'missing exact interaction result');
-    let failure = probe(`JSON.stringify({warning:document.querySelector('.atl-warn')?.textContent||'',
-      tabindex:document.querySelector('atelier-region[key=alpha]').hasAttribute('tabindex')})`);
-    assert(failure.warning.includes('missing-update'), 'missing interaction did not warn');
-    eq(failure.tabindex, false, 'failed reveal mutated the authored Region');
-    const { body } = await api('/api/update', { region:'v/alpha', title:'hidden exact target' }); await sleep(1300);
-    act(`document.querySelector('[data-update="${body.id}"]').style.display='none'`);
-    eq(probe(`JSON.stringify(window.fixtureReveal({region:'v/alpha',kind:'update',id:'${body.id}'}))`),
-      false, 'hidden interaction result');
-    assert(probe(`JSON.stringify(document.querySelector('.atl-warn[data-warning="reveal"]')?.textContent||'')`).includes(body.id),
-      'hidden interaction did not warn');
-    act(`document.querySelector('[data-update="${body.id}"]').style.display=''`);
-    eq(probe(`JSON.stringify(window.fixtureReveal({region:'v/alpha',kind:'update',id:'${body.id}'}))`), true, 'recovered reveal');
-    eq(probe(`JSON.stringify(!!document.querySelector('.atl-warn[data-warning="reveal"]'))`), false, 'stale reveal warning');
-    act(`window.setFixtureResolver(()=>{throw new Error('resolver sentinel')})`);
-    const rejected = probe(`JSON.stringify(window.fixtureReveal({region:'v/alpha',kind:'update',id:'missing-update'}))`);
-    eq(rejected, false, 'throwing resolver result');
-    failure = probe(`JSON.stringify(document.querySelector('.atl-warn')?.textContent||'')`);
-    assert(failure.includes('resolver sentinel'), 'resolver error did not warn');
-    act(`window.installFixtureResolver()`);
-    eq(probe(`JSON.stringify(window.fixtureReveal({region:'v/alpha',kind:'update',id:'${body.id}'}))`), true, 'resolver recovery');
+  await check('thread: an unsent new Thread survives a reload', async () => {
+    altClick(`document.querySelector('atelier-region[key=beta] h2')`);
+    await sleep(200);
+    act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value='draft kept'; t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    browser(['reload']); await sleep(1300);
+    eq(probe(`JSON.stringify(document.querySelector('atelier-margin [data-new]')?.value)`), 'draft kept', 'draft after reload');
+    act(`document.querySelector('atelier-margin [data-discard]').click()`);
   });
 
   // ---- proposals ----
-  await check('proposal: renders in its Region and records a chosen option', async () => {
-    const { body } = await api('/api/propose', { region:'v/alpha', question:'Which order?', options:['Provider first','Ingest first'] });
-    await sleep(1300);
-    const q = probe(`JSON.stringify(document.querySelector('atelier-region[key=alpha] .atl-proposal__q')?.textContent||'')`);
-    eq(q, 'Which order?', 'proposal question');
-    act(`[...document.querySelectorAll('atelier-region[key=alpha] [data-choose]')][1].click()`);
+  await check('proposal: sits in the margin at its Region and records a choice', async () => {
+    const { body } = await api('/api/propose', { region:'v/fig', question:'Which figure?', options:['Keep it', 'Drop it'] });
     await sleep(900);
-    const pr = (await state()).proposals[body.id];
-    eq([pr.status, pr.choiceIndex], ['decided', 1], 'decision');
+    level(tops(body.id, `document.querySelector('atelier-region[key=fig]')`), 'proposal card');
+    act(`document.querySelector('[data-decide="${body.id}"][data-i="0"]').click()`);
+    await sleep(600);
+    eq((await state()).proposals[body.id].choiceIndex, 0, 'choice');
+    assert(probe(`JSON.stringify(document.querySelector('[data-slot="${body.id}"]').innerText)`).startsWith('✓'), 'decided card did not collapse');
   });
 
-  await check('proposal: a multiline custom draft survives reload and submits by keyboard', async () => {
-    const { body } = await api('/api/propose', { region:'v/alpha', question:'Cut the step?', options:['Keep','Cut'] });
-    await sleep(1300);
-    viewport(390, 844);
-    act(`(()=>{const i=document.querySelector('[data-proposal="${body.id}"] .atl-custom textarea');
-         i.value='Split it\\nin two'; i.dispatchEvent(new Event('input')); i.focus()})()`);
-    open(base + '/'); await sleep(1200);
-    const restored = probe(`JSON.stringify(document.querySelector('[data-proposal="${body.id}"] .atl-custom textarea').value)`);
-    eq(restored, 'Split it\nin two', 'custom draft after reload');
-    act(`document.querySelector('[data-proposal="${body.id}"] .atl-custom textarea').focus()`);
-    browser(['press', 'Meta+Enter']); await sleep(900);
-    const pr = (await state()).proposals[body.id];
-    eq([pr.status, pr.custom], ['decided', 'Split it\nin two'], 'custom decision');
-    viewport(1440, 900);
+  await check('proposal: an anchor places it beside the exact text', async () => {
+    const { body } = await api('/api/propose', { region:'v/alpha', question:'Lazy?', options:['Yes', 'No'], anchor:{ region:'v/alpha', quote:'lazy dog' } });
+    await sleep(900);
+    eq((await state()).proposals[body.id].anchor.quote, 'lazy dog', 'stored anchor');
+    // It shares a line with the selection Thread, so it is pushed below it until it becomes active.
+    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('${body.id}')).then(() => 'ok')`]);
+    await sleep(700);
+    const t = probe(`JSON.stringify((()=>{const r=[...CSS.highlights.get('atl-active')].find(r=>r.toString()==='lazy dog');
+      return { card: Math.round(document.querySelector('[data-slot="${body.id}"]').getBoundingClientRect().top), anchor: Math.round(r.getBoundingClientRect().top) }})())`);
+    level(t, 'anchored proposal');
   });
 
-  await check('proposal: explanation draft, focus, and caret survive an unrelated event', async () => {
-    const long = 'Strict — reject incomplete records and explain every consequence before continuing';
-    const { body } = await api('/api/propose', { region:'v/alpha', question:'Which default?', options:[long,'Lenient'] });
-    await sleep(1300);
-    viewport(390, 844);
-    act(`(()=>{document.querySelector('[data-proposal="${body.id}"] [data-why]').click();
-         const i=document.querySelector('[data-proposal="${body.id}"] form[data-explain] textarea');
-         i.value='what\\nbreaks if I pick this?'; i.dispatchEvent(new Event('input')); i.focus(); i.setSelectionRange(4,4)})()`);
-    await api('/api/update', { region:'v', title:'unrelated event' }); await sleep(1300);
-    const draft = probe(`JSON.stringify((()=>{const i=document.querySelector('[data-proposal="${body.id}"] form[data-explain] textarea');
-      return {value:i.value, focused:document.activeElement===i, caret:i.selectionStart, visible:!i.closest('form').hidden};})())`);
-    eq(draft, { value:'what\nbreaks if I pick this?', focused:true, caret:4, visible:true }, 'explanation draft');
-    browser(['press', 'Meta+Enter']); await sleep(900);
-    let pr = (await state()).proposals[body.id];
-    eq(pr.explanationRequests['0']?.status, 'requested', 'request not recorded');
-    const waiting = probe(`JSON.stringify(document.querySelector('[data-proposal="${body.id}"] .atl-explain--waiting')?.textContent||'')`);
-    assert(waiting.includes('what'), 'the pending question is not visible on the option');
-    await api('/api/explain', { id: body.id, optionIndex:0, text:'nothing breaks, it only warns' });
-    await sleep(1300);
-    const answered = probe(`JSON.stringify(document.querySelector('[data-proposal="${body.id}"] .atl-explain')?.textContent||'')`);
-    assert(answered.includes('nothing breaks'), 'the answer never reached the option');
-    viewport(1440, 900);
+  await check('proposal: a custom answer is recorded', async () => {
+    const { body } = await api('/api/propose', { region:'v/beta', question:'Name?', options:['A', 'B'] });
+    await sleep(900);
+    act(`(()=>{document.querySelector('[data-custom="${body.id}"]').value='my own'; document.querySelector('[data-decide-custom="${body.id}"]').click()})()`);
+    await sleep(600);
+    const p = (await state()).proposals[body.id];
+    eq([p.status, p.custom], ['decided', 'my own'], 'custom decision');
   });
 
-  await check('proposal: long options stay left-aligned with their explanation control', async () => {
-    const openProposal = Object.values((await state()).proposals).find(pr => pr.region === 'v/alpha' && pr.status === 'open');
-    assert(openProposal?.options[0].length > 60, 'no long open option to inspect');
-    for (const [width, height] of [[1440,900],[390,844]]){
-      viewport(width, height); await sleep(300);
-      const layout = probe(`JSON.stringify((()=>{const option=document.querySelector('[data-proposal="${openProposal.id}"] .atl-option'),
-        choose=option.querySelector('[data-choose]'), why=option.querySelector('[data-why]'), a=choose.getBoundingClientRect(), b=why.getBoundingClientRect();
-        return {align:getComputedStyle(choose).textAlign, sameRow:Math.abs(a.top-b.top)<2, right:Math.round(b.right), viewport:innerWidth,
-          overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};})())`);
-      eq(layout.align, 'left', `${width}px option alignment`);
-      assert(layout.sameRow, `${width}px explanation control detached`);
-      assert(layout.right <= layout.viewport && layout.overflow === 0, `${width}px option overflow`);
-    }
-    viewport(1440, 900);
+  await check('proposal: an option explanation is asked and answered in place', async () => {
+    const { body } = await api('/api/propose', { region:'v/list', question:'Order?', options:['Alphabetical', 'By date'] });
+    await sleep(900);
+    act(`(()=>{document.querySelector('[data-explain-text="${body.id}:1"]').value='why date?'; document.querySelector('[data-explain="${body.id}"][data-i="1"]').click()})()`);
+    await sleep(600);
+    eq((await state()).proposals[body.id].explanationRequests['1'].answer, 'why date?', 'request');
+    await api('/api/explain', { id:body.id, optionIndex:1, text:'dates match the audit' });
+    await sleep(900);
+    assert(probe(`JSON.stringify(document.querySelector('[data-card="${body.id}"]').innerText)`).includes('dates match the audit'), 'explanation not shown');
   });
 
   await check('proposal: a second question cannot displace an open Proposal', async () => {
-    const before = await state();
-    const openProposal = Object.values(before.proposals).find(pr => pr.region === 'v/alpha' && pr.status === 'open');
-    assert(openProposal, 'no open Proposal to protect');
-    const replacement = await api('/api/propose', { region:'v/alpha', question:'Replacement?', options:['Replace'] });
-    eq(replacement.status, 409, 'duplicate Proposal status');
-    await sleep(400);
-    const after = await state();
-    eq(after.proposals[openProposal.id]?.status, 'open', 'original Proposal status');
-    assert(!Object.values(after.proposals).some(pr => pr.question === 'Replacement?'), 'replacement Proposal was stored');
-    const visible = probe(`JSON.stringify(document.querySelector('[data-proposal="${openProposal.id}"] .atl-proposal__q')?.textContent||'')`);
-    eq(visible, openProposal.question, 'visible Proposal');
+    eq((await api('/api/propose', { region:'v/list', question:'Replace?', options:['x'] })).status, 409, 'status');
   });
 
-  // ---- placements ----
-  await check('placement: the side gutter sits beside the content at 1440', async () => {
-    const side = probe(`JSON.stringify((()=>{const t=document.querySelector('atelier-region[key=beta] atelier-comments'),
-      s=getComputedStyle(t); return {position:s.position,width:s.width};})())`);
-    eq([side.position, side.width], ['absolute', '320px'], 'side gutter at 1440');
+  // ---- activity drawer ----
+  await check('activity: the drawer groups what waits, what changed, and Updates', async () => {
+    await api('/api/update', { region:'v/beta', title:'Batch finished', body:'six Regions re-rendered' });
+    await api('/api/ready', { changed:['v/beta'] });
+    await sleep(1200);
+    const tools = probe(`JSON.stringify(document.querySelector('atelier-activity .atl-tools').innerText)`);
+    assert(/2 waiting for you/.test(tools), `tools: ${tools}`);
+    act(`document.querySelector('[popovertarget=atl-drawer]').click()`);
+    const d = probe(`JSON.stringify({ open: document.querySelector('#atl-drawer').matches(':popover-open'), text: document.querySelector('#atl-drawer').innerText })`);
+    eq(d.open, true, 'drawer open');
+    for (const want of ['waiting for you', 'decide: lazy?', 'changed since you looked', 'beta', 'updates', 'batch finished']) assert(d.text.toLowerCase().includes(want), `drawer lacks "${want}"`);
+    eq(probe(`JSON.stringify(document.querySelector('atelier-region[key=beta]').classList.contains('atl-changed'))`), true, 'changed marker');
   });
 
-  await check('placement: the side gutter stacks at 820 with no horizontal overflow', async () => {
-    viewport(820, 1000);
+  await check('activity: a waiting item reveals and opens its exact card', async () => {
+    const id = Object.values((await state()).proposals).find(p => p.question === 'Lazy?').id;
+    act(`document.querySelector('#atl-drawer [data-reveal="${id}"]').click()`);
+    await sleep(700);
+    eq(probe(`JSON.stringify({ open: document.querySelector('#atl-drawer').matches(':popover-open'), active: !!document.querySelector('[data-card="${id}"].is-open') })`),
+      { open:false, active:true }, 'after reveal');
+  });
+
+  await check('activity: ✓ Seen and Dismiss clear their rows', async () => {
+    act(`document.querySelector('[popovertarget=atl-drawer]').click()`);
+    act(`document.querySelector('#atl-drawer [data-ack="v/beta"]').click()`);
     await sleep(500);
-    const narrow = probe(`JSON.stringify({
-      position:getComputedStyle(document.querySelector('atelier-region[key=beta] atelier-comments')).position,
-      overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth})`);
-    eq([narrow.position, narrow.overflow], ['static', 0], 'stacked gutter at 820');
-    viewport(1440, 900);
-    await sleep(400);
+    act(`document.querySelector('#atl-drawer [data-dismiss]').click()`);
+    await sleep(500);
+    const s = await state();
+    assert(!s.changed['v/beta'], 'ack not stored');
+    assert(Object.values(s.updates).every(u => u.dismissedAt), 'update not dismissed');
+    act(`document.querySelector('#atl-drawer').hidePopover()`);
   });
 
-  await check('placement: the sheet pins to the viewport and Escape restores focus', async () => {
-    act(`document.querySelector('atelier-region[key=gamma] .atl-comment-btn').click()`);
-    await sleep(600);
-    const opened = probe(`JSON.stringify((()=>{const s=document.querySelector('.atl-sheet'), r=s?.getBoundingClientRect();
-      return {open:!!s, region:s?.querySelector('atelier-comments').getAttribute('for'),
-        pinned:!!r && Math.abs(r.bottom-innerHeight)<2, focused:document.activeElement===s?.querySelector('.atl-compose textarea')};})())`);
-    eq(opened, { open:true, region:'v/gamma', pinned:true, focused:true }, 'sheet');
-    browser(['press', 'Escape']); await sleep(300);
-    const closed = probe(`JSON.stringify({sheet:!!document.querySelector('.atl-sheet'), space:!!document.querySelector('.atl-sheet-space'),
-      focus:document.activeElement===document.querySelector('atelier-region[key=gamma] .atl-comment-btn')})`);
-    eq(closed, { sheet:false, space:false, focus:true }, 'Escape close');
-  });
-
-  await check('placement: a growing sheet reserves bottom clearance at desktop and narrow widths', async () => {
-    for (const [width, height] of [[1440,900],[390,844]]){
-      viewport(width, height);
-      act(`document.querySelector('atelier-region[key=gamma] .atl-comment-btn').click()`); await sleep(300);
-      const before = probe(`JSON.stringify(document.querySelector('.atl-sheet-space').getBoundingClientRect().height)`);
-      act(`(()=>{const i=document.querySelector('.atl-sheet .atl-compose textarea'); i.style.height='180px'; i.dispatchEvent(new Event('input'))})()`);
-      await sleep(400);
-      const clearance = probe(`JSON.stringify((()=>{const s=document.querySelector('.atl-sheet'), space=document.querySelector('.atl-sheet-space');
-        window.scrollTo(0,document.documentElement.scrollHeight);
-        return {sheet:Math.round(s.getBoundingClientRect().height), space:Math.round(space.getBoundingClientRect().height),
-          target:Math.round(document.querySelector('atelier-region[key=gamma]').getBoundingClientRect().bottom),
-          available:Math.round(innerHeight-s.getBoundingClientRect().height)};})())`);
-      assert(clearance.space >= clearance.sheet - 1, `${width}px spacer is shorter than the sheet`);
-      assert(clearance.space > before, `${width}px spacer did not follow textarea growth`);
-      assert(clearance.target <= clearance.available + 2, `${width}px last Region remains under the sheet`);
-      act(`document.querySelector('.atl-sheet [data-close]').click()`); await sleep(200);
-    }
-    viewport(1440, 900);
+  await check('activity: desktop notifications are requested on the first gesture', async () => {
+    browser(['reload']); await sleep(1200);
+    act(`(()=>{window.__asked=0; Object.defineProperty(Notification,'permission',{get:()=>'default',configurable:true});
+      Notification.requestPermission=()=>{window.__asked++; return Promise.resolve('default')}})()`);
+    browser(['click', 'h1']);
+    await sleep(300);
+    eq(probe(`JSON.stringify(window.__asked)`), 1, 'permission requests');
   });
 
   // ---- ready ----
-  await check('ready: swaps only the named Region and holds scroll, focus, and Threads', async () => {
-    let store = await state();
-    if (!(store.threads['v/alpha']||[]).some(comment => comment.text === 'first comment')){
-      const id = 'c-ready-thread';
-      await api('/api/state', { threads:{ ...store.threads, 'v/alpha':[...(store.threads['v/alpha']||[]), { id, text:'first comment' }] } });
-      await api('/api/send', { region:'v/alpha', id }); await sleep(900); store = await state();
-    }
-    let openUpdate = Object.values(store.updates).find(update => update.region === 'v/alpha' && !update.dismissedAt);
-    if (!openUpdate){ await api('/api/update', { region:'v/alpha', title:'Ready focus' }); await sleep(1300);
-      openUpdate = Object.values((await state()).updates).find(update => update.region === 'v/alpha' && !update.dismissedAt); }
-    assert(openUpdate, 'no open Update for Ready focus');
-    act(`document.querySelector('[data-interaction-id="${openUpdate.id}"]').click()`); await sleep(200);
-    act(`window.scrollTo(0,700)`);
-    await sleep(300);
-    // What must not move is the material under the human's eyes, not the scroll number. A Ready can
-    // legitimately grow chrome above the fold — a new Cockpit row, for instance — and the browser
-    // then adjusts scrollY to hold the view still. Asserting scrollY would fail on correct behavior
-    // and, worse, pass when content really did jump.
-    const anchor = probe(`JSON.stringify(Math.round(document.querySelector('#alpha-body').getBoundingClientRect().top))`);
-    writeSurface('alpha body v2');
+  await check('ready: swaps only the named Region and keeps draft, caret, focus, scroll and anchors', async () => {
+    const c = await threadOf('v/alpha', 'selection thread');
+    act(`(()=>{document.querySelector('[data-open="${c.id}"]')?.click(); scrollTo(0, 400); window.__noReload=true;
+      const t=document.querySelector('[data-reply-text="${c.id}"]'); t.focus({preventScroll:true}); t.value='half typed'; t.setSelectionRange(4,4)})()`);
+    const before = probe(`JSON.stringify({ y: scrollY, beta: document.querySelector('atelier-region[key=beta]').innerHTML })`);
+    writeSurface('the quick brown fox jumps over the lazy dog, edited');
     await api('/api/ready', { changed:['v/alpha'] });
-    await sleep(1600);
-    const after = probe(`JSON.stringify({
-      alpha:document.querySelector('#alpha-body').textContent,
-      beta:document.querySelector('atelier-region[key=beta] p').textContent,
-      anchor:Math.round(document.querySelector('#alpha-body').getBoundingClientRect().top),
-      thread:document.querySelector('atelier-region[key=alpha] .atl-comment')?.textContent.includes('first comment')||false,
-      focused:document.activeElement===document.querySelector('[data-update="${openUpdate.id}"] [data-dismiss]'),
-      bars:document.querySelectorAll('atelier-region[key=alpha] > .atl-bar').length})`);
-    eq(after.alpha, 'alpha body v2', 'named Region did not swap');
-    eq(after.beta, 'beta body', 'an unnamed Region changed');
-    assert(Math.abs(after.anchor - anchor) <= 2, `the swapped content jumped ${after.anchor - anchor}px under the human`);
-    assert(after.thread, 'the existing Thread was lost in the swap');
-    assert(after.focused, 'the exact focused interaction was lost in the swap');
-    eq(after.bars, 1, 'chrome was mounted twice after the swap');
+    await sleep(1500);
+    const after = probe(`JSON.stringify({ reload: !window.__noReload, y: scrollY, text: document.querySelector('#alpha-body').textContent,
+      beta: document.querySelector('atelier-region[key=beta]').innerHTML, focused: document.activeElement.dataset.replyText,
+      draft: document.activeElement.value, caret: document.activeElement.selectionStart,
+      anchored: [...CSS.highlights.get('atl-active')].concat([...CSS.highlights.get('atl-anchor')]).some(r=>r.toString()==='brown fox'),
+      changed: document.querySelector('atelier-region[key=alpha]').classList.contains('atl-changed') })`);
+    eq(after.reload, false, 'page reloaded');
+    assert(after.text.endsWith('edited'), 'Region not swapped');
+    eq(after.beta, before.beta, 'unnamed Region changed');
+    assert(Math.abs(after.y - before.y) <= 2, `scroll moved ${before.y} → ${after.y}`);
+    eq([after.focused, after.draft, after.caret, after.anchored, after.changed], [c.id, 'half typed', 4, true, true], 'preserved state');
+  });
+
+  await check('ready: an anchor whose text is gone says so and fails preflight', async () => {
+    writeSurface('a sentence without the fox');
+    await api('/api/ready', { changed:['v/alpha'] });
+    await sleep(1500);
+    const c = await threadOf('v/alpha', 'selection thread');
+    act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
+    assert(probe(`JSON.stringify(document.querySelector('[data-card="${c.id}"]').innerText)`).includes('has changed'), 'no detached note');
+    const result = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'], { encoding:'utf8', timeout:120000 });
+    assert(result.status === 1 && /no longer find their target/.test(result.stderr), `preflight: ${result.status} ${result.stderr.slice(0, 300)}`);
+    writeSurface();
+    await api('/api/ready', { changed:['v/alpha'] });
+    await sleep(1200);
   });
 
   await check('ready: an unknown Region key warns on the page', async () => {
-    writeSurface('alpha body v3');
-    await api('/api/ready', { changed:['v/alpha','v/ghost'] });
-    await sleep(1600);
-    const warn = probe(`JSON.stringify(document.querySelector('.atl-warn')?.textContent||'')`);
-    assert(warn.includes('v/ghost'), `no warning for an unknown key (saw ${JSON.stringify(warn)})`);
+    await api('/api/ready', { changed:['v/nope'] });
+    await sleep(1200);
+    assert(probe(`JSON.stringify(document.querySelector('.atl-warnings')?.textContent || '')`).includes('v/nope'), 'no warning');
+    await api('/api/ready', { changed:['v/alpha'] });
+    await sleep(1200);
+    eq(probe(`JSON.stringify(!!document.querySelector('.atl-warnings'))`), false, 'warning did not clear');
   });
 
-  await check('ready: a Region new to the page triggers a reload', async () => {
-    writeSurface('alpha body v3', `<atelier-region key="delta"><h2>Delta</h2><p>delta body</p></atelier-region>`);
-    await api('/api/ready', { changed:['v/delta'] });
+  await check('ready: a Region new to the page reloads and keeps unsent Threads', async () => {
+    altClick(`document.querySelector('atelier-region[key=beta] h2')`);
+    await sleep(200);
+    act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value='survives reload'; t.dispatchEvent(new Event('input',{bubbles:true})); window.__noReload=true})()`);
+    writeSurface(undefined, '<atelier-region key="gamma"><h2>Gamma</h2><p>new</p></atelier-region>');
+    await api('/api/ready', { changed:['v/gamma'] });
     await sleep(2200);
-    const keys = probe(`JSON.stringify([...document.querySelectorAll('atelier-region')].map(e=>e.regionKey))`);
-    assert(keys.includes('v/delta'), 'the new Region never appeared');
+    eq(probe(`JSON.stringify({ reload: !window.__noReload, gamma: !!document.querySelector('atelier-region[key=gamma]'), draft: document.querySelector('atelier-margin [data-new]')?.value })`),
+      { reload:true, gamma:true, draft:'survives reload' }, 'after structural Ready');
+    act(`document.querySelector('atelier-margin [data-discard]').click()`);
   });
 
-  // ---- resilience ----
+  await check('preflight: the fixture passes the render gates', async () => {
+    const result = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'], { encoding:'utf8', timeout:120000 });
+    assert(result.status === 0, `preflight exited ${result.status}: ${result.stderr.slice(0, 400)}`);
+  });
+
   await check('resilience: a malformed request body is rejected without killing the server', async () => {
     const bad = await api('/api/propose', { region:'', question:'', options:[] });
     eq(bad.status, 400, 'status for a malformed body');

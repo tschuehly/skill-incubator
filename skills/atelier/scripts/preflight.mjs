@@ -4,8 +4,9 @@
 //   node <skill-dir>/scripts/preflight.mjs --url http://127.0.0.1:<port> \
 //     --poller-identity /abs/path/to/tools/review-poll.sh [--evidence-dir .review/preflight]
 //
-// It checks silent handoff defects: store and poller reachability, kit drift, Region identity and
-// references, browser errors and kernel warnings, overflow, and diagram rendering.
+// It checks silent handoff defects: store and poller reachability, kit drift, Region identity, the
+// margin and activity elements, stored anchors that no longer resolve, browser errors and kernel
+// warnings, overflow, and diagram rendering.
 //
 // --skip-poller / --skip-render exist for kernel tests. Neither is a human handoff.
 import fs from 'node:fs';
@@ -91,23 +92,19 @@ if (!skipPoller && pollerIdentity){
 // ---- rendered Surface ----------------------------------------------------------------
 // Region identity and cross-references can only be judged after the kernel has upgraded the
 // document, so this runs in a real browser rather than over the HTML source.
-const probe = `(() => {
+const probe = `(async () => {
+  const kernel = await import('/atelier.mjs').catch(() => null);
   const regions = [...document.querySelectorAll('atelier-region')];
   const keys = regions.map(r => r.regionKey || '');
   const unnamed = regions.filter(r => !(r.getAttribute('key') || '').trim())
     .map(r => (r.querySelector('h1,h2,h3')?.textContent || r.textContent || '').trim().slice(0, 40) || '(empty Region)');
   const duplicates = [...new Set(keys.filter((k, i) => k && keys.indexOf(k) !== i))];
-  const known = new Set(keys);
-  const dangling = [...document.querySelectorAll('atelier-attention[for],atelier-comments[for],atelier-proposal[for],atelier-update[for]')]
-    .map(el => ({ tag: el.tagName.toLowerCase(), target: el.getAttribute('for') }))
-    .filter(ref => !known.has(ref.target));
-  const mounted = regions.filter(r => r.querySelector(':scope > .atl-bar')).length;
-  // Evidence, never a gate. A sheet Thread mounts no composer until the human clicks, so an
-  // all-sheet Surface has nowhere visible to write. The mix makes that choice observable later.
-  const placements = regions.reduce((mix, r) => {
-    const value = r.getAttribute('comments') || 'below';
-    return { ...mix, [value]: (mix[value] || 0) + 1 };
-  }, {});
+  // The margin and the activity drawer must sit outside every Region: a Ready replaces Regions,
+  // and chrome inside one would be swapped away with the human's half-typed Thread.
+  const margins = [...document.querySelectorAll('atelier-margin')];
+  const activities = [...document.querySelectorAll('atelier-activity')];
+  const chromeInRegion = [...margins, ...activities].filter(el => el.closest('atelier-region')).map(el => el.tagName.toLowerCase());
+  const unresolved = kernel?.unresolvedAnchors ? kernel.unresolvedAnchors() : [];
 
   // Diagrams are agent-authored: whatever renders one must mark it ready and keep prose behind it,
   // or a screenshot of a blank box is the only evidence anyone will ever have.
@@ -145,7 +142,7 @@ const probe = `(() => {
     offline: doc.hasAttribute('data-atl-offline'),
     warning: (document.querySelector('.atl-warn')?.textContent || '').trim(),
     visibleText: (document.body.innerText || '').trim().length,
-    regionCount: regions.length, mounted, keys, unnamed, duplicates, dangling, placements,
+    regionCount: regions.length, keys, unnamed, duplicates, margins: margins.length, activities: activities.length, chromeInRegion, unresolved,
     diagramCount: diagrams.length, diagramFailures, overflow,
   });
 })()`;
@@ -178,7 +175,7 @@ if (!skipRender && state){
         step(['open', url]);
         // Wait for the kernel to upgrade the document, not merely for the network to go quiet.
         step(['wait', '--fn', "document.readyState==='complete' && !!customElements.get('atelier-region')"
-          + " && [...document.querySelectorAll('atelier-region')].every(r=>r.querySelector(':scope > .atl-bar'))"], undefined, 30000);
+          + " && !!document.querySelector('atelier-activity .atl-tools button')"], undefined, 30000);
         // Give diagrams their own bounded wait and never fail on it here: a renderer that never
         // finishes must be reported as that, not as an unexplained timeout.
         browser(['--session', session, 'wait', '--fn',
@@ -210,15 +207,16 @@ for (const report of reports){
   if (report.consoleErrors.length) fail(gate, `uncaught browser error(s): ${report.consoleErrors.join(' | ')}`);
   if (!report.title || report.visibleText < 40) fail(gate, 'the rendered page has no meaningful title or content');
   if (!report.regionCount) fail(gate, 'no <atelier-region> was rendered; the human would have nothing to comment on');
-  if (report.regionCount !== report.mounted) fail(gate, `${report.regionCount - report.mounted} Region(s) never mounted their chrome`);
+  if (report.margins !== 1) fail(gate, `found ${report.margins} <atelier-margin>; a Surface needs exactly one, or Threads have nowhere to appear`);
+  if (report.activities !== 1) fail(gate, `found ${report.activities} <atelier-activity>; a Surface needs exactly one in its header, or open decisions are unreachable`);
+  if (report.chromeInRegion.length) fail(gate, `${report.chromeInRegion.join(', ')} sits inside a Region; a Ready would replace it`);
+  if (report.unresolved.length) fail(gate, `${report.unresolved.length} stored Thread/Proposal anchor(s) no longer find their target: ${report.unresolved.map(u => `${u.id} in ${u.region} (${u.reason})`).join(', ')}; restore the text or tell the human in that Thread`);
   if (report.unnamed.length) fail(gate, `Region(s) without a key attribute collide under "unnamed": ${report.unnamed.join(' | ')}`);
   if (report.duplicates.length) fail(gate, `duplicate Region keys silently merge their Threads: ${report.duplicates.join(', ')}`);
-  if (report.dangling.length) fail(gate, `element(s) point at a Region that does not exist: ${report.dangling.map(d => `${d.tag} for="${d.target}"`).join(', ')}`);
   if (report.diagramFailures.length) fail(gate, `diagram(s) are not reviewable: ${report.diagramFailures.map(d => `${d.key} — ${d.reason}`).join('; ')}`);
   if (report.overflow.length) fail(gate, `horizontal overflow: ${JSON.stringify(report.overflow)}`);
   if (!failures.some(message => message.startsWith(`FAIL ${gate}:`))){
-    pass(gate, `${report.viewport.width}x${report.viewport.height}: ${report.regionCount} Region(s) with unique keys and mounted chrome, ${report.diagramCount} diagram(s), no overflow`
-      + `; Thread placement ${Object.entries(report.placements).map(([k,n]) => `${k}=${n}`).join(' ') || 'none'}`);
+    pass(gate, `${report.viewport.width}x${report.viewport.height}: ${report.regionCount} Region(s) with unique keys, one margin and activity outside them, 0 unresolved anchors, ${report.diagramCount} diagram(s), no overflow`);
   }
 }
 if (!skipRender && state && !failures.some(m => m.startsWith('FAIL BROWSER:'))

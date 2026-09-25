@@ -41,7 +41,7 @@ curl -fsS "$BASE/api/state" | grep -F '"name":"atelier-test"' >/dev/null
 
 # The kernel's own files must be served next to the server, or a copied kit renders nothing.
 curl -fsS "$BASE/atelier.mjs" | grep -F "customElements.define('atelier-region'" >/dev/null
-curl -fsS "$BASE/atelier.css" | grep -F '.atl-region' >/dev/null
+curl -fsS "$BASE/atelier.css" | grep -F '.atl-card' >/dev/null
 
 # --- preflight's non-browser gates -----------------------------------------------------
 PORT="$PORT" CURSOR_FILE="$TMP/poller.cursor" bash "$TMP/review-poll.sh" --once >"$TMP/poller.log" 2>&1 &
@@ -108,6 +108,25 @@ post api/comment-reject '{"region":"screening","id":"k1","msg":"The evidence is 
 wait "$POLLER_PID"; POLLER_PID=''
 grep -F 'COMMENT-REJECTED · screening' "$TMP/reject.log" >/dev/null
 grep -F 'The evidence is still missing.' "$TMP/reject.log" >/dev/null
+
+# --- a follow-up in a Thread wakes it, marked as one -----------------------------------
+unknown_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/api/thread-message" -H 'Content-Type: application/json' -d '{"region":"screening","id":"nope","msg":"x"}')"
+[ "$unknown_status" = 404 ] || { echo "FAIL: follow-up on an unsent Thread returned $unknown_status" >&2; exit 1; }
+CURSOR="$(curl -fsS "$BASE/api/state" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(String(JSON.parse(s).seq)))')" \
+  PORT="$PORT" CURSOR_FILE="$TMP/follow.cursor" bash "$TMP/review-poll.sh" --once >"$TMP/follow.log" 2>&1 &
+POLLER_PID=$!
+sleep 0.4
+post api/thread-message '{"region":"screening","id":"k1","msg":"One more thing."}'
+wait "$POLLER_PID"; POLLER_PID=''
+grep -F 'SENT · screening (id k1' "$TMP/follow.log" >/dev/null
+grep -F '(follow-up) One more thing.' "$TMP/follow.log" >/dev/null
+curl -fsS "$BASE/api/state" | grep -F '"author":"human"' >/dev/null
+
+# --- a Proposal keeps its anchor, and drops anything that is not one --------------------
+post api/propose '{"region":"screening/detail","question":"Here?","options":["A"],"anchor":{"quote":"material","prefix":"","junk":1,"point":{"x":"no"}}}'
+anchored="$(curl -fsS "$BASE/api/state")"
+grep -F '"anchor":{"region":"screening/detail","quote":"material"}' <<<"$anchored" >/dev/null \
+  || { echo "FAIL: Proposal anchor not stored cleanly" >&2; exit 1; }
 
 # --- the record survives the server ----------------------------------------------------
 # A review that loses its Threads when the server restarts is not a durable record.
