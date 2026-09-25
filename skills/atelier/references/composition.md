@@ -114,8 +114,8 @@ diagram carries the page.
 
 - **The diagram is on the first screen**, after at most about 60 words naming the subject, the
   finding, and the decision. Mark each gap on its node (color, a badge) so the diagram shows where
-  the process is weak. Keep its `[data-diagram-fallback]` prose in the DOM and hide it visually once
-  the SVG renders. Check that every node is readable and nothing is clipped.
+  the process is weak. Its fallback caption stays hidden once it draws (see
+  [Draw with a library](#draw-with-a-library)). Check that every node is readable and nothing is clipped.
 - **Draw the forward route in stage order.** Stage 1 and its first gates sit at the top of the
   diagram, on the first screen. Put a side lane beside the stage it branches from, and draw feedback
   as a labelled note or a short local return, so the route keeps its order. Keep labels full-size
@@ -131,9 +131,14 @@ diagram carries the page.
 
 Draw diagrams with a library rather than placing SVG shapes by hand; hand-written SVG is for
 custom visuals such as an annotated screenshot. Each renderer marks its figure ready so preflight
-can see it drew, keeps a `[data-diagram-fallback]` caption, and runs again after a Ready:
+can see it drew, keeps a `[data-diagram-fallback]` caption for readers without the renderer, and
+runs again after a Ready. Once the diagram is drawn, the caption stays in the DOM and off the screen,
+so the diagram is the only visible telling of the flow:
 
 ```html
+<style>
+  [data-diagram-ready="true"] [data-diagram-fallback] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
 <figure data-diagram="pipeline">
   <pre class="mermaid">flowchart LR
   draft[Draft build] --> high[HIGH build] --> review{Review}</pre>
