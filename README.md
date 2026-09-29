@@ -32,12 +32,17 @@ Externally maintained skills are copied into `vendored/` at an exact upstream re
 
 This is a curated subset, not a mirror. `vendored/MANIFEST.json` is the roster and provenance record. To adopt another external skill, copy it under the upstream owner, add its pinned revision and tree hash to the manifest, then run `./link.sh <name>`.
 
-Vendored content currently has **zero diff against upstream** — the fork buys the ability
-to edit, not a set of edits. Keep it that way where you can: prefer composing an upstream
+Vendored content has **zero diff against upstream** except the local edits listed below — the
+fork buys the ability to edit, not a set of edits. Keep it that way where you can: prefer composing an upstream
 skill from an incubator skill over editing the upstream copy, so `vendored/` stays a clean
 mirror. In particular, don't relax an upstream `disable-model-invocation: true` to make
 one composition work — that flag marks a user-facing entry point, and clearing it makes
 the skill model-invocable in *every* session. Compose what it delegates to instead.
+
+Local edits to re-apply after every upstream refresh:
+
+- `vercel-labs/agent-browser`: `description` shortened (≈1.1k → ≈280 chars) because every Pi
+  session pays for it in the skill catalog. Keep the triggers; drop product name lists.
 
 This is a fork, and it has a price:
 

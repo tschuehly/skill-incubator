@@ -1,12 +1,14 @@
 ---
 name: write-for-humans
 description: >-
-  Minimize reader effort when creating or reviewing substantial human-facing prose while
-  preserving technical depth and meaning. Use for fidelity-sensitive adaptations and alongside
-  format-specific skills.
+  Minimize reader effort in substantial human-facing prose or its review, keeping depth and
+  meaning; also fidelity-sensitive adaptations. Not for chat or reports to a lead agent unless
+  owner-facing.
 ---
 
 # Write for humans
+
+Do not re-read if this skill's unchanged text is still in context; re-read after compaction.
 
 Minimize the reader's effort to find the point, understand it, and act on it. Make the text:
 
