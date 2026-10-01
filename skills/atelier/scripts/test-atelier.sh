@@ -230,6 +230,50 @@ start_server
 sleep 0.5
 [ "$(decisions_of "$R1")" = 1 ] || { echo "FAIL: a restart repeated a decision" >&2; exit 1; }
 
+# --- the file never falls behind what the server answered --------------------------------
+# An older snapshot written after a newer one turned a pending choice back into an open one.
+# A large store makes any write slow enough for a choice to land while an earlier one is running.
+STORE_JSON="$TMP/.review/atelier-test.json"
+BASE="$BASE" STORE_JSON="$STORE_JSON" node --input-type=module -e '
+  import fs from "node:fs";
+  const { BASE, STORE_JSON } = process.env;
+  const post = (p, b) => fetch(BASE + p, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(b) });
+  const before = await (await fetch(BASE + "/api/state")).json();
+  const { id } = await (await post("/api/propose", { region:"screening/race", question:"Race?", options:["A","B"] })).json();
+  await post("/api/state", { threads:{ ...before.threads, big:[{ id:"big", text:"x".repeat(48e6) }] } });
+  await new Promise(r => setTimeout(r, 20));
+  const decided = await post("/api/decide", { id, choiceIndex:0, attempt:"race" });
+  await new Promise(r => setTimeout(r, 900));
+  let disk = null; try { disk = JSON.parse(fs.readFileSync(STORE_JSON, "utf8")); } catch {}
+  await post("/api/state", { threads:before.threads });
+  const status = disk?.proposals?.[id]?.status ?? "unreadable";
+  if (decided.status !== 200 || status === "open" || status === "unreadable") { console.error(`FAIL: decide answered ${decided.status}, the file says ${status}`); process.exit(1); }
+'
+
+# --- a store that cannot be written changes nothing and tells nobody ----------------------
+# The server used to answer 200 with the choice pending while the file still said open.
+disk_of() { js "st.proposals['$1'].status" <"$STORE_JSON"; }
+F="$(curl -fsS -X POST "$BASE/api/propose" -H 'Content-Type: application/json' -d '{"region":"screening/disk","question":"Disk?","options":["A","B"]}' | js 'st.id')"
+curl -sS --max-time 1 "$BASE/api/poll?cursor=$(curl -fsS "$BASE/api/state" | js 'st.seq')" >"$TMP/unsaved.poll" 2>/dev/null &
+POLLER_PID=$!
+mkdir "$STORE_JSON.tmp"                                               # every write now fails
+expect api/decide "{\"id\":\"$F\",\"choiceIndex\":0,\"attempt\":\"f1\"}" 500
+wait "$POLLER_PID" || true; POLLER_PID=''
+[ ! -s "$TMP/unsaved.poll" ] || { echo "FAIL: a poller heard of an unsaved choice: $(cat "$TMP/unsaved.poll")" >&2; exit 1; }
+[ "$(status_of "$F")/$(disk_of "$F")" = open/open ] || { echo "FAIL: an unsaved choice: $(status_of "$F")/$(disk_of "$F")" >&2; exit 1; }
+rmdir "$STORE_JSON.tmp"
+expect api/decide "{\"id\":\"$F\",\"choiceIndex\":0,\"attempt\":\"f2\"}" 200
+mkdir "$STORE_JSON.tmp"
+expect api/undo-decision "{\"id\":\"$F\",\"attempt\":\"f2\"}" 500
+[ "$(status_of "$F")/$(disk_of "$F")" = pending/pending ] || { echo "FAIL: an unsaved undo: $(status_of "$F")/$(disk_of "$F")" >&2; exit 1; }
+sleep "$(node -e "console.log(($UNDO_MS + 500) / 1000)")"           # the window closes while writes fail
+[ "$(status_of "$F")/$(disk_of "$F")/$(decisions_of "$F")" = pending/pending/0 ] \
+  || { echo "FAIL: an unsaved decision: $(status_of "$F")/$(disk_of "$F")/$(decisions_of "$F")" >&2; exit 1; }
+rmdir "$STORE_JSON.tmp"
+sleep 1.5                                                            # the next try writes it, once
+[ "$(status_of "$F")/$(disk_of "$F")/$(decisions_of "$F")" = decided/decided/1 ] \
+  || { echo "FAIL: after the store recovered: $(status_of "$F")/$(disk_of "$F")/$(decisions_of "$F")" >&2; exit 1; }
+
 # --- handoff waits for a screenshot verdict on exactly this content -----------------------
 # Surfaces were handed over on PREFLIGHT=PASS without anyone looking at them.
 EV="$TMP/evidence"

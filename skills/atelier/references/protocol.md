@@ -158,6 +158,9 @@ the anchor, its card says so, and preflight fails until it is restored or explai
 ```
 
 - Every address is a **Region Key**. There is no second addressing scheme.
+- **Writes**: every change is on disk before the server answers or any poller hears of it. A
+  write that fails answers `500` and leaves the store as it was; a decision whose window closes
+  while writes fail stays `pending` and is retried every second.
 - **Ownership**: one active browser owns `threads`; its `POST /api/state` autosave replaces that
   collection wholesale, so two active browsers can overwrite each other's Thread changes. The
   server owns everything else.

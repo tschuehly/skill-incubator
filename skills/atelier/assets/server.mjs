@@ -52,44 +52,38 @@ const COMMENT_STATES = ['open','acknowledged','in_progress','implemented','accep
 let store = emptyStore();
 try { store = { ...emptyStore(), ...JSON.parse(fs.readFileSync(STORE_FILE, 'utf8')) }; } catch {}
 
-let saveTimer = null;
+// Every mutation is written synchronously before anyone hears of it, so writes can never overtake
+// each other. A write that fails puts the store back to what is on disk and throws: the request
+// answers 500, no event goes out, and the human's page still holds what they wrote.
+// ponytail: the whole store is rewritten per mutation; append a journal if stores reach many MB.
+let saved = JSON.stringify(store, null, 2);
 function persist(){
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async ()=>{
-    // A failed write must stay visible but never take the server down with it: the human's open
-    // Surface keeps working, and the next mutation retries.
-    try {
-      await fsp.mkdir(DATA_DIR, { recursive: true });
-      const tmp = STORE_FILE + '.tmp';
-      await fsp.writeFile(tmp, JSON.stringify(store, null, 2));
-      await fsp.rename(tmp, STORE_FILE);
-    } catch (error){ console.error('store write failed:', error.message); }
-  }, 60);
-}
-// Stopping the server must not cost the human the comment they just sent. The debounce is the
-// reason a plain kill loses writes, so both stop signals flush it synchronously first.
-function persistNow(){
-  clearTimeout(saveTimer); saveTimer = null;
+  const json = JSON.stringify(store, null, 2), tmp = STORE_FILE + '.tmp';
   try {
     fs.mkdirSync(DATA_DIR, { recursive:true });
-    const tmp = STORE_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs.writeFileSync(tmp, json);
     fs.renameSync(tmp, STORE_FILE);
-  } catch (error){ console.error('store write failed:', error.message); }
+  } catch (error){
+    store = JSON.parse(saved);
+    console.error('store write failed, change rolled back:', error.message);
+    throw error;
+  }
+  saved = json;
+  notifyPollers();
 }
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { persistNow(); process.exit(0); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => process.exit(0));   // nothing is ever unwritten
+// Pollers hear of a logged event only once persist() has written it.
 function logEvent(kind, region, id, extra){
   store.seq += 1;
   store.log.push({ seq: store.seq, kind, region: region||null, id: id||null, ts: new Date().toISOString(), ...extra });
   if (store.log.length > 5000) store.log = store.log.slice(-4000);
 }
-function appendLog(kind, region, id, extra){ logEvent(kind, region, id, extra); notifyPollers(); }
 
 // ---- decisions: one click, then an undo window, then the agent hears of it -------------
 // A choice is `pending` until undoUntil. Only then is `decision` logged, which is what wakes the
 // agent, so a human who takes a choice back has cost the agent nothing. The store is written before
 // any caller hears of a change, and boot re-arms every pending choice, so a restart neither drops
-// nor repeats a decision.
+// nor repeats a decision. A failed write leaves the choice pending and tries again a second later.
 const undoTimers = new Map();
 function armDecision(pr){
   clearTimeout(undoTimers.get(pr.id));
@@ -104,7 +98,7 @@ function commitDecision(id){
   logEvent('decision', pr.region, pr.threadId, { proposalId:id, choiceIndex:pr.choiceIndex, custom:pr.custom });
   // A decision proves the human reviewed the Proposal's Region.
   if (store.changed[pr.region]){ delete store.changed[pr.region]; logEvent('ack', pr.region, null, {}); }
-  persistNow(); notifyPollers();
+  try { persist(); } catch { undoTimers.set(id, setTimeout(() => commitDecision(id), 1000)); }
 }
 
 // ---- long-poll ----
@@ -198,7 +192,7 @@ async function handle(req, res){
     }
     const ts = new Date().toISOString();
     for (const key of keys) store.changed[key] = { ts };
-    appendLog('ready', null, null, { changed: keys });  // the Surface cannot validate keys server-side
+    logEvent('ready', null, null, { changed: keys });  // the Surface cannot validate keys server-side
     persist();                                          // (no region registry) — it warns on unknown keys
     return sendJSON(res, 200, { ok:true, changed: keys, cursor: store.seq });
   }
@@ -207,7 +201,7 @@ async function handle(req, res){
     const { region } = await readBody(req);
     const key = str(region, 300);
     if (!key) return sendJSON(res, 400, { ok:false, error:'need region' });
-    if (store.changed[key]){ delete store.changed[key]; appendLog('ack', key, null, {}); persist(); }
+    if (store.changed[key]){ delete store.changed[key]; logEvent('ack', key, null, {}); persist(); }
     return sendJSON(res, 200, { ok:true, cursor: store.seq });
   }
 
@@ -221,7 +215,7 @@ async function handle(req, res){
     const id = `upd-${++store.seq}`;
     store.updates[id] = { id, region:key, title:head, body: body==null ? '' : String(body).slice(0,2000),
       ts:new Date().toISOString(), dismissedAt:null };
-    appendLog('update', key, id, { title:head }); persist();
+    logEvent('update', key, id, { title:head }); persist();
     return sendJSON(res, 200, { ok:true, id, cursor: store.seq });
   }
 
@@ -230,7 +224,7 @@ async function handle(req, res){
     const update = store.updates[String(id||'')];
     if (!update) return sendJSON(res, 404, { ok:false, error:'unknown update' });
     update.dismissedAt = new Date().toISOString();
-    appendLog('update-dismissed', update.region, update.id, {}); persist();
+    logEvent('update-dismissed', update.region, update.id, {}); persist();
     return sendJSON(res, 200, { ok:true, cursor: store.seq });
   }
 
@@ -240,9 +234,9 @@ async function handle(req, res){
     const c = findComment(region, id);
     if (c){ store.sent[id] = new Date().toISOString();
       if (!store.commentState[id]) store.commentState[id] = { value:'open', ts:new Date().toISOString() };
-      appendLog('sent', region, id, { comment: commentBody(c) });
+      logEvent('sent', region, id, { comment: commentBody(c) });
       // Sending proves the human read this Region; let every open page observe the normal ack.
-      if (store.changed[region]){ delete store.changed[region]; appendLog('ack', region, null, {}); }
+      if (store.changed[region]){ delete store.changed[region]; logEvent('ack', region, null, {}); }
       persist(); }
     return sendJSON(res, 200, { ok: !!c, cursor: store.seq });
   }
@@ -251,8 +245,8 @@ async function handle(req, res){
     const { region, id, msg, state } = await readBody(req);
     if (state==='rejected') return sendJSON(res, 400, { ok:false, error:'use /api/comment-reject with a non-empty msg' });
     (store.replies[id] ||= []).push({ ts:new Date().toISOString(), msg:String(msg||''), author:'agent' });
-    appendLog('reply', region, id, { msg });
-    if (state && COMMENT_STATES.includes(state)){ store.commentState[id] = { value:state, ts:new Date().toISOString() }; appendLog('comment-state', region, id, { state }); }
+    logEvent('reply', region, id, { msg });
+    if (state && COMMENT_STATES.includes(state)){ store.commentState[id] = { value:state, ts:new Date().toISOString() }; logEvent('comment-state', region, id, { state }); }
     persist();
     return sendJSON(res, 200, { ok:true });
   }
@@ -266,7 +260,7 @@ async function handle(req, res){
     const ts = new Date().toISOString();
     (store.replies[id] ||= []).push({ ts, msg:text, author:'human' });
     store.commentState[id] = { value:'rejected', ts };
-    appendLog('comment-rejected', region, id, { state:'rejected', msg:text }); persist();
+    logEvent('comment-rejected', region, id, { state:'rejected', msg:text }); persist();
     return sendJSON(res, 200, { ok:true, state:'rejected', cursor: store.seq });
   }
 
@@ -276,7 +270,7 @@ async function handle(req, res){
     const { region, id, state } = await readBody(req);
     if (!COMMENT_STATES.includes(state)) return sendJSON(res, 400, { ok:false, error:'invalid state', allowed:COMMENT_STATES });
     if (state==='rejected') return sendJSON(res, 400, { ok:false, error:'use /api/comment-reject with a non-empty msg' });
-    if (id){ store.commentState[id] = { value:state, ts:new Date().toISOString() }; appendLog('comment-state', region||null, id, { state }); persist(); }
+    if (id){ store.commentState[id] = { value:state, ts:new Date().toISOString() }; logEvent('comment-state', region||null, id, { state }); persist(); }
     return sendJSON(res, 200, { ok: !!id, state, cursor: store.seq });
   }
 
@@ -289,7 +283,7 @@ async function handle(req, res){
     if (!text && !images.length) return sendJSON(res, 400, { ok:false, error:'need a msg of at most 4000 characters or an image' });
     const extra = images.length ? { attachments:images } : {};
     (store.replies[id] ||= []).push({ ts:new Date().toISOString(), msg:text || '', author:'human', ...extra });
-    appendLog('sent', region, id, { followUp:text || '(image)', ...extra }); persist();
+    logEvent('sent', region, id, { followUp:text || '(image)', ...extra }); persist();
     return sendJSON(res, 200, { ok:true, cursor: store.seq });
   }
 
@@ -320,7 +314,7 @@ async function handle(req, res){
     store.proposals[id] = { id, region:key, threadId:threadId||null, anchor:cleanAnchor(anchor, key), question:q, options,
       explanationRequests:{}, explanations:{}, status:'open', choiceIndex:null, custom:null,
       ts:new Date().toISOString(), decidedAt:null };
-    appendLog('proposal', key, threadId||null, { proposalId:id }); persist();
+    logEvent('proposal', key, threadId||null, { proposalId:id }); persist();
     return sendJSON(res, 200, { ok:true, id });
   }
 
@@ -342,7 +336,7 @@ async function handle(req, res){
     Object.assign(pr, { status:'pending', choiceIndex: byIndex ? choiceIndex : null, custom: byIndex ? null : text,
       attempt:token, undoUntil: Date.now() + UNDO_MS });
     logEvent('decision-pending', pr.region, pr.threadId, { proposalId:pr.id, choiceIndex:pr.choiceIndex, custom:pr.custom, undoUntil:pr.undoUntil });
-    persistNow(); notifyPollers(); armDecision(pr);
+    persist(); armDecision(pr);
     return sendJSON(res, 200, { ok:true, status:'pending', undoUntil:pr.undoUntil, cursor: store.seq });
   }
 
@@ -356,12 +350,12 @@ async function handle(req, res){
     if (pr.status === 'pending' && Date.now() >= pr.undoUntil) commitDecision(pr.id);
     if (pr.status !== 'pending') return sendJSON(res, 409, { ok:false, error: pr.status === 'decided' ? 'the undo window has closed' : 'nothing to undo', status:pr.status });
     if (pr.attempt !== token) return sendJSON(res, 409, { ok:false, error:'a newer choice replaced this one' });
-    clearTimeout(undoTimers.get(pr.id)); undoTimers.delete(pr.id);
     const undone = { choiceIndex:pr.choiceIndex, custom:pr.custom };
     (pr.cancelledAttempts ||= []).push(token);
     Object.assign(pr, { status:'open', choiceIndex:null, custom:null, attempt:null, undoUntil:null });
     logEvent('decision-undone', pr.region, pr.threadId, { proposalId:pr.id, ...undone });
-    persistNow(); notifyPollers();
+    persist();                                          // throws on failure: the choice stays pending
+    clearTimeout(undoTimers.get(pr.id)); undoTimers.delete(pr.id);
     return sendJSON(res, 200, { ok:true, status:'open', cursor: store.seq });
   }
 
@@ -372,7 +366,7 @@ async function handle(req, res){
       return sendJSON(res, 400, { ok:false, error:'need proposal id, optionIndex, and answer' });
     const ts = new Date().toISOString();
     (pr.explanationRequests ||= {})[String(optionIndex)] = { status:'requested', answer:text, ts };
-    appendLog('explain-request', pr.region, pr.threadId, { proposalId:id, optionIndex, answer:text }); persist();
+    logEvent('explain-request', pr.region, pr.threadId, { proposalId:id, optionIndex, answer:text }); persist();
     return sendJSON(res, 200, { ok:true, cursor: store.seq });
   }
 
@@ -384,7 +378,7 @@ async function handle(req, res){
     const key = String(optionIndex), ts = new Date().toISOString();
     (pr.explanations ||= {})[key] = { text:body, ts };
     (pr.explanationRequests ||= {})[key] = { ...(pr.explanationRequests[key]||{}), status:'answered', ts };
-    appendLog('explanation', pr.region, pr.threadId, { proposalId:id, optionIndex, text:body }); persist();
+    logEvent('explanation', pr.region, pr.threadId, { proposalId:id, optionIndex, text:body }); persist();
     return sendJSON(res, 200, { ok:true, cursor: store.seq });
   }
 
@@ -392,8 +386,8 @@ async function handle(req, res){
     const { kind, region, data, wake } = await readBody(req);
     const action = str(kind, 100), target = region==null ? null : str(region, 300);
     if (!action) return sendJSON(res, 400, { ok:false, error:'need a bounded event kind' });
-    if (wake === true) appendLog('command', target, null, { action, data: data ?? null });
-    else appendLog(action, target, null, data == null ? {} : { data });
+    if (wake === true) logEvent('command', target, null, { action, data: data ?? null });
+    else logEvent(action, target, null, data == null ? {} : { data });
     persist();
     return sendJSON(res, 200, { ok:true, kind: wake===true?'command':action, cursor: store.seq });
   }
