@@ -41,7 +41,8 @@ const surface = ({ alpha = 'the quick brown fox jumps over the lazy dog', beta =
   <section atl-key="alpha" atl-label="Alpha"><h2>Alpha</h2><p id="alpha-body">${alpha}</p><div style="height:900px"></div></section>
   <section atl-key="list" atl-label="List"><ul><li>first item</li><li>second item</li><li>third item</li></ul><div style="height:600px"></div></section>
   <section atl-key="fig" atl-label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg>
-    <svg id="flow-svg" width="400" height="60" viewBox="0 0 400 60" style="max-width:100%">${flow.map((n, i) => `<g class="node" id="mermaid-${Date.now()}-flowchart-${n}" transform="translate(${10 + i * 130},10)"><rect width="110" height="40" fill="#ddd"/><text x="10" y="25">${n.split('-')[0]}</text></g>`).join('')}</svg><div style="height:600px"></div></section>
+    <svg id="flow-svg" width="400" height="60" viewBox="0 0 400 60" style="max-width:100%">${flow.map((n, i) => `<g class="node" id="mermaid-${Date.now()}-flowchart-${n}" transform="translate(${10 + i * 130},10)"><rect width="110" height="40" fill="#ddd"/><text x="10" y="25">${n.split('-')[0]}</text></g>`).join('')}</svg>
+    <svg width="200" height="60" viewBox="0 0 200 60"><g atl-key="dot" atl-label="Dot"><circle id="dot" cx="30" cy="30" r="20" fill="#c33"/></g></svg><div style="height:600px"></div></section>
   <section atl-key="beta" atl-label="Beta"><h2>Beta</h2><p>${beta}</p><div style="height:600px"></div></section>
   <section atl-key="late" atl-label="Late"><details id="late-box"><summary>file</summary><div id="late-view"></div></details></section>
   <section atl-key="tbl" atl-label="Table"><table><tbody><tr atl-key="r1"><td>row one</td><td>12 ms</td></tr><tr atl-key="r2"><td>row two</td><td>40 ms</td></tr></tbody></table></section>
@@ -258,6 +259,15 @@ try {
     await sleep(1200);
   });
 
+  await check('anchor: Alt+click inside an SVG <g> Region anchors the shape, not the SVG around it', async () => {
+    altClick(`document.querySelector('#dot')`);
+    await sleep(200);
+    await typeNewAndSend('dot thread');
+    const c = await threadOf('v/fig/dot', 'dot thread');
+    assert(c?.anchor?.selector, `no Thread on v/fig/dot: ${JSON.stringify(Object.keys((await state()).threads))}`);
+    eq(probe(`JSON.stringify(document.querySelector('[atl-key=dot]').querySelector(${JSON.stringify(c.anchor.selector)})?.id)`), 'dot', 'selector target');
+  });
+
   await check('anchor: text a viewer renders late resolves, and revealing it opens its details', async () => {
     await api('/api/state', { threads: { ...(await state()).threads, 'v/late': [{ id: 'c-late', text: 'late thread', anchor: { region: 'v/late', quote: 'rendered late' } }] } });
     await api('/api/send', { region: 'v/late', id: 'c-late' });
@@ -319,6 +329,22 @@ try {
     eq(probe(`JSON.stringify(document.querySelector('[data-reply-text="${c.id}"]')?.value ?? '')`), '', 'sent reply left in the box');
   });
 
+  await check('thread: text typed while a reply is sending stays in the box', async () => {
+    const c = await threadOf('v/alpha', 'selection thread');
+    act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
+    act(`(()=>{const f=window.fetch; window.__fetch=f; window.fetch=(u,o)=>String(u)==='/api/thread-message'
+      ? new Promise(r=>setTimeout(r,700)).then(()=>f(u,o)) : f(u,o)})()`);
+    typeInto(`[data-reply-text="${c.id}"]`, 'sent part');
+    act(`document.querySelector('[data-reply="${c.id}"]').click()`);
+    await sleep(200);
+    typeInto(`[data-reply-text="${c.id}"]`, 'typed while sending');
+    await sleep(1300);
+    act(`window.fetch = window.__fetch`);
+    eq([(await state()).replies[c.id].at(-1).msg, probe(`JSON.stringify(document.querySelector('[data-reply-text="${c.id}"]')?.value ?? null)`)],
+      ['sent part', 'typed while sending'], 'stored reply and the box');
+    typeInto(`[data-reply-text="${c.id}"]`, '');
+  });
+
   await check('thread: Accept closes an implemented Thread', async () => {
     const c = await threadOf('v/alpha', 'selection thread');
     await api('/api/reply', { region:'v/alpha', id:c.id, msg:'done', state:'implemented' });
@@ -340,6 +366,24 @@ try {
     await sleep(600);
     const s = await state();
     eq([s.commentState[c.id].value, s.replies[c.id].at(-1).msg], ['rejected', 'still wrong'], 'rejection');
+  });
+
+  await check('thread: two new Threads sent before a refresh are both kept', async () => {
+    act(`(()=>{const f=window.fetch; window.__fetch=f; window.fetch=(u,o)=>String(u)==='/api/state' && o?.method==='POST'
+      ? new Promise(r=>setTimeout(r,600)).then(()=>f(u,o)) : f(u,o)})()`);
+    altClick(`document.querySelectorAll('[atl-key=list] li')[0]`);
+    await sleep(200);
+    typeInto('atelier-host [data-new]', 'race one');
+    act(`document.querySelector('atelier-host [data-send]').click()`);
+    altClick(`document.querySelectorAll('[atl-key=list] li')[2]`);
+    await sleep(200);
+    typeInto('atelier-host [data-new]', 'race two');
+    act(`document.querySelector('atelier-host [data-send]').click()`);
+    await sleep(2500);
+    act(`window.fetch = window.__fetch`);
+    const s = await state(), one = await threadOf('v/list', 'race one'), two = await threadOf('v/list', 'race two');
+    assert(one && two, `stored: ${JSON.stringify((s.threads['v/list'] || []).map(c => c.text))}`);
+    eq([!!s.sent[one.id], !!s.sent[two.id], probe(`JSON.stringify(document.querySelectorAll('atelier-host [data-new]').length)`)], [true, true, 0], 'both sent, no draft left');
   });
 
   await check('thread: an unsent new Thread survives a reload', async () => {
@@ -419,6 +463,17 @@ try {
     eq(ev.comment.attachments, c.attachments, 'image in the wake event');
   });
 
+  await check('thread: an image pasted into a reply survives a reload', async () => {
+    const c = await threadOf('v/beta', 'image thread');
+    act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
+    pasteInto(`[data-reply-text="${c.id}"]`);
+    await sleep(800);
+    await reload();
+    act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
+    eq(probe(`JSON.stringify(document.querySelectorAll('[data-card="${c.id}"] .atl-att img').length)`), 1, 'unsent images after reload');
+    act(`document.querySelector('[data-card="${c.id}"] [data-unattach]').click()`);
+  });
+
   await check('thread: an image pasted into a reply goes out as a follow-up', async () => {
     const c = await threadOf('v/beta', 'image thread');
     act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
@@ -450,8 +505,8 @@ try {
     eq(probe(`JSON.stringify((()=>{const card=document.querySelector('[data-card="${pr.id}"]'), b=card.getBoundingClientRect();
       return { shown: !document.querySelector('[atl-key=c65]').hidden, drawer: document.querySelector('#atl-drawer').matches(':popover-open'),
         focus: document.activeElement.closest('[data-card]')?.dataset.card, option: document.activeElement.matches('[data-choose]'),
-        inView: b.top >= 0 && b.bottom <= innerHeight }})())`),
-      { shown:true, drawer:false, focus:pr.id, option:true, inView:true }, 'after reveal');
+        inView: b.top >= 0 && b.bottom <= innerHeight, uncovered: card.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)) }})())`),
+      { shown:true, drawer:false, focus:pr.id, option:true, inView:true, uncovered:true }, 'after reveal');
   });
 
   await check('proposal: one click makes the choice pending, with an undo countdown at the click', async () => {
@@ -525,6 +580,22 @@ try {
     eq((await state()).proposals[body.id].status, 'open', 'after Undo');
   });
 
+  await check('proposal: Undo works while the click\'s own request is still in flight', async () => {
+    const { body } = await api('/api/propose', { region:'v/tbl', question:'Slow answer?', options:['A', 'B'] });
+    await sleep(900);
+    // The server took the choice and the page heard of it, but the click's own answer is late.
+    act(`(()=>{const f=window.fetch; window.__fetch=f; window.fetch=(u,o)=>String(u)==='/api/decide'
+      ? f(u,o).then(r=>new Promise(res=>setTimeout(()=>res(r),2500))) : f(u,o)})()`);
+    act(`document.querySelector('[data-choose="${body.id}"][data-i="0"]').click()`);
+    await sleep(900);
+    eq((await state()).proposals[body.id].status, 'pending', 'before Undo');
+    act(`document.querySelector('[data-card="${body.id}"] [data-undo]').click()`);
+    await sleep(600);
+    eq((await state()).proposals[body.id].status, 'open', 'after Undo');
+    await sleep(2000);
+    act(`window.fetch = window.__fetch`);
+  });
+
   await check('proposal: an option explanation is asked and answered in place', async () => {
     const { body } = await api('/api/propose', { region:'v/list', question:'Order?', options:['Alphabetical', 'By date'] });
     await sleep(900);
@@ -587,8 +658,24 @@ try {
     if (!probe(`JSON.stringify(document.querySelector('#atl-drawer').matches(':popover-open'))`)) act(`document.querySelector('[popovertarget=atl-drawer]').click()`);
     act(`document.querySelector('#atl-drawer [data-reveal="${id}"]').click()`);
     await sleep(700);
-    eq(probe(`JSON.stringify({ open: document.querySelector('#atl-drawer').matches(':popover-open'), focus: document.activeElement.closest('[data-card]')?.dataset.card })`),
-      { open:false, focus:id }, 'after reveal');
+    eq(probe(`JSON.stringify((()=>{const card=document.querySelector('[data-card="${id}"]'), b=card.getBoundingClientRect();
+      return { open: document.querySelector('#atl-drawer').matches(':popover-open'), focus: document.activeElement.closest('[data-card]')?.dataset.card,
+        uncovered: card.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)) }})())`),
+      { open:false, focus:id, uncovered:true }, 'after reveal');
+  });
+
+  // A keyboard choice behind the open drawer, or any click the drawer does not light-dismiss on.
+  await check('activity: a choice made while the drawer is open shows its Undo, not the drawer', async () => {
+    const { body } = await api('/api/propose', { region:'v/fig', question:'Under the drawer?', options:['A', 'B'] });
+    await sleep(900);
+    act(`document.querySelector('[popovertarget=atl-drawer]').click()`);
+    act(`document.querySelector('[data-choose="${body.id}"][data-i="0"]').click()`);
+    await sleep(600);
+    eq(probe(`JSON.stringify((()=>{const u=document.querySelector('[data-card="${body.id}"] [data-undo]'); u.scrollIntoView({block:'center'}); const b=u.getBoundingClientRect();
+      return { open: document.querySelector('#atl-drawer').matches(':popover-open'), uncovered: u.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)) }})())`),
+      { open:false, uncovered:true }, 'after choosing');
+    act(`document.querySelector('[data-card="${body.id}"] [data-undo]').click()`);
+    await sleep(600);
   });
 
   await check('activity: ✓ Seen and Dismiss clear their rows', async () => {
@@ -668,6 +755,19 @@ try {
       ['alpha after the first Ready', 'beta after the second Ready'], 'both Readys applied');
     writeSurface();
     await api('/api/ready', { changed:['v/alpha', 'v/beta'] });
+    await sleep(1200);
+  });
+
+  await check('ready: a Ready whose page fetch fails is applied on a later try, not dropped', async () => {
+    act(`(()=>{const f=window.fetch; window.__fetch=f; let n=0; window.fetch=(u,o)=>String(u)!==location.pathname || n>1 ? f(u,o)
+      : n++ ? Promise.resolve(new Response('busy',{status:503})) : Promise.reject(new TypeError('Failed to fetch'))})()`);
+    writeSurface({ beta:'beta after two failed fetches' });
+    await api('/api/ready', { changed:['v/beta'] });
+    await sleep(7500);
+    act(`window.fetch = window.__fetch`);
+    eq(probe(`JSON.stringify(document.querySelector('[atl-key=beta] p').textContent)`), 'beta after two failed fetches', 'Region after the retries');
+    writeSurface();
+    await api('/api/ready', { changed:['v/beta'] });
     await sleep(1200);
   });
 

@@ -24,6 +24,8 @@ async function post(url, body) {
   if (!r.ok || j.ok === false) throw new Error(j.error || `${url} answered ${r.status}`);
   return j;
 }
+const ok = r => { if (!r.ok) throw new Error(`the server answered ${r.status}`); return r; };
+const load = () => fetch('/api/state', { cache: 'no-store' }).then(ok).then(r => r.json());
 let S = { threads: {}, sent: {}, replies: {}, commentState: {}, proposals: {}, updates: {}, changed: {}, seq: 0 };
 let booted = false, snapshot = null;
 let active = null;                       // id of the expanded Thread or Proposal
@@ -33,9 +35,11 @@ const atts = new Map();                  // '<card>|new' or '<card>|reply' -> pa
 const opened = new Set();                // '<card>|<field>' of <details> the human opened in a card
 const errs = new Map();                  // card id -> why its last action failed
 const strays = new Set();                // ids whose reveal failed; shown in the catch-all host
-const DRAFTS = 'atelier:drafts', KEPT = 'atelier:kept';
-const saveKept = () => { try { sessionStorage.setItem(KEPT, JSON.stringify([...kept].filter(([, v]) => v))); } catch {} };
-try { for (const [k, v] of JSON.parse(sessionStorage.getItem(KEPT) || '[]')) kept.set(k, v); } catch {}
+const DRAFTS = 'atelier:drafts', KEPT = 'atelier:kept', ATTS = 'atelier:atts';
+const saveKept = () => { try { sessionStorage.setItem(KEPT, JSON.stringify([...kept].filter(([, v]) => v)));
+  sessionStorage.setItem(ATTS, JSON.stringify([...atts].filter(([, v]) => v.length))); } catch {} };
+try { for (const [k, v] of JSON.parse(sessionStorage.getItem(KEPT) || '[]')) kept.set(k, v);
+  for (const [k, v] of JSON.parse(sessionStorage.getItem(ATTS) || '[]')) atts.set(k, v); } catch {}
 
 // ===== Regions: atl-key on any element =============================================
 const regionKey = el => { const ks = []; for (let e = el; e; e = e.parentElement?.closest('[atl-key]')) ks.unshift(e.getAttribute('atl-key')); return ks.join('/'); };
@@ -117,7 +121,8 @@ function anchorFromElement(el, event) {
   // mark your own with data-anchor); anywhere else on an SVG or image, a relative point.
   const box = el.closest('svg g.node, svg [data-anchor]');
   if (box && region.contains(box)) return { region: key, selector: boxSelector(box, region) };
-  const target = el.closest('svg') || el, a = { region: key, selector: selectorFor(target, region) };
+  const svg = el.closest('svg'), target = svg && region.contains(svg) ? svg : el;   // a Region may be a <g> inside the SVG
+  const a = { region: key, selector: selectorFor(target, region) };
   if (target.tagName === 'IMG' || target.tagName.toLowerCase() === 'svg') {
     const r = target.getBoundingClientRect();
     a.point = { x: +((event.clientX - r.left) / r.width).toFixed(3), y: +((event.clientY - r.top) / r.height).toFixed(3) };
@@ -400,30 +405,43 @@ const itemOf = id => cache.find(i => i.id === id);
 const token = () => Math.random().toString(36).slice(2, 12);
 const busy = new Set();
 // Nothing the human wrote is cleared before the server answers 2xx; a failure stays on the card.
-async function act(id, fn) {
-  if (busy.has(id)) return;
-  busy.add(id);
+async function act(id, fn, lock = id) {
+  if (busy.has(lock)) return;
+  busy.add(lock);
   try { await fn(); errs.delete(id); } catch (e) { errs.set(id, e.message); }
-  finally { busy.delete(id); }
+  finally { busy.delete(lock); }
   await refresh().catch(() => render());
 }
-const forget = (...keys) => {
-  for (const t of document.querySelectorAll('atelier-host textarea')) if (keys.includes(fieldKey(t))) t.value = '';
-  for (const k of keys) { kept.delete(k); atts.delete(k); opened.delete(k); }
+// After a 2xx a field is cleared only if it still holds what was sent, and only the sent images
+// leave it: whatever the human added while the request ran stays. No `sent` discards everything.
+const forget = (key, sent) => {
+  const t = [...document.querySelectorAll('atelier-host textarea')].find(x => fieldKey(x) === key);
+  if (!sent || (t?.value ?? kept.get(key) ?? '').trim() === sent.text) { if (t) t.value = ''; kept.delete(key); opened.delete(key); }
+  const left = sent ? (atts.get(key) || []).filter(u => !sent.images?.includes(u)) : [];
+  left.length ? atts.set(key, left) : atts.delete(key);
   saveKept();
 };
 const fieldText = (sel, key) => ($(sel)?.value ?? kept.get(key) ?? '').trim();
+let saving = Promise.resolve();         // the chain of new-Thread saves
 async function sendNew(id) {
-  const p = pending.get(id), text = fieldText(`[data-card="${id}"] [data-new]`, id + '|new'), images = atts.get(id + '|new') || [];
+  const p = pending.get(id), text = fieldText(`[data-card="${id}"] [data-new]`, id + '|new'), images = [...atts.get(id + '|new') || []];
   if (!p || (!text && !images.length)) return;
   const thread = { id, text, anchor: p.anchor, ...(images.length ? { attachments: images } : {}) };
-  await post('/api/state', { threads: { ...S.threads, [p.region]: [...(S.threads[p.region] || []).filter(c => c.id !== id), thread] } });
+  // One save at a time, each merged into the threads the server holds now: two Threads sent before
+  // a refresh must not overwrite each other.
+  const save = saving.then(async () => { const { threads = {} } = await load();
+    await post('/api/state', { threads: { ...threads, [p.region]: [...(threads[p.region] || []).filter(c => c.id !== id), thread] } }); });
+  saving = save.catch(() => {});
+  await save;
   await post('/api/send', { region: p.region, id });
+  const now = fieldText(`[data-card="${id}"] [data-new]`, id + '|new');
   pending.delete(id); forget(id + '|new'); saveDrafts();
+  if (now !== text) { kept.set(id + '|reply', now); saveKept(); }   // typed while it was sending: a reply draft
 }
+// Undo never queues behind the click it takes back, whose request may still be in flight.
 async function undo(id) {
   const pr = S.proposals[id];
-  if (pr) await act(id, () => post('/api/undo-decision', { id, attempt: pr.attempt }));
+  if (pr?.attempt) await act(id, () => post('/api/undo-decision', { id, attempt: pr.attempt }), id + '|undo');
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest?.('atelier-host button, atelier-activity button, .atl-warnings button'); if (!b) return;
@@ -438,24 +456,26 @@ document.addEventListener('click', async e => {
   }
   if ('close' in d) { active = null; return render(); }
   if ('unwarn' in d) return warn();
-  if (d.unattach) { atts.get(d.unattach)?.splice(+d.i, 1); if (d.unattach.endsWith('|new')) saveDrafts(); return render(); }
+  if (d.unattach) { atts.get(d.unattach)?.splice(+d.i, 1); saveKept(); if (d.unattach.endsWith('|new')) saveDrafts(); return render(); }
   if (d.send) return act(d.send, () => sendNew(d.send));
   if (d.discard) { pending.delete(d.discard); forget(d.discard + '|new'); saveDrafts(); active = null; return render(); }
-  if (d.reply) { const msg = fieldText(`[data-reply-text="${d.reply}"]`, d.reply + '|reply'), images = atts.get(d.reply + '|reply') || [];
+  if (d.reply) { const msg = fieldText(`[data-reply-text="${d.reply}"]`, d.reply + '|reply'), images = [...atts.get(d.reply + '|reply') || []];
     if (!msg && !images.length) return;
-    return act(d.reply, async () => { await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg, attachments: images }); forget(d.reply + '|reply'); }); }
+    return act(d.reply, async () => { await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg, attachments: images }); forget(d.reply + '|reply', { text: msg, images }); }); }
   if (d.accept) return act(d.accept, () => post('/api/comment-state', { region: itemOf(d.accept).region, id: d.accept, state: 'accepted' }));
   if (d.reject) { const ta = $(`[data-reply-text="${d.reject}"]`), msg = ta.value.trim();
     if (!msg) { ta.placeholder = 'Say what is still wrong, then Reopen'; return ta.focus({ preventScroll: true }); }
-    return act(d.reject, async () => { await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); forget(d.reject + '|reply'); }); }
+    return act(d.reject, async () => { await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); forget(d.reject + '|reply', { text: msg }); }); }
+  // A choice and its Undo countdown never sit under the open drawer.
+  if ((d.choose || d.answer) && drawer?.matches(':popover-open')) drawer.hidePopover();
   if (d.choose) { if (active === d.choose) active = null;
     return act(d.choose, () => post('/api/decide', { id: d.choose, choiceIndex: +d.i, attempt: token() })); }
   if (d.answer) { const custom = fieldText(`[data-custom="${d.answer}"]`, d.answer + '|custom');
     if (!custom) return $(`[data-custom="${d.answer}"]`)?.focus({ preventScroll: true });
     if (active === d.answer) active = null;
-    return act(d.answer, async () => { await post('/api/decide', { id: d.answer, custom, attempt: token() }); forget(d.answer + '|custom'); }); }
+    return act(d.answer, async () => { await post('/api/decide', { id: d.answer, custom, attempt: token() }); forget(d.answer + '|custom', { text: custom }); }); }
   if (d.explain) { const key = `${d.explain}|explain:${d.i}`, answer = fieldText(`[data-explain-text="${d.explain}:${d.i}"]`, key); if (!answer) return;
-    return act(d.explain, async () => { await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); forget(key); }); }
+    return act(d.explain, async () => { await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); forget(key, { text: answer }); }); }
   if (d.undo) return undo(d.undo);
   if ('pick' in d) return setPicking(!picking);
   if ('notify' in d) { localStorage.setItem(NOTIFY, notifyOn() ? 'off' : 'on');
@@ -496,7 +516,7 @@ async function attachFiles(ta, files) {
     try { list.push((await post('/api/attach', { name: f.name || 'pasted', type: f.type, data })).url); }
     catch (e) { warn(`Image not attached: ${e.message}`, 'attach'); }
   }
-  atts.set(key, list); kept.set(key, ta.value);
+  atts.set(key, list); kept.set(key, ta.value); saveKept();
   if (key.endsWith('|new')) saveDrafts();
   render();
 }
@@ -606,9 +626,8 @@ function warn(message, key) {
 // kernel's own record, and the browser's scroll anchoring keeps the reading place.
 async function onReady(named) {
   if (!named?.length) return;
-  let doc;
-  try { doc = new DOMParser().parseFromString(await (await fetch(location.pathname, { cache: 'no-store' })).text(), 'text/html'); }
-  catch { return; }
+  // A failed fetch throws, so the loop keeps its cursor and applies this Ready on its next try.
+  const doc = new DOMParser().parseFromString(await (await fetch(location.pathname, { cache: 'no-store' }).then(ok)).text(), 'text/html');
   const incoming = new Map([...doc.querySelectorAll('[atl-key]')].map(el => [regionKey(el), el]));
   syncKept(); saveKept();
   // ponytail: a Region new to the page reloads rather than being inserted; insert it if Readys add Regions often
@@ -628,14 +647,14 @@ async function onReady(named) {
 }
 
 // ===== state + live loop ============================================================
-export async function refresh() { S = await fetch('/api/state', { cache: 'no-store' }).then(r => r.json()); booted = true; render(); }
+export async function refresh() { S = await load(); booted = true; render(); }
 // The page's own cursor advances only past events it has handled; a refresh never moves it.
 let cursor = null;
 async function loop() {
   for (;;) {
     try {
       if (cursor === null) { await refresh(); cursor = S.seq; }
-      const r = await fetch('/api/poll?cursor=' + cursor).then(x => x.json());
+      const r = await fetch('/api/poll?cursor=' + cursor).then(ok).then(x => x.json());
       document.documentElement.removeAttribute('data-atl-offline');
       if (!r.events?.length) continue;
       for (const ev of r.events) {
@@ -643,6 +662,7 @@ async function loop() {
         if (ev.kind === 'reply') notify('Agent replied', labelOf(ev.region));
         if (ev.kind === 'proposal') notify('Decision needed', labelOf(ev.region));
         if (ev.kind === 'update') notify(ev.title || 'Update', labelOf(ev.region));
+        cursor = ev.seq;                                 // handled; a later failure retries from here
       }
       cursor = r.cursor;
       await refresh();
