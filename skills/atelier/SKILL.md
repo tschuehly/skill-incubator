@@ -1,40 +1,64 @@
 ---
 name: atelier
 description: >-
-  Create and operate a task-shaped HTML workspace when the human should understand, annotate,
-  answer, or review through a live surface instead of reading the session transcript. Use for
-  screening and grilling sessions, plans, comparisons, reports, code or media review, and other
-  work where anchored feedback and durable interaction improve the result.
+  Build and operate a live HTML Surface where the human reads, comments on, and decides the work
+  instead of reading the session transcript. Use for reviewing many records, plans and documents,
+  grilling sessions, comparisons, code or media review, and other work where anchored feedback and
+  durable decisions improve the result.
 ---
 
 # Atelier
 
-Give the human a good interface to the work, not a prettier session log.
+Atelier extends HTML the way htmx does. You build whatever page the task needs — a list/detail
+workspace, a document, a table, a prototype, media. The kernel adds what a page cannot have: an
+address for each thing the human judges, a durable conversation at each address, and the event
+loop between the human and you.
 
-A **Surface** is an ordinary HTML document you write, wrapped around a kernel that supplies the
-parts a document cannot have on its own: durable identity, shared state, and an event loop between
-you and the human. You own every pixel of the content. The kernel owns the protocol.
+**You own** layout, navigation, selection, counts, styling, and the phone layout. **The kernel
+owns** addresses, the store, polling, Threads, Proposals, Updates, Ready, safe submission
+(validation, retries, undo), drafts, the cards inside hosts, and reveal. It inserts nothing into
+your content uninvited and imposes no frame.
 
-The capitalized terms — Surface, Region, Region Key, Anchor, Margin, Ready, Attention, Thread,
-Proposal, Update, Activity — are defined in [CONTEXT.md](CONTEXT.md). Read it once; everything below assumes it.
-When changing Atelier itself, apply [the Atelier principles](docs/principles.md).
-`<skill-dir>` is the directory containing this file.
+Capitalized terms are defined in [CONTEXT.md](CONTEXT.md). When changing Atelier itself, apply
+[the principles](docs/principles.md). `<skill-dir>` is the directory containing this file.
 
-## Build the first useful Surface
+## The interface
 
-1. **Read the source material before writing HTML.** When a session transcript is supplied, extract
-   its current facts, recommendations, unresolved questions, disagreements, and source anchors.
-   Present the synthesized current state; keep the raw transcript available only as evidence.
+| You write | The kernel does |
+|---|---|
+| `atl-key="provider"` on any element (`<tr>`, `<li>`, `<article>`, `<g>`), optional `atl-label` | Makes it a Region. Nesting builds the Region Key `rollout/provider`, the address in every API call. One local key, no slash, unique path. |
+| `<atelier-host for="rollout">` | Shows the Threads and Proposals of that key and below. The longest whole-path `for` wins (`c6` never claims `c64`). |
+| `<atelier-host>` without `for` | The one catch-all: unclaimed items, Threads whose Region left, failed reveals. |
+| `layout="anchored"` on a host | Cards level with their anchors while the host sits beside its content; normal flow otherwise. |
+| `<atelier-activity>`, exactly one, anywhere | Pick-to-comment, the "N waiting" drawer, desktop notifications. |
+| `atl-thread` on a button (value: a key, or empty for the closest Region) | Opens a whole-Region Thread in that Region's host. |
+| `setRevealResolver(async ({region,id,kind}) => …)` | Awaited before every reveal, so your page can select the record or tab first. |
+| a listener for `atelier:state` (or `getState()`) | Gets `{state, items:[{kind,id,region,status,waiting}]}` after every change, for your counts and badges. |
+| a listener for `atelier:ready` | Fires after a Ready swap; re-apply your own view state there. |
 
-2. **Choose the composition and the form** with [references/composition.md](references/composition.md):
-   what job the human is doing, how the material divides into Regions, and what shows it best — a
-   diagram, table, diff, image, or click-through prototype before prose. Never ask the human to
-   invent the interface. Ask once, without blocking, when the choice would change
-   their workflow; if no answer arrives in the same turn, build the recommendation and post the
-   choice as a Proposal anchored where it matters, the recommendation first.
+The human starts a Thread by selecting text, Alt+clicking an element or a point on an image, or
+using Pick in Activity. Exports, endpoints, store, and events:
+[references/protocol.md](references/protocol.md).
 
-3. **Copy the kit into the project.** All four files travel together — the server serves
-   `/atelier.mjs` and `/atelier.css` from its own directory:
+Three rules hold on every Surface:
+
+1. **Build the UI the job needs** — a workspace, a document, a table — not a prettier session log.
+2. **Every open item has a host and is reachable**: each open Proposal and each Thread waiting for
+   the human shows in a host that `reveal()` can bring on screen.
+3. **Publish with Ready**, never by reloading the human's page.
+
+## Build the first Surface
+
+1. **Read the sources first.** From a transcript, extract current facts, recommendations, open
+   questions, disagreements, and source anchors; show the synthesized state, not the log.
+2. **Build the UI the job needs.** Choose the composition with
+   [references/composition.md](references/composition.md); never ask the human to invent it. For
+   many records, start from `recipes/list-detail.html`; for one argument, `recipes/document.html`;
+   for a grilling round, `recipes/frontier.html`; for diagrams or files,
+   `recipes/diagram-and-files.md`. Serve the recipe and click it before writing your own (its
+   header comment has the commands).
+3. **Copy the kit.** The four files travel together; the server serves `/atelier.mjs` and
+   `/atelier.css` from its own directory:
 
    ```bash
    mkdir -p tools .review
@@ -44,178 +68,79 @@ When changing Atelier itself, apply [the Atelier principles](docs/principles.md)
    chmod +x tools/review-poll.sh
    ```
 
-   Keep `.review/` out of version control. A copied kit never updates itself: fixes to the canonical
-   kit reach this Surface only when you copy them again, which preflight's kit gate detects.
+   Keep `.review/` out of version control; re-copy rather than patch.
+4. **Write the page.** Load `<link rel="stylesheet" href="/atelier.css">` and
+   `<script type="module" src="/atelier.mjs">`. Put `atl-key` on each thing the human judges on
+   its own — a record, a check row, a setting value, a step. Place a host where its conversation
+   helps: inside each record, under each questioned passage, or beside a document with
+   `layout="anchored"`. Add one catch-all. A page that hides records registers a reveal
+   resolver (rule 2).
+5. **Write the finding.** Every sentence stays true with the layout removed: no text about the
+   page, its sections, its controls, or its status. Quote the source being judged verbatim and
+   anchor each Proposal to it. The rest is in
+   [Write the finding](references/composition.md#write-the-finding).
+6. **Build once from the evidence.** Trace every claim, recommendation, and Proposal to the
+   sources as they are now; a located target proves only its location, not that a check ran.
+   Offer only actions the human can exercise in their browser.
 
-4. **Write the document.** One `<script type="module" src="/atelier.mjs">`, one
-   `<link rel="stylesheet" href="/atelier.css">`, and a content library of your choice — daisyUI 5
-   over the Tailwind browser build is the default:
-
-   ```html
-   <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet">
-   <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet">
-   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-   ```
-
-   Author [the frame](references/composition.md#lay-out-the-frame): a sticky header holding
-   `<atelier-activity>`, the content, and one `<atelier-margin>` beside it — both outside every
-   Region. Then wrap each thing the human reasons about in a Region with a stable key:
-
-   ```html
-   <header class="top"><b>Appliance onboarding</b><atelier-activity></atelier-activity></header>
-   <div class="page">
-     <main><atelier-region key="onboarding">
-       <atelier-region key="provider" label="Provider step">
-         <h2>Provider step</h2>
-         <p>…the material the human is judging…</p>
-       </atelier-region>
-     </atelier-region></main>
-     <atelier-margin></atelier-margin>
-   </div>
-   ```
-
-   Nesting builds the Region Key: that inner Region is `onboarding/provider`, and that is the
-   address you use in every API call about it. Make each Region one task-shaped judgment, and each
-   item the human can answer on its own — a setting value, an option, a step — its own Region. The
-   human opens Threads on any sentence, element, or image point; the kernel places them in the
-   Margin. Anchor each Proposal in the Region holding the rule, setting value, claim, stage, or diff
-   hunk it would change; quote that subject text verbatim and keep the recommendation, options, and
-   consequences beside it. A questions file names the decisions; each one still sits at the subject
-   it changes. Every sentence stays true with the layout removed:
-   no text about the page, its sections, its controls, or its status. The rest of the copy rules are
-   in [Write the finding](references/composition.md#write-the-finding); elements, Anchors, and
-   endpoints are in [references/protocol.md](references/protocol.md).
-
-5. **Build once from the evidence.** Do not run speculative presentation rounds. Re-open the
-   authoritative sources as they exist now and trace every factual claim, recommendation, and
-   Proposal back to them; correct stale copy before the human sees it. A located target proves only
-   location—not that a scenario is ready, a check ran, evidence exists, or a human verdict was
-   recorded. Embedded-product Surfaces offer only actions and claims the human can exercise in
-   their browser. Source fidelity and cold-reader comprehension are separate checks; neither
-   replaces the other.
-
-`examples/` holds runnable Surfaces: `anchored-document.html` (the frame, small Regions, and an SVG
-diagram to open Threads on) and `grill-session.html` with `grill-session.sh` (a frontier of anchored
-Proposals). Serve one and click it before writing your own.
-
-The first browser load needs no Ready. Ready begins only after the human could have seen the
-Surface.
-
-**Ready when:** one composition is chosen and any offered option is resolved or posted as a
-Proposal. Current sources support every visible claim. The first screen orients in
-about 60 words, and every sentence stays true with the layout removed. A cold reader can follow
-the material, reach every control, and understand each term and option from its visible or
-expandable context — without the session transcript.
+**Ready when:** current sources support every visible claim, the first screen orients in about 60
+words, and a cold reader can reach every control and understand each option without the
+transcript. The first browser load needs no Ready.
 
 ## Start the live loop
 
-1. Choose a free `PORT` and use the same exact `http://127.0.0.1:<port>` everywhere. Call
-   `monitor_status`, then start the server with the Workbench `monitor` using `source.type="spawn"`,
-   the explicit command `env PORT=<port> UI=tools/my-surface.html node tools/review-server.mjs`, the
-   project directory in `options.cwd`, and `recoveryPolicy:"never"`. Keep the port in the reuse key.
-   Never hide `cd`, pipes, or backgrounding inside the command.
+1. Choose a free `PORT`; use the exact `http://127.0.0.1:<port>` everywhere. Call `monitor_status`,
+   then start the server with the Workbench `monitor`: `source.type="spawn"`, the command
+   `env PORT=<port> UI=tools/my-surface.html node tools/review-server.mjs`, the project directory
+   in `options.cwd`, `recoveryPolicy:"never"`, the port in the reuse key. Never hide `cd`, pipes,
+   or backgrounding inside the command.
 2. Health-check `GET /api/state`, then start exactly one more `spawn` watcher for
-   `BASE_URL=<exact-url> bash <absolute-poller-path> --stream`, with a URL-specific reuse key and
-   `notifyOn` patterns for `SENT`, `DECISION`, `EXPLAIN-REQUEST`, `COMMENT-REJECTED`,
-   `COMMAND`, `SERVER-DOWN`, and `SERVER-UP`. Confirm with `monitor_inspect` that the recorded
-   command contains the exact URL. Do not also poll with Bash.
-3. Without the Workbench monitor, use the harness's tracked background-task facility and run
-   `BASE_URL=<exact-url> bash <poller> --once`. Each human event exits the poller; act, then re-arm
-   it from its persisted cursor. Never use an untracked shell `&` process.
-4. Run the gate:
+   `BASE_URL=<exact-url> bash <absolute-poller-path> --stream` with a URL-specific reuse key and
+   `notifyOn` for `SENT`, `DECISION`, `EXPLAIN-REQUEST`, `COMMENT-REJECTED`, `COMMAND`,
+   `SERVER-DOWN`, `SERVER-UP`. Confirm with `monitor_inspect` that it holds the exact URL.
+   Without the monitor, run `--once` under the harness's tracked background tasks and re-arm it
+   after each wake; never an untracked `&`.
+3. Run the gate:
 
    ```bash
-   node <skill-dir>/scripts/preflight.mjs \
-     --url http://127.0.0.1:<port> \
-     --poller-identity <absolute-poller-path> \
-     --evidence-dir .review/preflight
+   node <skill-dir>/scripts/preflight.mjs --url http://127.0.0.1:<port> \
+     --poller-identity <absolute-poller-path> --evidence-dir .review/preflight
    ```
 
-   It fails silent handoff defects: the store is unreachable, the poller is missing or duplicated,
-   this Surface's copied kit differs from the canonical one, Region keys are missing or duplicated,
-   the Margin or Activity is missing, doubled, or inside a Region, a stored Anchor no longer finds
-   its target, the page throws a browser error or kernel warning, content overflows horizontally, a
-   diagram did not render, or a sentence describes the page instead of its subject. For that last
-   gate it lists each sentence with its Region; rewrite each one as the subject's fact or delete it.
-   Instructions for an interface that is itself under review go in an element marked
-   `data-subject-ui`. Re-copy a drifted kit rather than patching it in place; pass
-   `--allow-kit-drift` only when the local change is deliberate and written down. `--skip-render`
-   and `--skip-poller` are for kernel tests, never a human handoff.
-5. After preflight passes, walk the primary reading path and every control yourself. Trace each
-   relationship that shapes a decision to its rendered form — settings × values as a matrix, rules
-   moving between scopes as a map — while each value and rule stays its own addressable Region. Put
-   missing definitions beside the control that needs them, rerun preflight, then open the URL for
-   the human. This pass is a short lead-owned
-   walk, not an independent review and not a delegated inspection; handing it to a subagent turns a
-   one-minute check into a blocking wait and reintroduces the browser repair loop that
-   [the principles](docs/principles.md) keep out of normal Atelier.
+   It fails silent handoff defects — store, poller, kit drift, keys, Activity, hosts, open items
+   `reveal()` cannot bring on screen, detached anchors, browser errors, kernel warnings, overflow
+   at 1440×900, 390×844 and 412×915, undrawn diagrams. Rewrite or delete each `WARN PROSE`
+   sentence; steps for an interface under review go in an element marked `data-subject-ui`.
+   `--skip-render`, `--skip-poller` and `--allow-kit-drift` are never a handoff.
+4. Walk the primary path and every control yourself, then open the URL for the human. Restarting
+   a used Surface repeats steps 1–3 and skips this one unless the content changed.
 
-**Restarting a Surface the human has already used is not a first handoff.** Its content was read
-once and its store already holds their work, so steps 1–4 apply unchanged — a restart is exactly
-when the port, store name, poller identity, and copied kit go wrong — and step 5 does not. Skip the
-cold-reader pass unless the content changed since they last saw it, and tell them the Surface is
-back rather than re-reviewing what they already accepted.
-
-**Ready when:** preflight passes, the exact-URL poll path is armed, and the browser is open. On a
-first handoff, the cold-reader pass also has no actionable finding.
+**Ready when:** preflight passes, the exact-URL poller is armed, and the browser is open.
 
 ## Work through the Surface
 
-Treat the Surface as the primary channel while the review is live. Chat carries the URL, a failure,
-and the final handback — not questions the Surface already represents.
+While the review is live, chat carries only the URL, failures, and the final handback.
 
-- **Answer a comment where it was written.** On every `sent` event — including a `followUp` in an
-  existing Thread — reply in its Thread with what you picked up and set `acknowledged` within
-  seconds, then work. Read its `anchor` to see exactly what the human pointed at, and any pasted
-  image in `attachments`. Move it through `in_progress` and
-  `implemented`; the human accepts or rejects it in place. A non-blocking follow-up is Accept, then
-  a new Thread—not a third verdict state.
-- **Ask with a Proposal.** Anchor a genuine choice to the source it decides, recommendation
-  first, with the consequence of each option stated. Facts you can discover yourself
-  are evidence, not questions. Anything that needs no answer is an Update.
-- **Publish changes with Ready, not by reloading.** Rewrite the HTML file, then post only the
-  edited leaf Region Keys to `/api/ready`; omit unchanged ancestors and unrelated Regions. The
-  kernel swaps exactly those Regions into the open page, keeps scroll position, and leaves Threads
-  and half-typed drafts untouched. Never reload the page
-  yourself; a reload during a human's sentence loses the sentence.
-- **Publish at coherent points.** Attention accumulates across Readys, so a half-finished thought
-  posted early costs the human a second pass over the same Region.
-- **For a grilling round, publish the whole current frontier together.** A decision unlocks its
-  dependents: update the affected Regions, add the next frontier, and post one Ready.
-- Comments and decisions send immediately. In multiline fields, ⌘+Enter sends and Enter inserts a
-  newline. Treat several events that arrive together as one work wave.
+- **Threads.** On every `sent` event, follow-ups included, reply in that Thread with what you picked
+  up and set `acknowledged` within seconds; read its `anchor` and any `attachments`. Move it
+  through `in_progress` to `implemented`; the human accepts or reopens it in place.
+- **Decisions.** Ask every question as a Proposal at the Region it would change, recommended option
+  first, each option's consequence stated. The host shows the options as buttons; one click
+  chooses and Undo stays beside the choice for 30 seconds. You receive `decision` only when that
+  window closes — never act on a choice before it. `custom` is the human's own wording and wins.
+- **Updates.** Anything that needs no answer is an Update; it waits in Activity.
+- **Ready.** Rewrite the HTML file, then post only the edited leaf Region Keys to `/api/ready`.
+  The kernel swaps exactly those Regions; drafts, focus, and scroll survive. Never reload the
+  page yourself. Publish at coherent points; for a grilling round, rewrite the decided Regions,
+  add the next frontier, and post one Ready.
 - When the human ends the review, stop the watchers and leave the store as the record.
 
-## Current operating limits
+Run one active browser per Surface; a second can overwrite Thread changes. While a Region has an
+open or pending Proposal, a new one answers 409: post an Update instead and ask after it resolves.
+When a Ready removes the text an Anchor quoted, restore it or say in that Thread where it went.
 
-Run one active browser per Surface. Browser autosave replaces the complete Thread collection, so a
-second active browser can overwrite Thread changes. The event log is bounded observation history,
-not a backup. Below 1100px the Margin is a plain bottom list without anchoring. The kernel cannot
-pick inside an iframe; see [Extending](references/protocol.md#extending). When a Ready removes the
-text an Anchor quoted, restore it or say in that Thread where it went; preflight fails meanwhile.
+## Kernel changes and promotion
 
-When a Region or Thread already has an open Proposal, keep it visible. If its context changed, post
-an Update; ask the next Proposal only after the first resolves.
-
-## Shared interaction state
-
-Use the kernel's small state model rather than inventing one per Surface:
-
-- comment: `draft → sent/open → acknowledged → in_progress → implemented → accepted|rejected`
-- proposal: `open → decided`
-- Region: `changed → acknowledged` (Ready sets it, the human's ✓ clears it)
-
-Task-specific state stays in the task's data and visible copy. It does not extend the protocol
-unless repeated real use proves a shared interaction is missing.
-
-## Verifying the kernel itself
-
-`node <skill-dir>/scripts/verify.mjs [filter]` drives a real browser through the whole protocol on
-a throwaway fixture and prints pass/fail per check. Run it after changing anything in `assets/`.
-`scripts/test-atelier.sh` covers the server and the poller wake filter without a browser.
-
-## Promotion
-
-A copied Atelier is owned by its task. When repeated use reveals a stable domain model, recurring
-actions, and valuable automation, use [references/promotion.md](references/promotion.md) to decide
-whether to build a durable Studio. Promotion is a judgment, not a usage count.
+After changing `assets/`, run `node <skill-dir>/scripts/verify.mjs` and
+`bash <skill-dir>/scripts/test-atelier.sh`. When repeated use of a copied Atelier reveals a stable
+domain model, decide with [references/promotion.md](references/promotion.md) whether to build a Studio.

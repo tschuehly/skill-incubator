@@ -1,43 +1,115 @@
-# Protocol — the contract between the document, the kernel, the server, and the agent
+# Protocol — the contract between the page, the kernel, the server, and the agent
 
 Everything here is what `assets/atelier.mjs` and `assets/server.mjs` implement and `assets/poll.sh`
 speaks. Extend beside it, not through it: `poll.sh`, `preflight.mjs` and future agents rely on these
 shapes.
 
-The division of labor never moves. **You author the content and the layout.** The kernel supplies
-identity, durable state, and interaction — anchors, Threads, Proposals, Activity, Ready — and
-confines its own chrome to its elements and `.atl-*` class names, so your content library cannot
-restyle the protocol and the protocol cannot restyle your content.
+The division of labor never moves. **You author the page:** layout, navigation, selection, counts,
+styling, phone layout. **The kernel supplies** addresses, durable state, the event loop, and the
+cards inside hosts. Its chrome lives in its two elements and under `.atl-*` class names; on your
+elements it sets only `atl-*` attributes, so your CSS cannot restyle the protocol and the protocol
+cannot restyle your content.
 
-## Kernel elements
-
-Load them with one module tag and one stylesheet; both are served by the server from its own
-directory:
+## The author interface
 
 ```html
 <link rel="stylesheet" href="/atelier.css">
 <script type="module" src="/atelier.mjs"></script>
 ```
 
-The kernel inserts nothing into authored content. It styles only its own three elements, its
-floating "💬 Thread" button, and state classes it toggles on your elements (`atl-el-anchor`,
-`atl-el-active`, `atl-el-hover`, `atl-pick-hover`, `atl-changed`).
+Both are served by the Surface server from its own directory.
 
-### `<atelier-region>` — identity and address
+### `atl-key` — Regions on any element
 
 ```html
-<atelier-region key="rollout" label="Rollout">
-  <atelier-region key="cutover" label="Step 3 · Cutover"> … </atelier-region>
-</atelier-region>
+<article atl-key="v03" atl-label="v03 · Before/after">
+  <table><tbody><tr atl-key="safe-zone">…</tr></tbody></table>
+</article>
 ```
 
 | Attribute | Meaning |
 |---|---|
-| `key` | Local key. **Required, unique among its siblings.** The Region Key is the `/`-joined path of local keys from the root: `rollout/cutover`. Preflight fails a missing or duplicate key. |
-| `label` | Human name used in the margin and the Activity drawer. Defaults to the Region's first heading. |
+| `atl-key` | One local key, no slash. Nested `atl-key` elements build the Region Key: `v03/safe-zone`. The full path must be unique; preflight fails an empty, slashed, or duplicate key. |
+| `atl-label` | Human name used in cards and the Activity drawer. Defaults to the Region's first heading, else its key. |
 
-A Region is the unit a Ready replaces, a Thread belongs to, and a changed marker names. Nesting is
-the hierarchy.
+Any element can be a Region — a table row, a list item, an SVG `<g>` — because it is an attribute,
+not a wrapper. Wrappers without `atl-key` do not change the path.
+
+### `<atelier-host>` — where Threads and Proposals appear
+
+```html
+<atelier-host for="v03"></atelier-host>                    <!-- v03 and everything below it -->
+<atelier-host for="migration" layout="anchored"></atelier-host>
+<atelier-host></atelier-host>                              <!-- the one catch-all -->
+```
+
+- An item goes to the host whose `for` is the **longest whole-path prefix** of its Region Key:
+  `v03/safe-zone` goes to `for="v03/safe-zone"`, else `for="v03"`; `for="v0"` never claims `v03`.
+- With no claiming host it goes to the catch-all, as do Threads whose Region left the page and any
+  item a reveal could not show. Without a catch-all it has no host: preflight fails an open
+  Proposal or an implemented Thread with no host, and the kernel warns when the human starts a
+  Thread there.
+- The kernel never creates a host. Two hosts with the same `for`, or two catch-alls, raise a
+  kernel warning and fail preflight. A host draws itself when it enters the page, so hosts a Ready
+  swaps in need no setup. A host with nothing to show is empty.
+- `layout="anchored"` positions each card level with its anchor, pushed down to avoid overlap,
+  the open card exact. It applies while the host sits beside its `for` Region; when the host is
+  `position: fixed` or stacked under that Region, the cards flow normally. The author sizes and
+  places the host.
+
+**Thread cards** are one line until opened: the first message and the lifecycle label. Opened, a
+card is the whole conversation, a reply box (⌘+Enter sends, Enter inserts a newline), and on
+`implemented` Accept and Reopen; Reopen needs the reply box to say what is still wrong. Pasting or
+dropping a PNG, JPEG, GIF, or WebP into a new Thread or a reply uploads it through `/api/attach`.
+An open card closes with ×, Escape, or a click elsewhere.
+
+**Proposal cards** are always open while undecided: the question, one button per option
+(recommended first and labelled), an Explain request under each option, and "Something else…" with
+its own Send. One click on an option is the answer; the card then reads "Chosen: … · Undo (29 s)".
+Undo returns it to open. When the window closes it collapses to "✓ Decided · …".
+
+**Drafts** — a new Thread, a reply, a custom answer, an explanation request — are kept by card and
+field in kernel memory and session storage (new Threads also in local storage), restored after any
+re-render, Ready, or reload, and cleared only after the server answers 2xx. A failed request shows
+"Not sent: …" in the card and keeps the text.
+
+### `<atelier-activity>` — Pick, the drawer, notifications
+
+Exactly one, anywhere on the page. It renders "💬 Comment on…" (Pick mode; Escape leaves it), a
+button reading "N waiting for you" or "Activity", and a native `popover` drawer:
+
+- **Waiting for you** — open Proposals and `implemented` Threads; a row reveals its card.
+- **Just chosen** — pending answers, each with its Undo countdown.
+- **Changed since you looked** — Regions named by Ready; the label reveals the Region, ✓ Seen clears
+  it. A changed Region also carries the `atl-changed` attribute.
+- **Updates** — title, body, a link to its Region, Dismiss.
+
+Desktop notifications are on by default: the kernel asks for permission on the first click and
+notifies of replies, Proposals, Updates, and Readys while the tab is hidden.
+
+### `atl-thread` — a visible way to start a Thread
+
+`<button atl-thread="v03">` opens a whole-Region Thread draft in that Region's host; an empty value
+means the closest Region. Selection, Alt+click, Pick, and image points need no markup.
+
+### State attributes on your elements
+
+`atl-changed` on a changed Region; `atl-anchor` on an element a Thread or Proposal points at,
+`atl-active` while its card is open, `atl-hover` while its card is hovered; `atl-pick` under the
+pointer in Pick mode; `atl-picking` on `<html>` during Pick. Text anchors render through the CSS
+Custom Highlight API (`::highlight(atl-anchor)`, `atl-active`, `atl-hover`).
+
+### Module exports and events
+
+| Name | Contract |
+|---|---|
+| `getState()` | `{ state, items }` after the first load, else `null`. `items`: `[{ kind:'thread'|'proposal'|'update', id, region, status, waiting }]`; `waiting` is true for an open Proposal and an `implemented` Thread. Read-only. |
+| `atelier:state` on `document` | Same `detail` after every reconciliation. Use it for counts and badges. |
+| `setRevealResolver(fn)` | One `async ({ region, id, kind }) => void` that makes the target reachable — select the record, switch the tab. Awaited for up to 2 s. |
+| `reveal(id | { region, id?, kind? })` | Runs the resolver, opens `<details>` around the anchor and the card, scrolls the card into view, focuses its first control. Resolves `true`, or `false` after a visible warning, with the item moved to the catch-all. |
+| `atelier:ready` on `document` | After a Ready swap: `detail = { changed, unknown }`. Re-apply your own view state here; it must be idempotent. |
+| `atelier:rendered` (you dispatch) | A renderer that adds text after load — a diagram, a file viewer — dispatches it so anchors inside resolve. Setting `data-diagram-ready="true"` does the same. |
+| `refresh()`, `unresolvedAnchors()` | Re-read the store; list stored anchors that no longer resolve (preflight uses it). |
 
 ### Anchors — what a Thread or Proposal points at
 
@@ -48,66 +120,10 @@ the hierarchy.
   "point": { "x": 0.25, "y": 0.5 } }       // a point on an IMG or SVG, relative to its box
 ```
 
-Only `region` means the whole Region. Inside a diagram, a click anchors the box it hit: a Mermaid or
-Graphviz `g.node`, or any SVG element carrying `data-anchor="<name>"`, found again by its name
-rather than its position. The human creates anchors three ways: select text and click
-the floating "💬 Thread" button; Alt+click any element; or press "💬 Comment on…" in the Activity
-tools and click. Text anchors resolve again by `quote` + `prefix` after every Ready, so rewording
-around a quote keeps it; removing the quoted words detaches it. A detached anchor falls back to its
-Region and its card says so. Preflight fails while any stored anchor is detached or its Region is
-gone.
-
-### `<atelier-margin>` — Threads and Proposals, level with their anchors
-
-```html
-<div class="page"><main> …Regions… </main><atelier-margin></atelier-margin></div>
-```
-
-Place exactly one, **outside every Region** — a Ready would otherwise replace it with the human's
-half-typed Thread. Give it its own column that grows with the screen, `clamp(340px, 32vw, 520px)`. Each card sits at its anchor's
-height and is pushed down to avoid overlap; the expanded card sits exactly at its anchor. Collapsed
-Every card is one line until opened: a Thread shows its first message, an open Proposal
-"Decide: …", a decided one "✓ Decided · …"; open Proposals are also listed under Waiting for you. Hovering a card highlights its
-anchor; clicking anchored text or an anchored element opens its card. Text anchors render through
-the CSS Custom Highlight API, element anchors as an outline.
-
-A Thread card is the whole conversation: the human's first message, every reply from either side,
-the lifecycle label, and a reply box (⌘+Enter sends, Enter inserts a newline). On `implemented` it
-offers Accept and Reopen; Reopen needs the reply box to say what is still wrong. A Proposal card
-shows the question, options with the recommended one first, a per-option "Explain this option"
-request, any explanation that came back, and a free-text answer. An open card closes with its ×,
-Escape, or a click elsewhere on the page; a half-typed text stays with the closed card. Pasting or
-dropping a PNG, JPEG, GIF, or WebP image into a new Thread or a reply uploads it through
-`/api/attach` and shows it as a thumbnail; it goes out with the message. Unsent new Threads, with
-their images, survive a reload in `localStorage`; every textarea keeps its value, focus, and caret
-across store updates.
-
-Below 1100px the margin becomes a fixed bottom list without anchoring.
-
-### `<atelier-activity>` — header tools and the drawer
-
-```html
-<header class="top"><b>Title</b><nav>…</nav><atelier-activity></atelier-activity></header>
-```
-
-Place exactly one, outside every Region, in a Surface-authored sticky header. It renders two
-buttons — "💬 Comment on…" (Pick mode; Escape leaves it) and one that reads "N waiting for you" or
-"Activity" — and a native `popover` drawer from the right, grouped:
-
-- **Waiting for you** — open Proposals and `implemented` Threads; a row reveals its exact card.
-- **Changed since you looked** — Regions named by Ready; the label scrolls there, ✓ Seen clears it.
-  A changed Region also gets a left-edge marker.
-- **Updates** — title, body, Dismiss.
-
-The drawer also holds the desktop-notification switch. Notifications are on by default: the kernel
-asks for permission on the human's first click, and notifies of replies, Proposals, Updates, and
-Readys while the tab is hidden. Set `--atl-header-height` on `:root` to your header's height so the
-drawer opens below it.
-
-### Module exports
-
-`reveal(id)` scrolls to a Thread's or Proposal's anchor, opening any `<details>` around it, and expands its card. A renderer that adds text after load — a diagram or file viewer — dispatches `atelier:rendered` on `document` when done, so anchors inside it resolve. `refresh()` rereads
-the store. `unresolvedAnchors()` lists stored anchors that no longer resolve; preflight uses it.
+Only `region` means the whole Region. Inside a diagram, a click anchors the box it hit — a Mermaid
+or Graphviz `g.node`, or any SVG element with `data-anchor="<name>"` — found again by name. Text
+anchors resolve again by `quote` + `prefix` after every Ready; removing the quoted words detaches
+the anchor, its card says so, and preflight fails until it is restored or explained.
 
 ## Configuration (env)
 
@@ -118,6 +134,7 @@ the store. `unresolvedAnchors()` lists stored anchors that no longer resolve; pr
 | `ROOT` | `<server-dir>/..` | Directory served statically (usually the project root) |
 | `UI` | `<server-dir>/surface.html` | HTML file served at `/` |
 | `STORE` | `atelier` | Store name → `.review/<STORE>.json` (use a batch id or date for parallel loops) |
+| `UNDO_MS` | `30000` | How long an answer stays pending and can be undone |
 
 ## Durable store (`.review/<STORE>.json` — gitignore it)
 
@@ -131,7 +148,8 @@ the store. `unresolvedAnchors()` lists stored anchors that no longer resolve; pr
   "commentState": { "<commentId>": { "value":"implemented", "ts":"<iso>" } },
   "proposals":{ "<propId>": { "id","region","threadId","anchor","question","options":[],
                               "explanationRequests":{}, "explanations":{},
-                              "status":"open|decided","choiceIndex","custom","ts" } },
+                              "status":"open|pending|decided","choiceIndex","custom",
+                              "attempt","undoUntil","cancelledAttempts":[],"ts","decidedAt" } },
   "updates":  { "<updId>": { "id","region","title","body","ts","dismissedAt" } },
   "changed":  { "<regionKey>": { "ts":"<iso>" } },
   "log":      [ { "seq":1, "kind":"sent", "region":"…", "id":"…", "ts":"…" } ],
@@ -141,113 +159,97 @@ the store. `unresolvedAnchors()` lists stored anchors that no longer resolve; pr
 
 - Every address is a **Region Key**. There is no second addressing scheme.
 - **Ownership**: one active browser owns `threads`; its `POST /api/state` autosave replaces that
-  collection wholesale. Two active browsers can overwrite each other's Thread changes. The server
-  owns everything else. `commentState` is server-owned so autosave cannot clobber a lifecycle.
-  Unsent new Threads live in that browser's `localStorage` until sent, so a store update
-  mid-sentence cannot overwrite what the human is typing.
+  collection wholesale, so two active browsers can overwrite each other's Thread changes. The
+  server owns everything else.
+- **Proposal states**: `open → pending → decided`; Undo is `pending → open`. `attempt` names the
+  click that made the choice, `undoUntil` (epoch ms) closes its window, `cancelledAttempts` keeps
+  undone clicks from coming back. The server writes `pending` to disk before it answers, and logs
+  `decision` once, when `undoUntil` passes — re-armed from the store after a restart.
 - Normal UI actions do not delete Threads. A Thread whose Region left the document stays under its
-  Region Key and keeps its replies and lifecycle; a later Ready that brings the Region back
-  reattaches it. Meanwhile its card stays at the end of the margin, saying its section is gone.
-- **Attention is not in the store.** The Activity drawer derives it from `changed`, `updates`,
-  `proposals` and `commentState` every time state changes.
-- The `log` is a **bounded monotonic event stream** (`seq` strictly increases). It keeps at most
-  5,000 recent entries, trimming to the newest 4,000 when full. The agent and page consume it
-  through the same long-poll with independent cursors; it is observation history, not a backup.
+  Region Key; a later Ready that brings the Region back reattaches it.
+- **Attention is not in the store.** The page derives it from `changed`, `updates`, `proposals`
+  and `commentState`.
+- The `log` is a **bounded monotonic event stream** (`seq` strictly increases), at most 5,000
+  entries, trimmed to the newest 4,000. It is observation history, not a backup.
 
 ## Endpoints
 
 | Endpoint | Caller | Body | Effect |
 |---|---|---|---|
 | `GET /api/state` | both | — | Full store (also the health check) |
-| `POST /api/state` | UI | `{threads}` | Keystroke autosave — replaces `threads` wholesale |
-| `POST /api/ready` | agent | `{changed:[regionKey]}` | **Publish.** Marks those Regions changed and logs `ready`; the open page refetches the document and swaps exactly those Regions in place |
+| `POST /api/state` | UI | `{threads}` | Thread autosave — replaces `threads` wholesale |
+| `POST /api/ready` | agent | `{changed:[regionKey]}` | **Publish.** Marks those Regions changed and logs `ready`; open pages swap exactly those Regions |
 | `POST /api/ack` | UI | `{region}` | Clears an existing changed marker and logs `ack` |
 | `POST /api/update` | agent | `{region, title, body?}` | Durable agent message that asks for nothing |
 | `POST /api/update-dismiss` | UI | `{id}` | The human dismissed it |
-| `POST /api/send` | UI | `{region, id}` | Dispatches ONE comment → logs `sent` **with the comment inline**; clears that Region's existing changed marker |
-| `POST /api/thread-message` | UI | `{region, id, msg?, attachments?}` | The human writes into a sent Thread → stores the message with `author:"human"` and logs `sent` with `followUp:<msg>` (`"(image)"` when only images) and `attachments`, waking the agent |
-| `POST /api/attach` | UI | `{type, data}` | A pasted image, base64, at most 10 MB → stored as `.review/attachments/<file>`; returns `{url:"/.review/attachments/<file>"}` |
-| `POST /api/reply` | agent | `{region, id, msg, state?}` | Appends an agent message to the Thread; the optional `state` bumps the lifecycle in the same call |
-| `POST /api/comment-reject` | UI | `{region, id, msg}` | Requires an implemented comment and a non-empty follow-up; stores the message, sets `rejected`, logs `comment-rejected` |
-| `POST /api/comment-state` | both | `{region, id, state}` | Non-rejection lifecycle. Agent drives `acknowledged`/`in_progress`/`implemented`; the UI drives `accepted`. An optional improvement is accepted first, then sent as a new Thread |
-| `POST /api/propose` | agent | `{region, question, options[], threadId?, anchor?}` | Asks the human to decide beside the material. Placement: `anchor`, else the Thread's anchor, else the Region. Returns `409` while that Region or Thread already has an open Proposal; leave it visible and use an Update if its context changed |
-| `POST /api/decide` | UI | `{id, choiceIndex?, custom?}` | Resolves it → logs `decision`; clears the Proposal Region's existing changed marker; `custom` is the human's own wording |
-| `POST /api/explain-request` | UI | `{id, optionIndex, answer}` | The human asks what an option means → logs `explain-request`, waking the agent |
-| `POST /api/explain` | agent | `{id, optionIndex, text}` | The answer, stored on that option → page-facing `explanation` |
-| `POST /api/event` | both | `{kind, region?, data?, wake?}` | Custom event. With `wake:true` logs canonical `command` carrying `action:kind` — use it for bespoke human buttons such as sign-off. Without it, logs `kind` as page-facing state |
-| `GET /api/poll?cursor=N` | both | — | Long-poll (~25 s): `{cursor, events}` with `seq > N`, or the same cursor and no events on timeout |
-| `GET /<path>` | browser | — | Static from `ROOT`, HTTP Range for video/audio; `/` serves `UI`; `/atelier.mjs` and `/atelier.css` come from the server's own directory |
+| `POST /api/send` | UI | `{region, id}` | Dispatches one Thread → logs `sent` **with the comment inline**; clears that Region's changed marker |
+| `POST /api/thread-message` | UI | `{region, id, msg?, attachments?}` | The human writes into a sent Thread → logs `sent` with `followUp` (`"(image)"` when only images) and `attachments` |
+| `POST /api/attach` | UI | `{type, data}` | A pasted image, base64, at most 10 MB → `{url:"/.review/attachments/<file>"}` |
+| `POST /api/reply` | agent | `{region, id, msg, state?}` | Appends an agent message; `state` bumps the lifecycle in the same call |
+| `POST /api/comment-reject` | UI | `{region, id, msg}` | Needs an implemented Thread and a non-empty message; sets `rejected`, logs `comment-rejected` |
+| `POST /api/comment-state` | both | `{region, id, state}` | Non-rejection lifecycle: the agent drives `acknowledged`/`in_progress`/`implemented`, the UI `accepted` |
+| `POST /api/propose` | agent | `{region, question, options[], threadId?, anchor?}` | Asks the human. `409` while that Region or Thread has an `open` or `pending` Proposal |
+| `POST /api/decide` | UI | `{id, attempt, choiceIndex}` or `{id, attempt, custom}` | `404` unknown; `400` without an attempt, with both or neither of `choiceIndex`/`custom`, or an index outside the options; `409` when not open or the attempt was undone. Sets `pending` with `undoUntil`, logs `decision-pending`. The same attempt again answers `200` with `repeated:true` |
+| `POST /api/undo-decision` | UI | `{id, attempt}` | Before `undoUntil`: back to `open`, logs `decision-undone`. `409` after the window or for another attempt's token |
+| `POST /api/explain-request` | UI | `{id, optionIndex, answer}` | The human asks what an option means → logs `explain-request` |
+| `POST /api/explain` | agent | `{id, optionIndex, text}` | The answer, shown under that option |
+| `POST /api/event` | both | `{kind, region?, data?, wake?}` | Custom event. With `wake:true` logs `command` with `action:kind`, for bespoke human buttons such as sign-off |
+| `GET /api/poll?cursor=N` | both | — | Long-poll (~25 s): `{cursor, events}` with `seq > N`, or no events on timeout |
+| `GET /<path>` | browser | — | Static from `ROOT`, HTTP Range for video/audio; `/` serves `UI` |
 
 ## Ready — how content changes reach the human
 
-The first browser load reads the HTML directly; it needs no Ready. Use Ready only after the human
-could have seen an earlier version.
+The first browser load reads the HTML directly; it needs no Ready.
 
 1. Rewrite the HTML file on disk.
-2. `POST /api/ready {"changed":["onboarding/provider","onboarding/step-3"]}` with only the edited
-   leaf Regions—never unchanged ancestors or unrelated keys.
-3. Every open page refetches its own URL, parses it, and replaces **only those Regions** in place.
-   The margin and header sit outside Regions, so scroll position, open cards, half-typed drafts,
-   focus, and caret survive; anchors resolve again against the new content. Regions you did not
-   name are not touched.
+2. `POST /api/ready {"changed":["v03/safe-zone","v04"]}` with only the edited leaf Regions.
+3. Every open page refetches its URL and replaces **only those Regions**. Hosts inside them draw
+   again with their drafts; focus and caret return to the kernel field the human was in; scroll
+   stays. Then `atelier:ready` fires, so the page re-applies its own selection and tabs.
 
-Two failure modes are handled explicitly, because both are silent otherwise:
-
-- A named Region the new document does not contain is a typo. The page shows a warning naming
-  it, and preflight fails on that warning.
-- A named Region that exists in the new document but not in the open page is a structural change,
-  not a content change. The page saves unsent Threads and reloads rather than guessing where it
-  belongs.
-
-A changed marker **accumulates** across Readys until the human clears it with ✓ Seen, sends a
-comment, or answers a Proposal in that Region, so publishing three times before they look does not lose the
-first two. Each cleared marker logs `ack`; no marker means no stray `ack`.
+A named Region missing from the new file is a typo: the page shows a warning naming it. A named
+Region new to the page is a structural change: the page saves drafts and reloads. A changed marker
+**accumulates** across Readys until the human clears it with ✓ Seen, sends a Thread in that Region,
+or a decision there is final.
 
 ## Poll semantics
 
-- Start at `cursor=0` (or your persisted cursor), advance to the returned `.cursor` on every
-  response, re-poll immediately. Empty `events` on timeout is normal.
-- A cursor can replay only the retained bounded log. Read `GET /api/state` for current durable
-  state; neither source is a recovery journal.
-- The agent runs **one** singleton `poll.sh`; the page runs its own loop. Independent cursors, no
-  conflict.
+- Start at `cursor=0` (or your persisted cursor), advance to the returned `.cursor`, re-poll
+  immediately. Empty `events` on timeout is normal. The log replays only what it retains; read
+  `GET /api/state` for current durable state.
+- The agent runs **one** `poll.sh`; each page runs its own loop with its own cursor, advanced only
+  past events it has handled.
 
 ### How the poll wakes the agent
 
 **Primary — `--stream` under the Workbench monitor.** One `spawn` watcher for
 `BASE_URL=<exact-url> bash <absolute-poller-path> --stream`, `recoveryPolicy:"never"`, a
 URL-specific reuse key, and `notifyOn` for `SENT`, `DECISION`, `EXPLAIN-REQUEST`,
-`COMMENT-REJECTED`, `COMMAND`, `SERVER-DOWN`, `SERVER-UP`. It prints one compact line per waking
-event and never exits on events. Stop it with `monitor_kill` when the review ends.
+`COMMENT-REJECTED`, `COMMAND`, `SERVER-DOWN`, `SERVER-UP`. It prints one line per waking event and
+never exits on events.
 
-**Fallback — `--once` exit-to-wake.** Harnesses without a monitor re-invoke the agent when a
-background task *exits*, not when it prints. `--once` long-polls until a human-origin event arrives,
-prints it, persists the cursor, and exits `0`; act, then re-arm from the persisted cursor. `--tail`
-prints every kind forever and is only for a human watching a terminal.
+**Fallback — `--once` exit-to-wake.** For harnesses that re-invoke the agent when a background task
+exits: it polls until a human-origin event arrives, prints it, persists the cursor, and exits `0`.
+Act, then re-arm. `--tail` prints every kind for a human watching a terminal.
 
-**Wake kinds** (`WAKE_KINDS`, csv): `sent`, `decision`, `explain-request`,
-`comment-rejected`, `command`. Everything else is filtered, and two exclusions are load-bearing:
+**Wake kinds** (`WAKE_KINDS`, csv): `sent`, `decision`, `explain-request`, `comment-rejected`,
+`command`. Everything else is filtered, and three exclusions are load-bearing:
 
-- **`ready` must never wake the agent.** It is the agent's own announcement to the page; waking on
-  it would make the agent answer itself forever.
-- **`update` and `explanation` must never wake the agent.** They are agent → human messages. The
-  page consumes them; the poller drops them.
+- **`ready`** is the agent's own announcement; waking on it would make the agent answer itself.
+- **`update` and `explanation`** are agent → human messages.
+- **`decision-pending` and `decision-undone`** are an answer still inside its undo window. The
+  agent must not act on it; `decision` follows when the window closes.
 
 ## Event kinds to react to
 
-- **`sent`** — a comment was dispatched, carried inline with its `anchor`. Acknowledge → triage →
-  fix → reply. With `followUp`, the human wrote again in an existing Thread; answer that message.
-  The poller prints it as `SENT · <region> … — (follow-up) <text>`. Pasted images arrive as
-  `attachments` URLs, printed as `[images: …]`; read the file at `<ROOT><url>`.
-- **`decision`** — the human resolved a Proposal. `choiceIndex` identifies the option; `custom`
-  carries their own wording and is authoritative when present. Act, then reply in the Thread.
-- **`explain-request`** — the human asked what an option means. Use `proposalId`, `optionIndex` and
-  `answer`, and post a decision-relevant explanation to `/api/explain`.
-- **`comment-rejected`** — an implemented comment was judged incomplete; `msg` carries the required
-  follow-up. Re-work it through `in_progress → implemented`.
+- **`sent`** — a Thread was dispatched, its `anchor` inline. Acknowledge → triage → fix → reply.
+  With `followUp`, the human wrote again in an existing Thread. Images arrive as `attachments`
+  URLs; read the file at `<ROOT><url>`.
+- **`decision`** — final, after the undo window. `proposalId` names the Proposal; `choiceIndex`
+  the option; `custom`, when present, is the human's own wording and wins. Act, then reply.
+- **`explain-request`** — the human asked what an option means; answer through `/api/explain`.
+- **`comment-rejected`** — an implemented Thread was judged incomplete; `msg` says why.
 - **`command`** — a human action posted with `wake:true`; `action` carries the bespoke kind.
-- Ignore your own echoes (`reply`, `proposal`, `update`, `explanation`, `ready`) and the human's
-  bookkeeping (`ack`, `update-dismissed`, `comment-state`).
 
 ## Agent-side snippets
 
@@ -256,13 +258,13 @@ BASE_URL=http://127.0.0.1:<port>
 
 # acknowledge within seconds, before fixing — piggyback the lifecycle bump
 curl -s -X POST "$BASE_URL/api/reply" -H 'Content-Type: application/json' \
-  -d '{"region":"onboarding/provider","id":"<commentId>","msg":"Picked up: <plan>","state":"acknowledged"}'
+  -d '{"region":"v03","id":"<commentId>","msg":"Picked up: <plan>","state":"acknowledged"}'
 
-# ask the human to decide beside the exact evidence, recommended option FIRST
+# ask beside the exact evidence, recommended option FIRST
 curl -s -X POST "$BASE_URL/api/propose" -H 'Content-Type: application/json' \
-  -d '{"region":"onboarding/provider","question":"Which order?",
-       "options":["Provider first (recommended)","Ingest first"],
-       "anchor":{"region":"onboarding/provider","quote":"provider must exist"}}'
+  -d '{"region":"v03","question":"Release v03 with its caption inside the button row?",
+       "options":["Move the caption up 40 px, then release (recommended)","Release as is"],
+       "anchor":{"region":"v03/safe-zone","selector":":scope > td:nth-of-type(1)"}}'
 
 # answer an explanation request (proposal id + optionIndex come from the event)
 curl -s -X POST "$BASE_URL/api/explain" -H 'Content-Type: application/json' \
@@ -270,18 +272,17 @@ curl -s -X POST "$BASE_URL/api/explain" -H 'Content-Type: application/json' \
 
 # tell the human something without asking for anything
 curl -s -X POST "$BASE_URL/api/update" -H 'Content-Type: application/json' \
-  -d '{"region":"onboarding","title":"All six drafts re-rendered","body":"Steps 2 and 5 changed."}'
+  -d '{"region":"v01","title":"All eight renders finished","body":"Three fail a check."}'
 
 # publish rewritten content into the open page
 curl -s -X POST "$BASE_URL/api/ready" -H 'Content-Type: application/json' \
-  -d '{"changed":["onboarding/provider","onboarding/step-3"]}'
+  -d '{"changed":["v03/safe-zone","v04"]}'
 ```
 
 ## Extending
 
-Add task endpoints in the marked section of the copied `tools/review-server.mjs` (artifact
-discovery, computed views, task actions), and call them from your own HTML. Never repurpose a
-protocol endpoint's shape.
+Add task endpoints in the marked section of the copied `tools/review-server.mjs` and call them
+from your own HTML. Never repurpose a protocol endpoint's shape.
 
 The kernel cannot pick inside an iframe. A Surface that embeds a cooperating app — one that reports
 clicked elements over `postMessage` — records the human's note with `POST /api/event` and
