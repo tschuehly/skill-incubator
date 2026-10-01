@@ -5,6 +5,7 @@
 //
 //   node tools/review-server.mjs                          # serve + print URL
 //   PORT=4747 UI=tools/my-surface.html STORE=2026-08-27 node tools/review-server.mjs
+//   UNDO_MS=30000                                       # how long a chosen option can be undone
 //
 // The server is deliberately ignorant of content: it knows Region KEYS as opaque strings and
 // nothing about the document tree. Identity, layout, and rendering belong to the Surface.
@@ -22,6 +23,8 @@ const UI   = path.resolve(process.env.UI || path.join(HERE, 'surface.html'));
 const NAME = process.env.STORE || 'atelier';
 const DATA_DIR = path.join(ROOT, '.review');                             // gitignore this
 const STORE_FILE = path.join(DATA_DIR, `${NAME}.json`);
+// The human may take back a choice for this long; the agent hears of it only afterwards.
+const UNDO_MS = /^\d+$/.test(process.env.UNDO_MS || '') ? Number(process.env.UNDO_MS) : 30000;
 await fsp.mkdir(DATA_DIR, { recursive: true });
 
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.mjs':'text/javascript', '.css':'text/css',
@@ -35,7 +38,8 @@ const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.mj
 //   attachments = ['/.review/attachments/<file>'] (pasted images, uploaded through /api/attach)
 //   anchor = {region, quote?, prefix?, selector?, point?:{x,y}}; only region = the whole Region
 //   sent:{[commentId]:iso}, replies:{[commentId]:[{ts,msg,author:'agent'|'human',attachments?}]}, commentState:{[commentId]:{value,ts}},
-//   proposals:{[id]:{id,region,threadId,anchor,question,options,explanationRequests,explanations,status,choiceIndex,custom,ts,decidedAt}},
+//   proposals:{[id]:{id,region,threadId,anchor,question,options,explanationRequests,explanations,status,choiceIndex,custom,
+//     attempt,undoUntil,cancelledAttempts,ts,decidedAt}},     status: open → pending → decided; Undo: pending → open
 //   updates:{[id]:{id,region,title,body,ts,dismissedAt}},
 //   changed:{[region]:{ts}},                                        ← named by Ready, cleared by ack
 //   log:[{seq,kind,region,id,ts,...}], seq }
@@ -74,11 +78,33 @@ function persistNow(){
   } catch (error){ console.error('store write failed:', error.message); }
 }
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { persistNow(); process.exit(0); });
-function appendLog(kind, region, id, extra){
+function logEvent(kind, region, id, extra){
   store.seq += 1;
   store.log.push({ seq: store.seq, kind, region: region||null, id: id||null, ts: new Date().toISOString(), ...extra });
   if (store.log.length > 5000) store.log = store.log.slice(-4000);
-  notifyPollers();
+}
+function appendLog(kind, region, id, extra){ logEvent(kind, region, id, extra); notifyPollers(); }
+
+// ---- decisions: one click, then an undo window, then the agent hears of it -------------
+// A choice is `pending` until undoUntil. Only then is `decision` logged, which is what wakes the
+// agent, so a human who takes a choice back has cost the agent nothing. The store is written before
+// any caller hears of a change, and boot re-arms every pending choice, so a restart neither drops
+// nor repeats a decision.
+const undoTimers = new Map();
+function armDecision(pr){
+  clearTimeout(undoTimers.get(pr.id));
+  undoTimers.set(pr.id, setTimeout(() => commitDecision(pr.id), Math.max(0, pr.undoUntil - Date.now())));
+}
+function commitDecision(id){
+  undoTimers.delete(id);
+  const pr = store.proposals[id];
+  if (!pr || pr.status !== 'pending') return;
+  if (Date.now() < pr.undoUntil) return armDecision(pr);          // a timer may fire a millisecond early
+  pr.status = 'decided'; pr.decidedAt = new Date().toISOString();
+  logEvent('decision', pr.region, pr.threadId, { proposalId:id, choiceIndex:pr.choiceIndex, custom:pr.custom });
+  // A decision proves the human reviewed the Proposal's Region.
+  if (store.changed[pr.region]){ delete store.changed[pr.region]; logEvent('ack', pr.region, null, {}); }
+  persistNow(); notifyPollers();
 }
 
 // ---- long-poll ----
@@ -287,7 +313,7 @@ async function handle(req, res){
     const key = str(region, 300), q = str(question, 2000);
     if (!key || !q || !Array.isArray(options) || !options.length)
       return sendJSON(res, 400, { ok:false, error:'need region, question, options[]' });
-    const open = Object.values(store.proposals).find(pr => pr.status==='open'
+    const open = Object.values(store.proposals).find(pr => (pr.status==='open' || pr.status==='pending')
       && (pr.region===key || (threadId && pr.threadId===threadId)));
     if (open) return sendJSON(res, 409, { ok:false, error:'resolve the existing open Proposal before asking another', proposalId:open.id });
     const id = `prop-${++store.seq}`;
@@ -298,18 +324,45 @@ async function handle(req, res){
     return sendJSON(res, 200, { ok:true, id });
   }
 
-  if (p === '/api/decide' && req.method === 'POST'){     // { id, choiceIndex, custom }
-    const { id, choiceIndex, custom } = await readBody(req);
-    const pr = store.proposals[id];
-    if (pr){
-      pr.status='decided'; pr.choiceIndex = (choiceIndex===undefined?null:choiceIndex);
-      pr.custom = custom||null; pr.decidedAt = new Date().toISOString();
-      appendLog('decision', pr.region, pr.threadId, { proposalId:id, choiceIndex:pr.choiceIndex, custom:pr.custom });
-      // A decision proves the human reviewed the Proposal's Region.
-      if (store.changed[pr.region]){ delete store.changed[pr.region]; appendLog('ack', pr.region, null, {}); }
-      persist();
-    }
-    return sendJSON(res, 200, { ok: !!pr, cursor: store.seq });
+  // One click chooses; the same attempt token repeated is the same click, never a second choice.
+  if (p === '/api/decide' && req.method === 'POST'){     // { id, choiceIndex | custom, attempt }
+    const { id, choiceIndex, custom, attempt } = await readBody(req);
+    const pr = store.proposals[String(id||'')];
+    if (!pr) return sendJSON(res, 404, { ok:false, error:'unknown proposal' });
+    const token = str(attempt, 100), byIndex = choiceIndex != null, text = custom == null ? null : str(custom, 4000);
+    if (!token) return sendJSON(res, 400, { ok:false, error:'need an attempt token of at most 100 characters' });
+    if (byIndex === (custom != null)) return sendJSON(res, 400, { ok:false, error:'send exactly one of choiceIndex or custom' });
+    if (byIndex && !(Number.isInteger(choiceIndex) && choiceIndex >= 0 && choiceIndex < pr.options.length))
+      return sendJSON(res, 400, { ok:false, error:`choiceIndex must be an option index from 0 to ${pr.options.length - 1}` });
+    if (!byIndex && !text) return sendJSON(res, 400, { ok:false, error:'custom must be text of at most 4000 characters' });
+    if (pr.attempt === token && pr.status !== 'open')
+      return sendJSON(res, 200, { ok:true, repeated:true, status:pr.status, undoUntil:pr.undoUntil, cursor: store.seq });
+    if (pr.status !== 'open') return sendJSON(res, 409, { ok:false, error:`this Proposal is ${pr.status}, not open`, status:pr.status });
+    if ((pr.cancelledAttempts||[]).includes(token)) return sendJSON(res, 409, { ok:false, error:'this choice was undone' });
+    Object.assign(pr, { status:'pending', choiceIndex: byIndex ? choiceIndex : null, custom: byIndex ? null : text,
+      attempt:token, undoUntil: Date.now() + UNDO_MS });
+    logEvent('decision-pending', pr.region, pr.threadId, { proposalId:pr.id, choiceIndex:pr.choiceIndex, custom:pr.custom, undoUntil:pr.undoUntil });
+    persistNow(); notifyPollers(); armDecision(pr);
+    return sendJSON(res, 200, { ok:true, status:'pending', undoUntil:pr.undoUntil, cursor: store.seq });
+  }
+
+  if (p === '/api/undo-decision' && req.method === 'POST'){ // { id, attempt } — before undoUntil only
+    const { id, attempt } = await readBody(req);
+    const pr = store.proposals[String(id||'')];
+    if (!pr) return sendJSON(res, 404, { ok:false, error:'unknown proposal' });
+    const token = str(attempt, 100);
+    if (!token) return sendJSON(res, 400, { ok:false, error:'need the attempt token of the choice to undo' });
+    if (pr.status === 'open' && (pr.cancelledAttempts||[]).includes(token)) return sendJSON(res, 200, { ok:true, repeated:true, status:'open' });
+    if (pr.status === 'pending' && Date.now() >= pr.undoUntil) commitDecision(pr.id);
+    if (pr.status !== 'pending') return sendJSON(res, 409, { ok:false, error: pr.status === 'decided' ? 'the undo window has closed' : 'nothing to undo', status:pr.status });
+    if (pr.attempt !== token) return sendJSON(res, 409, { ok:false, error:'a newer choice replaced this one' });
+    clearTimeout(undoTimers.get(pr.id)); undoTimers.delete(pr.id);
+    const undone = { choiceIndex:pr.choiceIndex, custom:pr.custom };
+    (pr.cancelledAttempts ||= []).push(token);
+    Object.assign(pr, { status:'open', choiceIndex:null, custom:null, attempt:null, undoUntil:null });
+    logEvent('decision-undone', pr.region, pr.threadId, { proposalId:pr.id, ...undone });
+    persistNow(); notifyPollers();
+    return sendJSON(res, 200, { ok:true, status:'open', cursor: store.seq });
   }
 
   if (p === '/api/explain-request' && req.method === 'POST'){ // { id, optionIndex, answer }
@@ -372,3 +425,5 @@ server.listen(PORT, HOST, ()=>{
   console.log(`  ui:    ${UI}`);
   console.log(`  store: ${STORE_FILE}`);
 });
+// A choice made before a restart still reaches the agent once its window closes, exactly once.
+for (const pr of Object.values(store.proposals)) if (pr.status === 'pending') armDecision(pr);

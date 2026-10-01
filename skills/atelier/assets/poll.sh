@@ -38,6 +38,9 @@
 #   * `ready` is the AGENT telling the page to swap in new content. Waking on it would make the
 #     agent answer its own announcement, forever.
 #   * `update` is the agent's own durable message to the human, and `explanation` its own answer.
+#   * `decision-pending` and `decision-undone` are a choice still inside its undo window. The
+#     server logs `decision` only when that window closes, so the agent never acts on a choice
+#     the human is still allowed to take back.
 # The rest (reply, proposal, comment-state, ack, update-dismissed) are echoes or human
 # bookkeeping that needs no work. The filter runs on the raw JSON in BOTH the jq and the python3
 # parser, identically.
