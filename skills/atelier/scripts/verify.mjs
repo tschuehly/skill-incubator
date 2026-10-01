@@ -140,7 +140,7 @@ const proposalOf = async (question) => Object.values((await state()).proposals).
 const decisionsOf = async (id) => (await state()).log.filter(e => e.kind === 'decision' && e.proposalId === id).length;
 const reload = async (ms = 1300) => { browser(['reload']); await sleep(ms); };
 const preflight = () => {
-  const r = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'], { encoding:'utf8', timeout:300000 });
+  const r = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'], { encoding:'utf8', timeout:300000, cwd: dir });
   return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
 };
 // Top of a host card and of its anchor, in page coordinates.
@@ -722,8 +722,11 @@ try {
   await check('preflight: the fixture passes the render gates at all three sizes', async () => {
     const result = preflight();
     assert(result.status === 0, `preflight exited ${result.status}: ${result.out.slice(0, 600)}`);
-    for (const line of ['PASS RENDER_DESKTOP', 'PASS RENDER_PHONE:', 'PASS RENDER_PHONE_LARGE', 'INFO LAYOUT_DESKTOP: 1440x900, page height'])
+    for (const line of ['PASS RENDER_DESKTOP', 'PASS RENDER_PHONE:', 'PASS RENDER_PHONE_LARGE', 'INFO LAYOUT_DESKTOP: 1440x900, page height',
+      'PREFLIGHT=PASS (render checks)', 'NEXT=visual judgment pending'])
       assert(result.out.includes(line), `missing "${line}"`);
+    // Render checks are not a look: without a screenshot verdict nobody sends the human there.
+    assert(!/for the human/.test(result.out), 'a render-clean page without a visual verdict was handed over');
   });
 
   // The kernel warning on this page is also what proves preflight reads .atl-warnings: the probe

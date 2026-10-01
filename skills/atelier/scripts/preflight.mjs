@@ -11,6 +11,15 @@
 // Region coverage are evidence lines.
 //
 // --skip-poller / --skip-render exist for kernel tests. Neither is a human handoff.
+//
+// Passing these checks proves the page renders, not that a cold reader can use it. That judgment is
+// a screenshot pass by a delegated subagent, recorded against the current content hash:
+//
+//   node <skill-dir>/scripts/preflight.mjs --url <surface-url> [--evidence-dir .review/preflight] \
+//     --record-visual pass|fail|unverified --note "what was seen, or what is wrong, or what state is needed"
+//
+// The hash covers the served page and kit, so restarting an unchanged Surface keeps its verdict and
+// any content change makes it pending again.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -20,6 +29,8 @@ import { metaFindings, REPAIR } from './prose.mjs';
 
 const args = process.argv.slice(2);
 let url = '', pollerIdentity = '', evidenceDir = '', skipPoller = false, skipRender = false, allowKitDrift = false;
+let recordVisual = '';
+const notesArg = [];
 while (args.length){
   const arg = args.shift();
   if (arg === '--url') url = args.shift() || '';
@@ -28,8 +39,42 @@ while (args.length){
   else if (arg === '--skip-poller') skipPoller = true;
   else if (arg === '--skip-render') skipRender = true;
   else if (arg === '--allow-kit-drift') allowKitDrift = true;
+  else if (arg === '--record-visual') recordVisual = args.shift() || '';
+  else if (arg === '--note') notesArg.push(args.shift() || '');
   else { console.error(`unknown argument: ${arg}`); process.exit(2); }
 }
+
+// ---- visual verdict ------------------------------------------------------------------
+const verdictFile = path.join(evidenceDir || '.review/preflight', 'visual-verdict.json');
+const sameUrl = (a, b) => { try { return new URL(a).href === new URL(b).href; } catch { return a === b; } };
+// ponytail: hashes only the page and kit the server answers for; assets the page loads itself
+// (data files, images, recipe scripts) can change without invalidating the verdict.
+async function contentHash(){
+  const hash = createHash('sha256');
+  for (const route of ['/', '/atelier.mjs', '/atelier.css']){
+    const response = await fetch(new URL(route, url), { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error(`GET ${route} returned HTTP ${response.status}`);
+    hash.update(route).update('\0').update(Buffer.from(await response.arrayBuffer())).update('\0');
+  }
+  return hash.digest('hex').slice(0, 16);
+}
+if (recordVisual){
+  const notes = notesArg.map(n => n.trim()).filter(Boolean);
+  if (!url || !['pass', 'fail', 'unverified'].includes(recordVisual) || (recordVisual !== 'pass' && !notes.length)){
+    console.error('usage: preflight.mjs --url <surface-url> [--evidence-dir <dir>] --record-visual pass|fail|unverified --note "…" (a note is required for fail and unverified)');
+    process.exit(2);
+  }
+  let hash;
+  try { hash = await contentHash(); }
+  catch (error){ console.error(`cannot hash ${url}: ${error.message}`); process.exit(1); }
+  const verdict = { url, contentHash: hash, verdict: recordVisual, viewports: ['1440x900', '390x844'], findings: notes,
+    ...(recordVisual === 'unverified' ? { reason: notes.join('; ') } : {}), recordedAt: new Date().toISOString() };
+  fs.mkdirSync(path.dirname(verdictFile), { recursive: true });
+  fs.writeFileSync(verdictFile, `${JSON.stringify(verdict, null, 2)}\n`);
+  console.log(`VISUAL=${recordVisual} recorded for ${url} at content ${hash} in ${verdictFile}`);
+  process.exit(0);
+}
+
 if (!url || (!skipPoller && !pollerIdentity)){
   console.error('usage: preflight.mjs --url <surface-url> --poller-identity <absolute-poller-path> [--evidence-dir <dir>] [--skip-render] [--skip-poller] [--allow-kit-drift]');
   process.exit(2);
@@ -290,5 +335,19 @@ if (failures.length){
   console.error('NEXT=Fix every FAIL line and rerun preflight before involving the human.');
   process.exit(1);
 }
-console.log('PREFLIGHT=PASS');
-console.log(`NEXT=Open ${url} for the human and keep the poller armed.`);
+console.log('PREFLIGHT=PASS (render checks)');
+// Only a screenshot verdict for this exact content may send the human to the page.
+let hash = null, verdict = null;
+try { hash = await contentHash(); } catch (error){ console.log(`INFO VISUAL: cannot hash the served content (${error.message})`); }
+try { verdict = JSON.parse(fs.readFileSync(verdictFile, 'utf8')); } catch {}
+const record = `node ${fileURLToPath(import.meta.url)} --url ${url}${evidenceDir ? ` --evidence-dir ${evidenceDir}` : ''} --record-visual pass|fail|unverified --note "…"`;
+if (!hash || !verdict || !sameUrl(verdict.url, url) || verdict.contentHash !== hash){
+  if (verdict) console.log(`INFO VISUAL: ${verdictFile} judged ${verdict.url} at content ${verdict.contentHash}; the page is now ${hash}`);
+  console.log(`NEXT=visual judgment pending — delegate a read-only screenshot pass at 1440x900 and 390x844 to a background subagent, which records: ${record}`);
+} else if (verdict.verdict === 'pass'){
+  console.log(`NEXT=Open ${url} for the human and keep the poller armed.`);
+} else if (verdict.verdict === 'fail'){
+  console.log(`NEXT=fix: ${(verdict.findings || []).join('; ') || 'the screenshot pass failed without findings'} — then rerun preflight and a new screenshot pass.`);
+} else {
+  console.log(`NEXT=Hand over labelled UNVERIFIED: ${verdict.reason || (verdict.findings || []).join('; ') || 'no reason recorded'}; tell the human what state they need to see it (${url}).`);
+}

@@ -57,7 +57,7 @@ PORT="$PORT" CURSOR_FILE="$TMP/poller.cursor" bash "$TMP/review-poll.sh" --once 
 POLLER_PID=$!
 sleep 0.4
 node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" --skip-render \
-  | grep -Fx 'PREFLIGHT=PASS' >/dev/null
+  | grep -Fx 'PREFLIGHT=PASS (render checks)' >/dev/null
 
 # A copied kit never updates itself, so a Surface must not hand off on a kit it has drifted from.
 cp "$TMP/atelier.mjs" "$TMP/atelier.mjs.pristine"
@@ -67,7 +67,7 @@ if node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.
 fi
 grep -F 'FAIL KIT' "$TMP/kit.log" >/dev/null
 node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" --skip-render --allow-kit-drift \
-  | grep -Fx 'PREFLIGHT=PASS' >/dev/null
+  | grep -Fx 'PREFLIGHT=PASS (render checks)' >/dev/null
 mv "$TMP/atelier.mjs.pristine" "$TMP/atelier.mjs"
 
 # --- agent-origin events must NOT wake the agent ---------------------------------------
@@ -229,5 +229,34 @@ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null || true
 start_server
 sleep 0.5
 [ "$(decisions_of "$R1")" = 1 ] || { echo "FAIL: a restart repeated a decision" >&2; exit 1; }
+
+# --- handoff waits for a screenshot verdict on exactly this content -----------------------
+# Surfaces were handed over on PREFLIGHT=PASS without anyone looking at them.
+EV="$TMP/evidence"
+next_line() { node "$HERE/preflight.mjs" --url "$BASE" --skip-poller --skip-render --evidence-dir "$EV" | grep '^NEXT='; }
+record() { node "$HERE/preflight.mjs" --url "$BASE" --evidence-dir "$EV" --record-visual "$@" >/dev/null; }
+expect_next() { local got; got="$(next_line)"; [[ "$got" == $1 ]] || { echo "FAIL: $2: $got" >&2; exit 1; }; }
+never_open() { local got; got="$(next_line)"; ! grep -q 'for the human' <<<"$got" || { echo "FAIL: $1: $got" >&2; exit 1; }; }
+
+never_open 'no verdict, yet the human was sent to the page'
+expect_next 'NEXT=visual judgment pending*--record-visual*' 'no verdict did not ask for a screenshot pass'
+record pass --note 'desktop and phone read cleanly'
+expect_next "NEXT=Open $BASE for the human*" 'a matching pass verdict did not hand over'
+kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null || true
+start_server
+expect_next "NEXT=Open $BASE for the human*" 'a restart of unchanged content lost its verdict'
+cp "$TMP/surface.html" "$TMP/surface.html.judged"
+printf '<p>new finding</p>\n' >>"$TMP/surface.html"
+never_open 'content changed after the verdict, yet the human was sent to the page'
+expect_next 'NEXT=visual judgment pending*' 'changed content did not make the verdict pending'
+mv "$TMP/surface.html.judged" "$TMP/surface.html"
+record fail --note 'the phone list hides the detail pane'
+expect_next 'NEXT=fix: the phone list hides the detail pane*' 'a fail verdict did not name its finding'
+record unverified --note 'needs a record with an open Proposal selected'
+expect_next 'NEXT=Hand over labelled UNVERIFIED: needs a record with an open Proposal selected;*' 'an unverified verdict was not labelled'
+never_open 'an unverified Surface was handed over as ready'
+if node "$HERE/preflight.mjs" --url "$BASE" --evidence-dir "$EV" --record-visual fail >/dev/null 2>&1; then
+  echo "FAIL: a fail verdict was recorded without a finding" >&2; exit 1
+fi
 
 printf 'atelier server and poll loop: PASS\n'

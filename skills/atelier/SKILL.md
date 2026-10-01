@@ -112,10 +112,27 @@ transcript. The first browser load needs no Ready.
    at 1440×900, 390×844 and 412×915, undrawn diagrams. Rewrite or delete each `WARN PROSE`
    sentence; steps for an interface under review go in an element marked `data-subject-ui`.
    `--skip-render`, `--skip-poller` and `--allow-kit-drift` are never a handoff.
-4. Walk the primary path and every control yourself, then open the URL for the human. Restarting
-   a used Surface repeats steps 1–3 and skips this one unless the content changed.
+4. Look before handing over; `PREFLIGHT=PASS (render checks)` proves only that the page renders.
+   - **You** walk the primary path and every control through the source and the DOM
+     (`agent-browser snapshot` and `eval`); you load no screenshots.
+   - **A background subagent** takes agent-browser screenshots at 1440×900 and 390×844 and judges
+     whether a cold reader can understand and use the page. It is read-only: it never clicks the
+     human's live Decisions or Threads, and uses a store copy on another port when it must
+     interact. It records its verdict against the current content:
 
-**Ready when:** preflight passes, the exact-URL poller is armed, and the browser is open.
+     ```bash
+     node <skill-dir>/scripts/preflight.mjs --url http://127.0.0.1:<port> \
+       --evidence-dir .review/preflight --record-visual pass|fail|unverified --note "…"
+     ```
+
+   Rerun preflight and follow its `NEXT=` line: `Open <url> for the human` only after a matching
+   pass; `fix:` names what to fix first. A Surface no one can check visually is handed over
+   labelled UNVERIFIED (record `unverified` with the reason), and you tell the human which state
+   they need to see it. Restarting an unchanged Surface keeps its verdict — the page and kit hash
+   the same — so it needs no new look; any content change makes the verdict pending again.
+
+**Ready when:** preflight passes, its `NEXT=` line says `Open <url> for the human` (or the human
+knows the Surface is UNVERIFIED and why), the exact-URL poller is armed, and the browser is open.
 
 ## Work through the Surface
 
