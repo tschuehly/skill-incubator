@@ -42,7 +42,8 @@ const surface = ({ alpha = 'the quick brown fox jumps over the lazy dog', beta =
   <section atl-key="list" atl-label="List"><ul><li>first item</li><li>second item</li><li>third item</li></ul><div style="height:600px"></div></section>
   <section atl-key="fig" atl-label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg>
     <svg id="flow-svg" width="400" height="60" viewBox="0 0 400 60" style="max-width:100%">${flow.map((n, i) => `<g class="node" id="mermaid-${Date.now()}-flowchart-${n}" transform="translate(${10 + i * 130},10)"><rect width="110" height="40" fill="#ddd"/><text x="10" y="25">${n.split('-')[0]}</text></g>`).join('')}</svg>
-    <svg width="200" height="60" viewBox="0 0 200 60"><g atl-key="dot" atl-label="Dot"><circle id="dot" cx="30" cy="30" r="20" fill="#c33"/></g></svg><div style="height:600px"></div></section>
+    <svg width="200" height="60" viewBox="0 0 200 60"><g atl-key="dot" atl-label="Dot"><circle id="dot" cx="30" cy="30" r="20" fill="#c33"/></g>
+      <g atl-key="box" atl-label="Box" data-anchor="box"><rect id="box-rect" x="80" y="10" width="60" height="40" fill="#9c9"/></g></svg><div style="height:600px"></div></section>
   <section atl-key="beta" atl-label="Beta"><h2>Beta</h2><p>${beta}</p><div style="height:600px"></div></section>
   <section atl-key="late" atl-label="Late"><details id="late-box"><summary>file</summary><div id="late-view"></div></details></section>
   <section atl-key="tbl" atl-label="Table"><table><tbody><tr atl-key="r1"><td>row one</td><td>12 ms</td></tr><tr atl-key="r2"><td>row two</td><td>40 ms</td></tr></tbody></table></section>
@@ -155,6 +156,11 @@ const typeNewAndSend = async (text) => {
 const typeInto = (sel, text) => act(`(()=>{const t=document.querySelector(${JSON.stringify(sel)}); t.value=${JSON.stringify(text)}; t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
 const altClick = (js, fx = 0.5, fy = 0.5) => act(`(()=>{const el=${js}; el.scrollIntoView({block:'center'}); const r=el.getBoundingClientRect();
   el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,altKey:true,clientX:r.left+r.width*${fx},clientY:r.top+r.height*${fy}}))})()`);
+// Holds the page's matching requests until release(); every other request passes.
+const hold = (match) => act(`(()=>{const f=window.fetch, held=[]; window.__fetch=f; window.__release=()=>held.splice(0).forEach(go=>go());
+  window.fetch=(u,o)=>(${match})(String(u),o) ? new Promise(go=>held.push(go)).then(()=>f(u,o)) : f(u,o)})()`);
+const release = () => act(`(()=>{window.fetch=window.__fetch; window.__release()})()`);
+const unattachAll = (id) => act(`(()=>{let b; while ((b = document.querySelector('[data-card="${id}"] [data-unattach]'))) b.click()})()`);
 const cardText = (id) => probe(`JSON.stringify(document.querySelector('[data-slot="${id}"]')?.innerText || '')`);
 const hostOf = (id) => probe(`JSON.stringify(document.querySelector('[data-slot="${id}"]')?.closest('atelier-host')?.getAttribute('for') ?? null)`);
 
@@ -266,6 +272,16 @@ try {
     const c = await threadOf('v/fig/dot', 'dot thread');
     assert(c?.anchor?.selector, `no Thread on v/fig/dot: ${JSON.stringify(Object.keys((await state()).threads))}`);
     eq(probe(`JSON.stringify(document.querySelector('[atl-key=dot]').querySelector(${JSON.stringify(c.anchor.selector)})?.id)`), 'dot', 'selector target');
+  });
+
+  await check('anchor: Alt+click inside a <g> Region that is its own data-anchor box anchors the whole Region', async () => {
+    altClick(`document.querySelector('#box-rect')`);
+    await sleep(200);
+    await typeNewAndSend('own box thread');
+    const c = await threadOf('v/fig/box', 'own box thread');
+    eq(c?.anchor, { region:'v/fig/box' }, 'anchor');
+    const lost = JSON.parse(JSON.parse(browser(['eval', `import('/atelier.mjs').then(k => JSON.stringify(k.unresolvedAnchors()))`])));
+    eq(lost.filter(u => u.id === c.id), [], 'unresolved');
   });
 
   await check('anchor: text a viewer renders late resolves, and revealing it opens its details', async () => {
@@ -487,6 +503,65 @@ try {
     eq(probe(`JSON.stringify(document.querySelectorAll('[data-card="${c.id}"] .atl-msg img').length)`), 2, 'images shown in the Thread');
   });
 
+  await check('thread: an image pasted while a new Thread is sending stays, in its reply draft', async () => {
+    altClick(`document.querySelector('[atl-key=beta] h2')`);
+    await sleep(200);
+    typeInto('atelier-host [data-new]', 'sent while pasting');
+    hold(`(u, o) => u === '/api/state' && o?.method === 'POST'`);
+    act(`document.querySelector('atelier-host [data-send]').click()`);
+    await sleep(300);
+    pasteInto('atelier-host [data-new]');
+    await sleep(800);
+    eq(probe(`JSON.stringify(document.querySelector('atelier-host [data-new]').closest('[data-card]').querySelectorAll('.atl-att img').length)`), 1, 'uploaded while sending');
+    release();
+    await sleep(1000);
+    const c = await threadOf('v/beta', 'sent while pasting');
+    assert(c && (await state()).sent[c.id], 'Thread not sent');
+    try {
+      eq([c.attachments ?? null, probe(`JSON.stringify(document.querySelectorAll('[data-card="${c.id}"] .atl-att img').length)`),
+        probe(`JSON.stringify(JSON.parse(sessionStorage.getItem('atelier:atts')).filter(([k]) => k === '${c.id}|reply').map(([, v]) => v.length))`)],
+        [null, 1, [1]], 'sent Thread, its reply draft, and sessionStorage');
+    } finally { unattachAll(c.id); }
+  });
+
+  await check('thread: two images uploading at once into a reply are both kept', async () => {
+    const c = await threadOf('v/beta', 'sent while pasting');
+    await reload();
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    hold(`u => u === '/api/attach'`);
+    pasteInto(`[data-reply-text="${c.id}"]`);
+    pasteInto(`[data-reply-text="${c.id}"]`);
+    await sleep(300);
+    release();
+    await sleep(800);
+    try { eq(probe(`JSON.stringify(document.querySelectorAll('[data-card="${c.id}"] .atl-att img').length)`), 2, 'images'); }
+    finally { unattachAll(c.id); }
+  });
+
+  await check('thread: an upload that finishes after its card was redrawn keeps the newer text', async () => {
+    const c = await threadOf('v/beta', 'sent while pasting');
+    act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
+    typeInto(`[data-reply-text="${c.id}"]`, 'older text');
+    hold(`u => u === '/api/attach'`);
+    pasteInto(`[data-reply-text="${c.id}"]`);
+    await sleep(300);
+    act(`document.querySelector('[data-card="${c.id}"] [data-close]').click()`);
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    typeInto(`[data-reply-text="${c.id}"]`, 'newer text');
+    act(`document.querySelector('[data-card="${c.id}"] [data-close]').click()`);
+    release();
+    await sleep(800);
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    try {
+      eq(probe(`JSON.stringify({ text: document.querySelector('[data-reply-text="${c.id}"]').value, images: document.querySelectorAll('[data-card="${c.id}"] .atl-att img').length })`),
+        { text:'newer text', images:1 }, 'reopened card');
+    } finally {
+      typeInto(`[data-reply-text="${c.id}"]`, '');
+      unattachAll(c.id);
+      act(`document.querySelector('[data-card="${c.id}"] [data-close]').click()`);
+    }
+  });
+
   // ---- proposals ----
   await check('proposal: one posted after load appears open, with its options, in a hidden record\'s host', async () => {
     const { body } = await api('/api/propose', { region:'c65', question:'Ship c65 as is?', options:['Ship it (recommended)', 'Hold it back'] });
@@ -627,6 +702,28 @@ try {
     eq([await hostOf(row.id), await hostOf(rec.id)], ['v/tbl', 'c64'], 'hosts');
     writeSurface();
     await reload();
+  });
+
+  await check('host: kernel buttons inside an author <form> never submit it', async () => {
+    try {
+      writeSurface();
+      const html = fs.readFileSync(path.join(dir, 'surface.html'), 'utf8');
+      fs.writeFileSync(path.join(dir, 'surface.html'), html.replace('<atelier-host for="c64"></atelier-host>', '<form action="/submitted"><atelier-host for="c64"></atelier-host></form>'));
+      await reload();
+      act(`(()=>{window.__submits=0; document.addEventListener('submit', e => { window.__submits++; e.preventDefault() })})()`);
+      const rec = await threadOf('c64', 'record thread'), crop = await proposalOf('Crop c64?');
+      act(`document.querySelector('[data-open="${rec.id}"]').click()`);
+      typeInto(`[data-reply-text="${rec.id}"]`, 'reply inside a form');
+      act(`document.querySelector('[data-reply="${rec.id}"]').click()`);
+      await sleep(700);
+      act(`document.querySelector('[data-choose="${crop.id}"][data-i="1"]').click()`);
+      await sleep(700);
+      act(`document.querySelector('[data-undo="${crop.id}"]').click()`);
+      await sleep(700);
+      eq(probe(`JSON.stringify({ submits: window.__submits, untyped: [...document.querySelectorAll('atelier-host button, atelier-activity button, .atl-warnings button, .atl-float')]
+        .filter(b => b.getAttribute('type') !== 'button').map(b => b.outerHTML.slice(0, 60)).slice(0, 3) })`), { submits:0, untyped:[] }, 'form submissions, and kernel buttons without type="button"');
+      eq([(await state()).replies[rec.id]?.at(-1)?.msg, (await proposalOf('Crop c64?')).status], ['reply inside a form', 'open'], 'reply sent, choice undone');
+    } finally { writeSurface(); await reload(); }
   });
 
   // ---- activity ----

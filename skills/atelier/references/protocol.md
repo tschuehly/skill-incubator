@@ -121,7 +121,8 @@ Custom Highlight API (`::highlight(atl-anchor)`, `atl-active`, `atl-hover`).
 ```
 
 Only `region` means the whole Region. Inside a diagram, a click anchors the box it hit — a Mermaid
-or Graphviz `g.node`, or any SVG element with `data-anchor="<name>"` — found again by name. Text
+or Graphviz `g.node`, or any SVG element with `data-anchor="<name>"` — found again by name; a box
+that is itself the Region anchors the whole Region. Text
 anchors resolve again by `quote` + `prefix` after every Ready; removing the quoted words detaches
 the anchor, its card says so, and preflight fails until it is restored or explained.
 

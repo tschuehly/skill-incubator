@@ -120,6 +120,7 @@ function anchorFromElement(el, event) {
   // Inside a diagram, anchor the box that was clicked (Mermaid and Graphviz draw each as g.node, or
   // mark your own with data-anchor); anywhere else on an SVG or image, a relative point.
   const box = el.closest('svg g.node, svg [data-anchor]');
+  if (box === region) return { region: key };            // the box is the Region itself
   if (box && region.contains(box)) return { region: key, selector: boxSelector(box, region) };
   const svg = el.closest('svg'), target = svg && region.contains(svg) ? svg : el;   // a Region may be a <g> inside the SVG
   const a = { region: key, selector: selectorFor(target, region) };
@@ -258,11 +259,11 @@ function where(it) {
   if (!it.res) return '<div class="atl-detached">Its section is no longer on this page.</div>';
   return it.res.detached ? '<div class="atl-detached">The part this pointed at has changed.</div>' : '';
 }
-const CLOSE = '<button class="atl-close" data-close aria-label="Close" title="Close (Esc)">×</button>';
+const CLOSE = '<button type="button" class="atl-close" data-close aria-label="Close" title="Close (Esc)">×</button>';
 const errHTML = id => errs.has(id) ? `<div class="atl-error" role="alert">Not sent: ${esc(errs.get(id))}. Your text is kept.</div>` : '';
 const imgs = urls => urls?.length ? `<div class="atl-atts">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Pasted image"></a>`).join('')}</div>` : '';
 const pendingImgs = key => { const u = atts.get(key) || [];
-  return u.length ? `<div class="atl-atts">${u.map((x, i) => `<span class="atl-att"><img src="${esc(x)}" alt="Pasted image"><button class="atl-att-x" data-unattach="${esc(key)}" data-i="${i}" aria-label="Remove image">×</button></span>`).join('')}</div>` : ''; };
+  return u.length ? `<div class="atl-atts">${u.map((x, i) => `<span class="atl-att"><img src="${esc(x)}" alt="Pasted image"><button type="button" class="atl-att-x" data-unattach="${esc(key)}" data-i="${i}" aria-label="Remove image">×</button></span>`).join('')}</div>` : ''; };
 const clean = o => String(o).replace(/\s*\((recommended|empfohlen)\)\s*$/i, '');
 const secs = until => `${Math.max(0, Math.ceil((until - Date.now()) / 1000))} s`;
 const ask = (key, summary, field, button) => `<details class="atl-ask" data-keep="${esc(key)}"><summary>${summary}</summary>
@@ -272,40 +273,40 @@ const ask = (key, summary, field, button) => `<details class="atl-ask" data-keep
 function proposalHTML(it) {
   const pr = it.pr, id = it.id, chosen = pr.custom || clean(pr.options?.[pr.choiceIndex] ?? '');
   if (pr.status === 'decided' && id !== active)
-    return `<button class="atl-card atl-card--line atl-card--decided" data-open="${id}">✓ <b>Decided</b> · ${esc(chosen.split(/[.:;(]/)[0])}</button>`;
+    return `<button type="button" class="atl-card atl-card--line atl-card--decided" data-open="${id}">✓ <b>Decided</b> · ${esc(chosen.split(/[.:;(]/)[0])}</button>`;
   const head = `<div class="atl-card atl-card--decision${pr.status === 'pending' ? ' is-pending' : ''}" data-card="${id}">${pr.status === 'decided' ? CLOSE : ''}${where(it)}
     <p class="atl-q">${esc(pr.question)}</p>`;
   if (pr.status === 'decided') return `${head}<div class="atl-state">Decided: ${esc(chosen)}</div></div>`;
   if (pr.status === 'pending') return `${head}<div class="atl-pending" role="status">Chosen: <b>${esc(chosen)}</b> ·
-    <button class="atl-btn" data-undo="${id}">Undo (<span data-until="${pr.undoUntil}">${secs(pr.undoUntil)}</span>)</button></div>${errHTML(id)}</div>`;
+    <button type="button" class="atl-btn" data-undo="${id}">Undo (<span data-until="${pr.undoUntil}">${secs(pr.undoUntil)}</span>)</button></div>${errHTML(id)}</div>`;
   const opt = (o, i) => {
     const req = pr.explanationRequests?.[i], ex = pr.explanations?.[i];
-    return `<div class="atl-option"><button class="atl-btn atl-choice" data-choose="${id}" data-i="${i}">${esc(clean(o))}${i === 0 ? ' <span class="atl-rec">Recommended</span>' : ''}</button>
+    return `<div class="atl-option"><button type="button" class="atl-btn atl-choice" data-choose="${id}" data-i="${i}">${esc(clean(o))}${i === 0 ? ' <span class="atl-rec">Recommended</span>' : ''}</button>
       ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? '<div class="atl-explain atl-meta">Explanation requested</div>'
-        : `${ask(`${id}|explain:${i}`, 'Explain', `data-explain-text="${id}:${i}"`, 'Ask')}<button class="atl-btn" data-explain="${id}" data-i="${i}">Ask</button></details>`}</div>`;
+        : `${ask(`${id}|explain:${i}`, 'Explain', `data-explain-text="${id}:${i}"`, 'Ask')}<button type="button" class="atl-btn" data-explain="${id}" data-i="${i}">Ask</button></details>`}</div>`;
   };
   return `${head}<div class="atl-options">${(pr.options || []).map(opt).join('')}</div>
-    ${ask(`${id}|custom`, 'Something else…', `data-custom="${id}"`, 'Send answer')}<button class="atl-btn atl-btn--primary" data-answer="${id}">Send answer</button></details>${errHTML(id)}</div>`;
+    ${ask(`${id}|custom`, 'Something else…', `data-custom="${id}"`, 'Send answer')}<button type="button" class="atl-btn atl-btn--primary" data-answer="${id}">Send answer</button></details>${errHTML(id)}</div>`;
 }
 function cardHTML(it) {
   const open = it.id === active;
   if (it.kind === 'proposal') return proposalHTML(it);
   const c = it.c, st = S.commentState[c.id]?.value, replies = S.replies[c.id] || [];
   const quote = it.anchor?.quote ? `<blockquote>${esc(it.anchor.quote.slice(0, 140))}</blockquote>` : '';
-  if (it.kind === 'new' && !open) return `<button class="atl-card atl-card--line" data-open="${it.id}">
+  if (it.kind === 'new' && !open) return `<button type="button" class="atl-card atl-card--line" data-open="${it.id}">
       <span class="atl-first">✎ ${esc(kept.get(it.id + '|new') || c.text || 'Unsent Thread')}</span><span class="atl-meta">Not sent${errs.has(it.id) ? ' · failed' : ''}</span></button>`;
   if (it.kind === 'new') return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}${it.anchor?.quote ? '' : `<div class="atl-meta">${esc(labelOf(it.region))}</div>`}
       <textarea data-new placeholder="Start a Thread…  (⌘+Enter sends; paste images)">${esc(c.text || '')}</textarea>${pendingImgs(it.id + '|new')}
-      <div class="atl-row"><button class="atl-btn atl-btn--primary" data-send="${it.id}">Send</button><button class="atl-link" data-discard="${it.id}">Discard</button></div>${errHTML(it.id)}</div>`;
-  if (!open) return `<button class="atl-card atl-card--line ${st === 'implemented' ? 'is-yours' : ''}" data-open="${it.id}">
+      <div class="atl-row"><button type="button" class="atl-btn atl-btn--primary" data-send="${it.id}">Send</button><button type="button" class="atl-link" data-discard="${it.id}">Discard</button></div>${errHTML(it.id)}</div>`;
+  if (!open) return `<button type="button" class="atl-card atl-card--line ${st === 'implemented' ? 'is-yours' : ''}" data-open="${it.id}">
       <span class="atl-first">${esc(c.text)}</span><span class="atl-meta">${replies.length ? replies.length + (replies.length > 1 ? ' replies' : ' reply') + ' · ' : ''}${STATE[st] || ''}${kept.get(it.id + '|reply') ? ' · ✎ draft' : ''}</span></button>`;
   return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}${where(it)}
       <div class="atl-msg atl-msg--you">${esc(c.text)}${imgs(c.attachments)}</div>
       ${replies.map(r => `<div class="atl-msg ${r.author === 'human' ? 'atl-msg--you' : ''}"><span class="atl-who">${r.author === 'human' ? 'You' : 'Agent'}</span>${esc(r.msg)}${imgs(r.attachments)}</div>`).join('')}
       <div class="atl-state">${STATE[st] || ''}</div>
       <textarea data-reply-text="${it.id}" placeholder="${st === 'implemented' ? 'Reply, or say what is still wrong…' : 'Reply…'}  (⌘+Enter sends)"></textarea>${pendingImgs(it.id + '|reply')}
-      <div class="atl-row"><button class="atl-btn ${st === 'implemented' ? '' : 'atl-btn--primary'}" data-reply="${it.id}">Reply</button>
-      ${st === 'implemented' ? `<button class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}</div>${errHTML(it.id)}</div>`;
+      <div class="atl-row"><button type="button" class="atl-btn ${st === 'implemented' ? '' : 'atl-btn--primary'}" data-reply="${it.id}">Reply</button>
+      ${st === 'implemented' ? `<button type="button" class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button type="button" class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}</div>${errHTML(it.id)}</div>`;
 }
 
 const textareaKind = t => t.dataset.replyText ? 'reply' : t.dataset.custom ? 'custom' : t.dataset.explainText ? 'explain:' + t.dataset.explainText.split(':').pop() : 'new';
@@ -434,9 +435,12 @@ async function sendNew(id) {
   saving = save.catch(() => {});
   await save;
   await post('/api/send', { region: p.region, id });
-  const now = fieldText(`[data-card="${id}"] [data-new]`, id + '|new');
+  const now = fieldText(`[data-card="${id}"] [data-new]`, id + '|new'), later = (atts.get(id + '|new') || []).filter(u => !images.includes(u));
   pending.delete(id); forget(id + '|new'); saveDrafts();
-  if (now !== text) { kept.set(id + '|reply', now); saveKept(); }   // typed while it was sending: a reply draft
+  // Typed or pasted while it was sending: a reply draft.
+  if (now !== text) kept.set(id + '|reply', now);
+  if (later.length) atts.set(id + '|reply', [...atts.get(id + '|reply') || [], ...later]);
+  saveKept();
 }
 // Undo never queues behind the click it takes back, whose request may still be in flight.
 async function undo(id) {
@@ -507,18 +511,23 @@ document.addEventListener('input', e => {
   if (t.matches('[data-new]')) saveDrafts();
 });
 
-// Pasting or dropping an image into a new Thread or a reply uploads it and attaches it there.
+// Pasting or dropping an image into a new Thread or a reply uploads it and attaches it there. Each
+// finished upload joins the field's images as they are now, never a copy taken before the await,
+// and leaves the text alone: the human may have typed, re-rendered or sent since. A new Thread
+// sent meanwhile takes the image into its reply draft.
 const IMAGE = /^image\/(png|jpeg|gif|webp)$/;
 async function attachFiles(ta, files) {
-  const key = fieldKey(ta), list = atts.get(key) || [];
+  const key = fieldKey(ta), card = key.split('|')[0];
   for (const f of files) {
     const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(f); });
-    try { list.push((await post('/api/attach', { name: f.name || 'pasted', type: f.type, data })).url); }
-    catch (e) { warn(`Image not attached: ${e.message}`, 'attach'); }
+    let url;
+    try { url = (await post('/api/attach', { name: f.name || 'pasted', type: f.type, data })).url; }
+    catch (e) { warn(`Image not attached: ${e.message}`, 'attach'); continue; }
+    const to = key.endsWith('|new') && !pending.has(card) ? card + '|reply' : key;
+    atts.set(to, [...atts.get(to) || [], url]); saveKept();
+    if (to.endsWith('|new')) saveDrafts();
+    render();
   }
-  atts.set(key, list); kept.set(key, ta.value); saveKept();
-  if (key.endsWith('|new')) saveDrafts();
-  render();
 }
 const imageTarget = e => { const ta = e.target.closest?.('atelier-host [data-new], atelier-host [data-reply-text]');
   const files = [...(e.clipboardData || e.dataTransfer)?.files || []].filter(f => IMAGE.test(f.type));
@@ -596,16 +605,16 @@ function renderActivity() {
   const chosen = cache.filter(i => i.kind === 'proposal' && i.pr.status === 'pending');
   const news = ups.length + changed.length;
   el.querySelector('.atl-tools').innerHTML = `
-    <button class="atl-btn ${picking ? 'atl-btn--primary' : ''}" data-pick title="Or hold Alt and click">${picking ? 'Click anything… (Esc)' : '💬 Comment on…'}</button>
-    <button class="atl-btn ${waiting.length ? 'atl-btn--warn' : ''}" popovertarget="atl-drawer">${waiting.length ? `${waiting.length} waiting for you` : 'Activity'}${news ? ` · ${news} new` : ''}</button>`;
+    <button type="button" class="atl-btn ${picking ? 'atl-btn--primary' : ''}" data-pick title="Or hold Alt and click">${picking ? 'Click anything… (Esc)' : '💬 Comment on…'}</button>
+    <button type="button" class="atl-btn ${waiting.length ? 'atl-btn--warn' : ''}" popovertarget="atl-drawer">${waiting.length ? `${waiting.length} waiting for you` : 'Activity'}${news ? ` · ${news} new` : ''}</button>`;
   el.querySelector('.atl-drawer').innerHTML = `
-    <div class="atl-drawer-head"><b>Activity</b><button class="atl-link" popovertarget="atl-drawer" popovertargetaction="hide">Close</button></div>
-    ${waiting.length ? `<h4>Waiting for you</h4>${waiting.map(i => `<button class="atl-feed-item atl-feed-btn" data-reveal="${i.id}">${i.kind === 'proposal' ? '<b>Decide:</b> ' + esc(i.pr.question) : '<b>Check:</b> ' + esc(i.c.text)}<span>${esc(labelOf(i.region))}</span></button>`).join('')}` : ''}
-    ${chosen.length ? `<h4>Just chosen</h4>${chosen.map(i => `<div class="atl-feed-item"><button class="atl-link" data-reveal="${i.id}">${esc(i.pr.question)}</button><p>Chosen: ${esc(i.pr.custom || clean(i.pr.options[i.pr.choiceIndex]))}</p><button class="atl-btn" data-undo="${i.id}">Undo (<span data-until="${i.pr.undoUntil}">${secs(i.pr.undoUntil)}</span>)</button></div>`).join('')}` : ''}
-    ${changed.length ? `<h4>Changed since you looked</h4>${changed.map(k => `<div class="atl-feed-item"><button class="atl-link" data-go="${esc(k)}">${esc(labelOf(k))}</button> <button class="atl-link" data-ack="${esc(k)}">✓ Seen</button></div>`).join('')}` : ''}
-    ${ups.length ? `<h4>Updates</h4>${ups.map(u => `<div class="atl-feed-item"><b>${esc(u.title)}</b>${u.body ? `<p>${esc(u.body)}</p>` : ''}<button class="atl-link" data-go="${esc(u.region)}">Go to ${esc(labelOf(u.region))}</button> <button class="atl-link" data-dismiss="${u.id}">Dismiss</button></div>`).join('')}` : ''}
+    <div class="atl-drawer-head"><b>Activity</b><button type="button" class="atl-link" popovertarget="atl-drawer" popovertargetaction="hide">Close</button></div>
+    ${waiting.length ? `<h4>Waiting for you</h4>${waiting.map(i => `<button type="button" class="atl-feed-item atl-feed-btn" data-reveal="${i.id}">${i.kind === 'proposal' ? '<b>Decide:</b> ' + esc(i.pr.question) : '<b>Check:</b> ' + esc(i.c.text)}<span>${esc(labelOf(i.region))}</span></button>`).join('')}` : ''}
+    ${chosen.length ? `<h4>Just chosen</h4>${chosen.map(i => `<div class="atl-feed-item"><button type="button" class="atl-link" data-reveal="${i.id}">${esc(i.pr.question)}</button><p>Chosen: ${esc(i.pr.custom || clean(i.pr.options[i.pr.choiceIndex]))}</p><button type="button" class="atl-btn" data-undo="${i.id}">Undo (<span data-until="${i.pr.undoUntil}">${secs(i.pr.undoUntil)}</span>)</button></div>`).join('')}` : ''}
+    ${changed.length ? `<h4>Changed since you looked</h4>${changed.map(k => `<div class="atl-feed-item"><button type="button" class="atl-link" data-go="${esc(k)}">${esc(labelOf(k))}</button> <button type="button" class="atl-link" data-ack="${esc(k)}">✓ Seen</button></div>`).join('')}` : ''}
+    ${ups.length ? `<h4>Updates</h4>${ups.map(u => `<div class="atl-feed-item"><b>${esc(u.title)}</b>${u.body ? `<p>${esc(u.body)}</p>` : ''}<button type="button" class="atl-link" data-go="${esc(u.region)}">Go to ${esc(labelOf(u.region))}</button> <button type="button" class="atl-link" data-dismiss="${u.id}">Dismiss</button></div>`).join('')}` : ''}
     ${waiting.length || chosen.length || news ? '' : '<p class="atl-hint">Nothing new.</p>'}
-    <button class="atl-link" data-notify>${notifyOn() ? '🔔 Desktop notifications on' : '🔕 Desktop notifications off'}</button>`;
+    <button type="button" class="atl-link" data-notify>${notifyOn() ? '🔔 Desktop notifications on' : '🔕 Desktop notifications off'}</button>`;
   document.querySelectorAll('[atl-changed]').forEach(r => r.removeAttribute('atl-changed'));
   changed.forEach(k => regionEl(k)?.setAttribute('atl-changed', ''));
 }
@@ -618,7 +627,7 @@ function warn(message, key) {
   let stack = $('.atl-warnings');
   if (!warnings.size) { stack?.remove(); return; }
   if (!stack) { stack = document.createElement('div'); stack.className = 'atl-warnings'; stack.setAttribute('role', 'alert'); document.body.append(stack); }
-  stack.innerHTML = `<button class="atl-close" data-unwarn aria-label="Close">×</button>${[...warnings.values()].map(m => `<div>${esc(m)}</div>`).join('')}`;
+  stack.innerHTML = `<button type="button" class="atl-close" data-unwarn aria-label="Close">×</button>${[...warnings.values()].map(m => `<div>${esc(m)}</div>`).join('')}`;
 }
 
 // ===== Ready: swap only the named Regions into the open page ========================

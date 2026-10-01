@@ -35,10 +35,28 @@ cat >"$TMP/surface.html" <<'HTML'
 <atelier-host></atelier-host></body></html>
 HTML
 
+# Copies the store file the moment each POST answer's head is written, before a byte of it leaves,
+# so a test reads exactly what was on disk when the server answered.
+STORE_JSON="$TMP/.review/atelier-test.json"
+cat >"$TMP/at-answer.mjs" <<'JS'
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+const { STORE_JSON, AT_ANSWER } = process.env, writeHead = http.ServerResponse.prototype.writeHead;
+http.ServerResponse.prototype.writeHead = function (...args) {
+  if (this.req?.method === 'POST') {
+    try { fs.mkdirSync(AT_ANSWER, { recursive: true });
+      fs.copyFileSync(STORE_JSON, path.join(AT_ANSWER, path.basename(new URL(this.req.url, 'http://x').pathname) + '.json')); } catch {}
+  }
+  return writeHead.apply(this, args);
+};
+JS
+
 # Decisions wait UNDO_MS before they reach the agent; a short window keeps this test fast.
 UNDO_MS=1500
 start_server() {
-  ROOT="$TMP" PORT="$PORT" UI="$TMP/surface.html" STORE=atelier-test UNDO_MS="$UNDO_MS" node "$TMP/review-server.mjs" >>"$TMP/server.log" 2>&1 &
+  ROOT="$TMP" PORT="$PORT" UI="$TMP/surface.html" STORE=atelier-test UNDO_MS="$UNDO_MS" STORE_JSON="$STORE_JSON" AT_ANSWER="$TMP/at-answer" \
+    node --import "$TMP/at-answer.mjs" "$TMP/review-server.mjs" >>"$TMP/server.log" 2>&1 &
   SERVER_PID=$!
   for _ in {1..40}; do curl -fsS "$BASE/api/state" >/dev/null 2>&1 && break; sleep 0.1; done
 }
@@ -209,6 +227,22 @@ expect api/undo-decision "{\"id\":\"$P\",\"attempt\":\"a3\"}" 409               
 expect api/decide "{\"id\":\"$P\",\"choiceIndex\":0,\"attempt\":\"a3\"}" 200          # retry after commit: no new event
 [ "$(decisions_of "$P")" = 1 ] || { echo "FAIL: a retried click logged a second decision" >&2; exit 1; }
 
+# --- the file never falls behind what the server answered ---------------------------------
+# An older snapshot written after a newer one turned a pending choice back into an open one. Each
+# answer must find its own change already on disk: a write that lands after its answer shows here
+# as the state before it.
+answered() { js "$1" <"$TMP/at-answer/$2.json"; }
+D="$(curl -fsS -X POST "$BASE/api/propose" -H 'Content-Type: application/json' -d '{"region":"screening/answered","question":"On disk?","options":["A","B"]}' | js 'st.id')"
+[ "$(answered "st.proposals['$D']?.status" propose)" = open ] || { echo "FAIL: propose answered before its Proposal was on disk" >&2; exit 1; }
+expect api/decide "{\"id\":\"$D\",\"choiceIndex\":0,\"attempt\":\"d1\"}" 200
+want="pending@$(js 'st.cursor' <"$TMP/call.out")"
+[ "$(answered "st.proposals['$D'].status+'@'+st.seq" decide)" = "$want" ] \
+  || { echo "FAIL: decide answered while the file said $(answered "st.proposals['$D'].status+'@'+st.seq" decide), not $want" >&2; exit 1; }
+expect api/undo-decision "{\"id\":\"$D\",\"attempt\":\"d1\"}" 200
+want="open@$(js 'st.cursor' <"$TMP/call.out")"
+[ "$(answered "st.proposals['$D'].status+'@'+st.seq" undo-decision)" = "$want" ] \
+  || { echo "FAIL: undo answered while the file said $(answered "st.proposals['$D'].status+'@'+st.seq" undo-decision), not $want" >&2; exit 1; }
+
 # A server killed inside the window still delivers the choice once, after restart.
 R1="$(curl -fsS -X POST "$BASE/api/propose" -H 'Content-Type: application/json' -d '{"region":"screening/r1","question":"Restart?","options":["A","B"]}' | js 'st.id')"
 R2="$(curl -fsS -X POST "$BASE/api/propose" -H 'Content-Type: application/json' -d '{"region":"screening/r2","question":"Down?","options":["A","B"]}' | js 'st.id')"
@@ -229,26 +263,6 @@ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null || true
 start_server
 sleep 0.5
 [ "$(decisions_of "$R1")" = 1 ] || { echo "FAIL: a restart repeated a decision" >&2; exit 1; }
-
-# --- the file never falls behind what the server answered --------------------------------
-# An older snapshot written after a newer one turned a pending choice back into an open one.
-# A large store makes any write slow enough for a choice to land while an earlier one is running.
-STORE_JSON="$TMP/.review/atelier-test.json"
-BASE="$BASE" STORE_JSON="$STORE_JSON" node --input-type=module -e '
-  import fs from "node:fs";
-  const { BASE, STORE_JSON } = process.env;
-  const post = (p, b) => fetch(BASE + p, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(b) });
-  const before = await (await fetch(BASE + "/api/state")).json();
-  const { id } = await (await post("/api/propose", { region:"screening/race", question:"Race?", options:["A","B"] })).json();
-  await post("/api/state", { threads:{ ...before.threads, big:[{ id:"big", text:"x".repeat(48e6) }] } });
-  await new Promise(r => setTimeout(r, 20));
-  const decided = await post("/api/decide", { id, choiceIndex:0, attempt:"race" });
-  await new Promise(r => setTimeout(r, 900));
-  let disk = null; try { disk = JSON.parse(fs.readFileSync(STORE_JSON, "utf8")); } catch {}
-  await post("/api/state", { threads:before.threads });
-  const status = disk?.proposals?.[id]?.status ?? "unreadable";
-  if (decided.status !== 200 || status === "open" || status === "unreadable") { console.error(`FAIL: decide answered ${decided.status}, the file says ${status}`); process.exit(1); }
-'
 
 # --- a store that cannot be written changes nothing and tells nobody ----------------------
 # The server used to answer 200 with the choice pending while the file still said open.
