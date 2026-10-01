@@ -4,9 +4,11 @@
 //   node <skill-dir>/scripts/preflight.mjs --url http://127.0.0.1:<port> \
 //     --poller-identity /abs/path/to/tools/review-poll.sh [--evidence-dir .review/preflight]
 //
-// It checks silent handoff defects: store and poller reachability, kit drift, Region identity, the
-// margin and activity elements, stored anchors that no longer resolve, browser errors and kernel
-// warnings, overflow, diagram rendering, and prose that describes the page instead of its subject.
+// It fails silent handoff defects: store and poller reachability, kit drift, Region identity, the
+// Activity element and hosts, open items without a reachable host, stored anchors that no longer
+// resolve, browser errors and kernel warnings, overflow at three viewports, and diagram rendering.
+// Prose that may describe the page instead of its subject is a warning; page height and first-screen
+// Region coverage are evidence lines.
 //
 // --skip-poller / --skip-render exist for kernel tests. Neither is a human handoff.
 import fs from 'node:fs';
@@ -91,20 +93,25 @@ if (!skipPoller && pollerIdentity){
 }
 
 // ---- rendered Surface ----------------------------------------------------------------
-// Region identity and cross-references can only be judged after the kernel has upgraded the
-// document, so this runs in a real browser rather than over the HTML source.
+// Region identity, hosts and reachability can only be judged after the kernel has drawn the page,
+// so this runs in a real browser rather than over the HTML source.
 const probe = `(async () => {
   const kernel = await import('/atelier.mjs').catch(() => null);
-  const regions = [...document.querySelectorAll('atelier-region')];
-  const keys = regions.map(r => r.regionKey || '');
-  const unnamed = regions.filter(r => !(r.getAttribute('key') || '').trim())
-    .map(r => (r.querySelector('h1,h2,h3')?.textContent || r.textContent || '').trim().slice(0, 40) || '(empty Region)');
+  for (let i = 0; i < 40 && kernel?.getState && !kernel.getState(); i++) await new Promise(r => setTimeout(r, 125));
+  const keyOf = el => { const ks = []; for (let e = el; e; e = e.parentElement?.closest('[atl-key]')) ks.unshift(e.getAttribute('atl-key')); return ks.join('/'); };
+  const describe = el => (el.querySelector('h1,h2,h3')?.textContent || el.textContent || '').trim().slice(0, 40) || '(empty Region)';
+  const regions = [...document.querySelectorAll('[atl-key]')];
+  const keys = regions.map(keyOf);
+  const unnamed = regions.filter(r => !r.getAttribute('atl-key').trim()).map(describe);
+  const slashed = regions.map(r => r.getAttribute('atl-key')).filter(k => k.includes('/'));
   const duplicates = [...new Set(keys.filter((k, i) => k && keys.indexOf(k) !== i))];
-  // The margin and the activity drawer must sit outside every Region: a Ready replaces Regions,
-  // and chrome inside one would be swapped away with the human's half-typed Thread.
-  const margins = [...document.querySelectorAll('atelier-margin')];
-  const activities = [...document.querySelectorAll('atelier-activity')];
-  const chromeInRegion = [...margins, ...activities].filter(el => el.closest('atelier-region')).map(el => el.tagName.toLowerCase());
+  // Every open question and every Thread waiting for a verdict needs a host the human can reach.
+  const activities = document.querySelectorAll('atelier-activity').length;
+  const hosts = [...document.querySelectorAll('atelier-host')];
+  const fors = hosts.map(h => (h.getAttribute('for') || '').trim());
+  const catchAlls = fors.filter(f => !f).length;
+  const duplicateHosts = [...new Set(fors.filter((f, i) => f && fors.indexOf(f) !== i))];
+  const unclaimed = catchAlls ? [] : keys.filter(k => !fors.some(f => f && (k === f || k.startsWith(f + '/'))));
   // Viewers and diagrams render after load; give their anchors up to 5 s to resolve before failing.
   let unresolved = kernel?.unresolvedAnchors ? kernel.unresolvedAnchors() : [];
   for (let i = 0; i < 20 && unresolved.length; i++) {
@@ -128,38 +135,58 @@ const probe = `(async () => {
   // The agent's own prose, one block at a time: quoted source, code, diffs, diagrams, kernel chrome,
   // and [data-subject-ui] (instructions for an interface that is itself under review) are not prose.
   const SKIP = 'pre,code,kbd,samp,blockquote,q,svg,script,style,template,[hidden],.file-view,.d2h-wrapper,.cm-editor,'
-    + '[data-verbatim],[data-subject-ui],atelier-margin,atelier-activity,[class^="atl-"],[class*=" atl-"]';
+    + '[data-verbatim],[data-subject-ui],atelier-host,atelier-activity,[class^="atl-"],[class*=" atl-"]';
   const inline = el => /^inline|^contents$/.test(getComputedStyle(el).display);
   const own = el => [...el.childNodes].map(n => n.nodeType === 3 ? n.data
     : n.nodeType === 1 && !n.matches(SKIP) && inline(n) ? own(n) : ' ').join('');
   const prose = [...document.body.querySelectorAll('*')].filter(el => !el.closest(SKIP) && !inline(el))
-    .map(el => ({ region: el.closest('atelier-region')?.getAttribute('key') || '(outside Regions)', text: own(el) }))
+    .map(el => ({ region: el.closest('[atl-key]') ? keyOf(el.closest('[atl-key]')) : '(outside Regions)', text: own(el) }))
     .filter(block => block.text.trim());
 
   const doc = document.documentElement;
   const overflow = doc.scrollWidth > doc.clientWidth + 1
     ? [{ selector:'document', width: doc.scrollWidth, viewport: doc.clientWidth }] : [];
-  document.querySelectorAll('atelier-region *').forEach(el => {
+  document.querySelectorAll('[atl-key], [atl-key] *, atelier-host *').forEach(el => {
     if (overflow.length >= 8) return;
     for (let p = el.parentElement; p && p !== document.body; p = p.parentElement){
       const x = getComputedStyle(p).overflowX;
-      if (x === 'auto' || x === 'scroll') return;               // inside its own scroller: fine
+      if (x === 'auto' || x === 'scroll') return;   // inside its own scroller: fine
     }
     const rect = el.getBoundingClientRect();
     if (rect.width && rect.right > doc.clientWidth + 1)
       overflow.push({ selector: el.id ? '#' + el.id : el.tagName.toLowerCase() + (el.classList[0] ? '.' + el.classList[0] : ''),
         right: Math.round(rect.right), viewport: doc.clientWidth });
   });
+  const warning = (document.querySelector('.atl-warnings')?.innerText || '').replace(/^×\\s*/, '').trim();
+  const firstScreen = regions.filter(r => { const b = r.getBoundingClientRect(); return b.height > 0 && b.top < innerHeight && b.bottom > 0; }).length;
+
+  const state = kernel?.getState?.();
+  const open = (state?.items || []).filter(i => i.kind === 'proposal' ? i.status === 'open' || i.status === 'pending'
+    : i.kind === 'thread' && i.status === 'implemented');
+  const slotOf = id => [...document.querySelectorAll('atelier-host [data-slot]')].find(s => s.dataset.slot === id);
+  const unhosted = open.filter(i => !slotOf(i.id)).map(i => i.id + ' in ' + i.region);
+  const unreachable = [];
+  for (const i of open) {
+    if (!slotOf(i.id)) continue;
+    const shown = await kernel.reveal(i.id);
+    let inView = false;
+    for (let t = 0; t < 20 && !inView; t++) {
+      await new Promise(r => setTimeout(r, 100));
+      const b = slotOf(i.id)?.getBoundingClientRect();
+      inView = !!b && b.width > 0 && b.height > 0 && b.top < innerHeight && b.bottom > 0 && b.left < innerWidth && b.right > 0;
+    }
+    if (!shown || !inView) unreachable.push(i.id + ' in ' + i.region + (shown ? ' (outside the screen)' : ' (reveal failed)'));
+  }
 
   return JSON.stringify({
     viewport: { width: innerWidth, height: innerHeight },
     title: document.title,
-    kernel: !!customElements.get('atelier-region'),
+    kernel: !!customElements.get('atelier-host') && !!state,
     offline: doc.hasAttribute('data-atl-offline'),
-    warning: (document.querySelector('.atl-warn')?.textContent || '').trim(),
-    visibleText: (document.body.innerText || '').trim().length,
-    regionCount: regions.length, keys, unnamed, duplicates, margins: margins.length, activities: activities.length, chromeInRegion, unresolved,
-    diagramCount: diagrams.length, diagramFailures, overflow, prose,
+    warning, visibleText: (document.body.innerText || '').trim().length,
+    regionCount: regions.length, keys, unnamed, slashed, duplicates, activities, catchAlls, duplicateHosts, unclaimed,
+    unhosted, unreachable, openItems: open.length, unresolved, diagramCount: diagrams.length, diagramFailures, overflow, prose,
+    pageHeight: doc.scrollHeight, firstScreen,
   });
 })()`;
 
@@ -171,6 +198,8 @@ function decode(raw){
   return value;
 }
 
+// The owner reads on a laptop and on two phones; desktop is not evidence for either phone.
+const VIEWS = [{ name:'desktop', width:1440, height:900 }, { name:'phone', width:390, height:844 }, { name:'phone-large', width:412, height:915 }];
 const reports = [];
 if (!skipRender && state){
   if (spawnSync('agent-browser', ['--version'], { encoding:'utf8' }).status !== 0){
@@ -179,7 +208,7 @@ if (!skipRender && state){
     const session = `atelier-preflight-${process.pid}`;
     try {
       if (evidenceDir) fs.mkdirSync(evidenceDir, { recursive:true });
-      for (const view of [{ name:'desktop', width:1440, height:900 }, { name:'narrow', width:390, height:844 }]){
+      for (const view of VIEWS){
         const step = (argv, input, timeout) => {
           const r = browser(['--session', session, ...argv], input, timeout);
           if (r.status !== 0) throw new Error(`${view.name}: ${(r.stderr || r.stdout || 'agent-browser failed').trim().slice(0, 300)}`);
@@ -189,23 +218,19 @@ if (!skipRender && state){
         step(['console', '--clear']);
         step(['errors', '--clear']);
         step(['open', url]);
-        // Wait for the kernel to upgrade the document, not merely for the network to go quiet.
-        step(['wait', '--fn', "document.readyState==='complete' && !!customElements.get('atelier-region')"
-          + " && !!document.querySelector('atelier-activity .atl-tools button')"], undefined, 30000);
+        step(['wait', '--fn', "document.readyState==='complete' && !!customElements.get('atelier-host')"], undefined, 30000);
         // Give diagrams their own bounded wait and never fail on it here: a renderer that never
         // finishes must be reported as that, not as an unexplained timeout.
         browser(['--session', session, 'wait', '--fn',
           "[...document.querySelectorAll('[data-diagram]')].every(f=>f.dataset.diagramReady==='true')"], undefined, 15000);
-        const report = decode(step(['eval', '--stdin'], probe));
+        if (evidenceDir) step(['screenshot', path.join(evidenceDir, `${view.name}.png`)]);
+        const report = decode(step(['eval', '--stdin'], probe, 180000));
         const consoleMessages = decode(step(['console', '--json'])).messages || [];
         const pageErrors = decode(step(['errors', '--json'])).errors || [];
         report.consoleErrors = [...consoleMessages.filter(message => message.type === 'error').map(message => message.text),
           ...pageErrors.map(error => error.text)].filter(Boolean);
         reports.push({ name: view.name, ...report });
-        if (evidenceDir){
-          fs.writeFileSync(path.join(evidenceDir, `${view.name}.json`), `${JSON.stringify(report, null, 2)}\n`);
-          step(['screenshot', path.join(evidenceDir, `${view.name}.png`)]);
-        }
+        if (evidenceDir) fs.writeFileSync(path.join(evidenceDir, `${view.name}.json`), `${JSON.stringify(report, null, 2)}\n`);
       }
     } catch (error){
       fail('BROWSER', error.message);
@@ -215,39 +240,50 @@ if (!skipRender && state){
   }
 }
 
+const notes = [];
 for (const report of reports){
-  const gate = `RENDER_${report.name.toUpperCase()}`;
-  if (!report.kernel) fail(gate, 'the kernel never loaded; check the <script type="module" src="/atelier.mjs"> tag and the server console');
+  const gate = `RENDER_${report.name.toUpperCase().replace('-', '_')}`;
+  if (!report.kernel) fail(gate, 'the kernel never loaded or never reached its server; check the <script type="module" src="/atelier.mjs"> tag and the server console');
   if (report.offline) fail(gate, 'the page cannot reach its server; nothing the human writes would be delivered');
   if (report.warning) fail(gate, `the Surface is showing a kernel warning: ${report.warning}`);
   if (report.consoleErrors.length) fail(gate, `uncaught browser error(s): ${report.consoleErrors.join(' | ')}`);
   if (!report.title || report.visibleText < 40) fail(gate, 'the rendered page has no meaningful title or content');
-  if (!report.regionCount) fail(gate, 'no <atelier-region> was rendered; the human would have nothing to comment on');
-  if (report.margins !== 1) fail(gate, `found ${report.margins} <atelier-margin>; a Surface needs exactly one, or Threads have nowhere to appear`);
-  if (report.activities !== 1) fail(gate, `found ${report.activities} <atelier-activity>; a Surface needs exactly one in its header, or open decisions are unreachable`);
-  if (report.chromeInRegion.length) fail(gate, `${report.chromeInRegion.join(', ')} sits inside a Region; a Ready would replace it`);
+  if (!report.regionCount) fail(gate, 'no element carries atl-key; the human would have nothing to comment on');
+  if (report.activities !== 1) fail(gate, `found ${report.activities} <atelier-activity>; a Surface needs exactly one, or waiting decisions and Updates are unreachable`);
+  if (report.catchAlls > 1) fail(gate, `found ${report.catchAlls} catch-all <atelier-host> elements without for=; keep at most one`);
+  if (report.duplicateHosts.length) fail(gate, `two hosts share for="${report.duplicateHosts.join('", "')}"; each address needs exactly one host`);
+  if (report.unhosted.length) fail(gate, `open item(s) have no host on the page: ${report.unhosted.join(', ')}; add an <atelier-host for="…"> for that Region or one catch-all <atelier-host>`);
+  if (report.unreachable.length) fail(gate, `open item(s) cannot be brought on screen with reveal(): ${report.unreachable.join(', ')}; make the host visible, or register setRevealResolver to select its record`);
   if (report.unresolved.length) fail(gate, `${report.unresolved.length} stored Thread/Proposal anchor(s) no longer find their target: ${report.unresolved.map(u => `${u.id} in ${u.region} (${u.reason})`).join(', ')}; restore the text or tell the human in that Thread`);
-  if (report.unnamed.length) fail(gate, `Region(s) without a key attribute collide under "unnamed": ${report.unnamed.join(' | ')}`);
+  if (report.unnamed.length) fail(gate, `Region(s) with an empty atl-key: ${report.unnamed.join(' | ')}`);
+  if (report.slashed.length) fail(gate, `atl-key holds one local key; nesting builds the path, so remove the slash from: ${report.slashed.join(', ')}`);
   if (report.duplicates.length) fail(gate, `duplicate Region keys silently merge their Threads: ${report.duplicates.join(', ')}`);
   if (report.diagramFailures.length) fail(gate, `diagram(s) are not reviewable: ${report.diagramFailures.map(d => `${d.key} — ${d.reason}`).join('; ')}`);
   if (report.overflow.length) fail(gate, `horizontal overflow: ${JSON.stringify(report.overflow)}`);
-  // Update cards are the agent's prose too, even though the kernel renders them in the margin.
-  const updates = Object.values(state.updates || {}).filter(u => !u.dismissedAt)
-    .map(u => ({ region: `${u.region} Update`, text: `${u.title || ''}. ${u.body || ''}` }));
-  const meta = report.name === 'desktop' ? metaFindings(report.prose.concat(updates)) : [];
-  if (meta.length) fail('PROSE', `${meta.length} sentence(s) describe the page instead of its subject:\n`
-    + meta.map(f => `  - "${f.sentence}" (Region ${f.region}; ${f.rule})`).join('\n') + `\n  Repair: ${REPAIR}`);
-  else if (report.name === 'desktop') pass('PROSE', `${report.prose.length} prose block(s), no sentence matches a known page-describing pattern`);
+  notes.push(`INFO LAYOUT_${report.name.toUpperCase().replace('-', '_')}: ${report.viewport.width}x${report.viewport.height}, page height ${report.pageHeight}px, `
+    + `${report.firstScreen} of ${report.regionCount} Region(s) on the first screen`
+    + (report.unclaimed.length ? `, ${report.unclaimed.length} Region(s) where a new Thread has no host: ${report.unclaimed.slice(0, 6).join(', ')}` : ''));
+  if (report.name === 'desktop'){
+    // Update cards are the agent's prose too, even though the kernel renders them in the drawer.
+    const updates = Object.values(state.updates || {}).filter(u => !u.dismissedAt)
+      .map(u => ({ region: `${u.region} Update`, text: `${u.title || ''}. ${u.body || ''}` }));
+    const meta = metaFindings(report.prose.concat(updates));
+    if (meta.length) notes.push(`WARN PROSE: ${meta.length} sentence(s) may describe the page instead of its subject:\n`
+      + meta.map(f => `  - "${f.sentence}" (Region ${f.region}; ${f.rule})`).join('\n') + `\n  Repair: ${REPAIR}`);
+    else pass('PROSE', `${report.prose.length} prose block(s), no sentence matches a known page-describing pattern`);
+  }
   if (!failures.some(message => message.startsWith(`FAIL ${gate}:`))){
-    pass(gate, `${report.viewport.width}x${report.viewport.height}: ${report.regionCount} Region(s) with unique keys, one margin and activity outside them, 0 unresolved anchors, ${report.diagramCount} diagram(s), no overflow`);
+    pass(gate, `${report.viewport.width}x${report.viewport.height}: ${report.regionCount} Region(s) with unique keys, one Activity, `
+      + `${report.openItems} open item(s) hosted and reachable, 0 unresolved anchors, ${report.diagramCount} diagram(s), no overflow`);
   }
 }
 if (!skipRender && state && !failures.some(m => m.startsWith('FAIL BROWSER:'))
-    && !['desktop','narrow'].every(name => reports.some(r => r.name === name))){
-  fail('BROWSER', `expected a desktop and a narrow report, found ${reports.map(r => r.name).join(', ') || 'none'}`);
+    && !VIEWS.every(view => reports.some(r => r.name === view.name))){
+  fail('BROWSER', `expected ${VIEWS.map(v => v.name).join(', ')} reports, found ${reports.map(r => r.name).join(', ') || 'none'}`);
 }
 
 passes.forEach(message => console.log(message));
+notes.forEach(message => console.log(message));
 failures.forEach(message => console.error(message));
 if (failures.length){
   console.error('PREFLIGHT=FAIL');

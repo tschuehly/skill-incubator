@@ -31,7 +31,8 @@ cp "$ASSETS/poll.sh" "$TMP/review-poll.sh"
 cat >"$TMP/surface.html" <<'HTML'
 <!doctype html><html><head><meta charset="utf-8"><title>t</title>
 <link rel="stylesheet" href="/atelier.css"><script type="module" src="/atelier.mjs"></script></head>
-<body><atelier-region key="screening"><h1>Screening</h1><p>material</p></atelier-region></body></html>
+<body><atelier-activity></atelier-activity><section atl-key="screening"><h1>Screening</h1><p>material</p></section>
+<atelier-host></atelier-host></body></html>
 HTML
 
 # Decisions wait UNDO_MS before they reach the agent; a short window keeps this test fast.
@@ -45,7 +46,7 @@ start_server
 curl -fsS "$BASE/api/state" | grep -F '"name":"atelier-test"' >/dev/null
 
 # The kernel's own files must be served next to the server, or a copied kit renders nothing.
-curl -fsS "$BASE/atelier.mjs" | grep -F "customElements.define('atelier-region'" >/dev/null
+curl -fsS "$BASE/atelier.mjs" | grep -F "customElements.define('atelier-host'" >/dev/null
 curl -fsS "$BASE/atelier.css" | grep -F '.atl-card' >/dev/null
 
 # --- the prose gate's rules against real eval sentences and clean subject sentences ---

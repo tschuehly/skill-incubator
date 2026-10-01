@@ -1,45 +1,56 @@
 // atelier kernel — the browser half. Vendored from the atelier skill: copy it, never patch it.
 //
-// The kernel supplies interaction, never layout. It never inserts anything into authored content.
-//   <atelier-region key label>  identity and address only
-//   <atelier-margin>            Threads and Proposals, each level with its anchor (the Surface places it)
-//   <atelier-activity>          Pick-to-comment + one drawer: waiting for you, changed, Updates
-// A Thread opens on an anchor: selected text, any element (Alt+click or Pick), a point on an image
-// or SVG, or a whole Region. Ready swaps only the named Regions into the open page.
+// Atelier extends HTML the way htmx does. The Surface is whatever HTML the task needs; the kernel
+// adds what a page cannot have on its own: addresses, a durable conversation per address, and the
+// event loop to the agent. It never inserts into authored content and imposes no layout.
+//   atl-key="local" [atl-label]       a Region on any element; nested keys form "a/b"
+//   atl-thread="a/b" on a button       opens a whole-Region Thread draft (empty: the closest Region)
+//   <atelier-host for="a">             Threads and Proposals for "a" and below; the longest `for` wins
+//   <atelier-host>                     catch-all: unclaimed items, Regions gone, failed reveals
+//   <atelier-host layout="anchored">   cards level with their anchors while the host sits beside them
+//   <atelier-activity>                 Pick-to-comment, the "N waiting" drawer, notifications
+// On author elements the kernel sets attributes only: atl-changed, atl-anchor, atl-active, atl-hover,
+// atl-pick. Exports: getState, reveal, setRevealResolver, refresh, unresolvedAnchors.
+// Events: atelier:state and atelier:ready (out), atelier:rendered (in).
 // ponytail: iframe picking is not built; a Surface that embeds a cooperating app posts its own
-// anchors (see references/protocol.md#extending). Narrow screens get a bottom list, not anchoring.
+// anchors (see references/protocol.md#extending).
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  .then(r => r.json().catch(() => ({ ok: r.ok })));
+// A non-2xx answer is a failure: the caller keeps the human's text and says what went wrong.
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `${url} answered ${r.status}`);
+  return j;
+}
 let S = { threads: {}, sent: {}, replies: {}, commentState: {}, proposals: {}, updates: {}, changed: {}, seq: 0 };
+let booted = false, snapshot = null;
 let active = null;                       // id of the expanded Thread or Proposal
 const pending = new Map();               // unsent new Threads: id -> { id, region, anchor, text, attachments }
-const kept = new Map();                  // '<card>|<field>' -> half-typed text, kept while a card is closed
+const kept = new Map();                  // '<card>|<field>' -> half-typed text, cleared only after a 2xx
 const atts = new Map();                  // '<card>|new' or '<card>|reply' -> pasted image URLs not yet sent
-const DRAFTS = 'atelier:drafts';
+const opened = new Set();                // '<card>|<field>' of <details> the human opened in a card
+const errs = new Map();                  // card id -> why its last action failed
+const strays = new Set();                // ids whose reveal failed; shown in the catch-all host
+const DRAFTS = 'atelier:drafts', KEPT = 'atelier:kept';
+const saveKept = () => { try { sessionStorage.setItem(KEPT, JSON.stringify([...kept].filter(([, v]) => v))); } catch {} };
+try { for (const [k, v] of JSON.parse(sessionStorage.getItem(KEPT) || '[]')) kept.set(k, v); } catch {}
 
-// ===== Regions: identity only ======================================================
-class AtelierRegion extends HTMLElement {
-  get regionKey() {
-    const parent = this.parentElement?.closest('atelier-region');
-    return (parent ? parent.regionKey + '/' : '') + (this.getAttribute('key') || 'unnamed');
-  }
-  get label() { return this.getAttribute('label') || this.querySelector('h1,h2,h3,h4')?.textContent.trim() || this.getAttribute('key'); }
-}
-customElements.define('atelier-region', AtelierRegion);
-const regionEls = () => [...document.querySelectorAll('atelier-region')];
-const regionEl = key => regionEls().find(r => r.regionKey === key);
-const labelOf = key => regionEl(key)?.label || key;
+// ===== Regions: atl-key on any element =============================================
+const regionKey = el => { const ks = []; for (let e = el; e; e = e.parentElement?.closest('[atl-key]')) ks.unshift(e.getAttribute('atl-key')); return ks.join('/'); };
+const regionEls = () => [...document.querySelectorAll('[atl-key]')];
+const regionEl = key => regionEls().find(r => regionKey(r) === key);
+const labelOf = key => { const el = regionEl(key);
+  return el?.getAttribute('atl-label') || el?.querySelector('h1,h2,h3,h4')?.textContent.trim() || key; };
 
 // ===== anchors ======================================================================
 // { region, quote?, prefix?, selector?, point?:{x,y} }. Only `region` means the whole Region.
 // Text is found again by quote + prefix, so it survives a Ready that re-renders the Region.
-const CHROME = 'atelier-margin,atelier-activity,.atl-float,.atl-warnings';
+const CHROME = 'atelier-host,atelier-activity,.atl-float,.atl-warnings';
 function textIndex(root) {
   const nodes = [], w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: n => n.parentElement.closest(`${CHROME},script,style,textarea,[hidden]`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    acceptNode: n => n.parentElement.closest(`${CHROME},script,style,textarea`) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
   let text = '', n;
   while ((n = w.nextNode())) { nodes.push({ n, at: text.length }); text += n.data; }
   return { text, nodes };
@@ -58,8 +69,8 @@ function selectorFor(el, root) {
   return parts.length ? ':scope > ' + parts.join(' > ') : null;
 }
 // -> { range } | { el, point? } | { el, detached:true } | null (Region gone)
-function resolve(anchor, fallbackRegion) {
-  const root = regionEl(anchor?.region || fallbackRegion);
+function resolve(anchor, fallbackRegion, map) {
+  const root = map.get(anchor?.region || fallbackRegion);
   if (!root) return null;
   if (anchor?.quote) {
     const idx = textIndex(root);
@@ -79,9 +90,11 @@ function resolve(anchor, fallbackRegion) {
 }
 const topOf = res => (res.range ? res.range.getBoundingClientRect() : res.el.getBoundingClientRect()).top +
   (res.point ? res.el.getBoundingClientRect().height * res.point.y : 0);
+const anchorEl = res => res?.range ? res.range.startContainer.parentElement : res?.el;
+const marksElement = it => it.res?.el && !it.res.range && !it.res.detached && it.anchor && it.res.el !== it.res.root;
 
 // ===== opening a Thread =============================================================
-const regionFor = node => (node?.nodeType === 1 ? node : node?.parentElement)?.closest('atelier-region');
+const regionFor = node => (node?.nodeType === 1 ? node : node?.parentElement)?.closest('[atl-key]');
 function anchorFromSelection() {
   const sel = getSelection();
   if (!sel.rangeCount || sel.isCollapsed) return null;
@@ -93,17 +106,18 @@ function anchorFromSelection() {
   const idx = textIndex(region), pre = document.createRange();
   pre.setStart(region, 0); pre.setEnd(range.startContainer, range.startOffset);
   const offset = idx.text.indexOf(quote, Math.max(0, pre.toString().length - 40));
-  return { region: region.regionKey, quote, prefix: offset > 0 ? idx.text.slice(Math.max(0, offset - 32), offset) : '' };
+  return { region: regionKey(region), quote, prefix: offset > 0 ? idx.text.slice(Math.max(0, offset - 32), offset) : '' };
 }
 function anchorFromElement(el, event) {
-  const region = el.closest('atelier-region');
+  const region = el.closest('[atl-key]');
   if (!region) return null;
-  if (el === region) return { region: region.regionKey };
+  const key = regionKey(region);
+  if (el === region) return { region: key };
   // Inside a diagram, anchor the box that was clicked (Mermaid and Graphviz draw each as g.node, or
   // mark your own with data-anchor); anywhere else on an SVG or image, a relative point.
   const box = el.closest('svg g.node, svg [data-anchor]');
-  if (box && region.contains(box)) return { region: region.regionKey, selector: boxSelector(box, region) };
-  const target = el.closest('svg') || el, a = { region: region.regionKey, selector: selectorFor(target, region) };
+  if (box && region.contains(box)) return { region: key, selector: boxSelector(box, region) };
+  const target = el.closest('svg') || el, a = { region: key, selector: selectorFor(target, region) };
   if (target.tagName === 'IMG' || target.tagName.toLowerCase() === 'svg') {
     const r = target.getBoundingClientRect();
     a.point = { x: +((event.clientX - r.left) / r.width).toFixed(3), y: +((event.clientY - r.top) / r.height).toFixed(3) };
@@ -121,6 +135,8 @@ function boxSelector(box, region) {
   return selectorFor(box, region);
 }
 function openNew(anchor) {
+  if (!route({ region: anchor.region, res: {} }, hostIndex()))
+    return warn(`No <atelier-host> shows Threads for ${labelOf(anchor.region)}.`, 'host');
   const id = 'c-' + Math.random().toString(36).slice(2, 10);
   pending.set(id, { id, region: anchor.region, anchor, text: '' });
   saveDrafts(); active = id; getSelection().removeAllRanges(); float.hidden = true; render();
@@ -155,10 +171,10 @@ document.addEventListener('mouseup', e => {
 });
 
 let picking = false;
-function setPicking(on) { picking = on; document.documentElement.classList.toggle('atl-picking', on); renderActivity(); }
+function setPicking(on) { picking = on; document.documentElement.toggleAttribute('atl-picking', on); renderActivity(); }
 document.addEventListener('mouseover', e => {
-  document.querySelectorAll('.atl-pick-hover').forEach(x => x.classList.remove('atl-pick-hover'));
-  if ((picking || e.altKey) && !e.target.closest?.(CHROME)) e.target.closest?.('atelier-region *, atelier-region')?.classList.add('atl-pick-hover');
+  document.querySelectorAll('[atl-pick]').forEach(x => x.removeAttribute('atl-pick'));
+  if ((picking || e.altKey) && !e.target.closest?.(CHROME)) e.target.closest?.('[atl-key] *, [atl-key]')?.setAttribute('atl-pick', '');
 });
 const caretAt = (x, y) => {
   const p = document.caretPositionFromPoint?.(x, y);
@@ -172,6 +188,11 @@ document.addEventListener('click', e => {
     const a = anchorFromElement(e.target, e);
     if (a) { e.preventDefault(); e.stopPropagation(); setPicking(false); openNew(a); }
     return;
+  }
+  const opener = e.target.closest?.('[atl-thread]');
+  if (opener) {
+    const key = opener.getAttribute('atl-thread').trim() || (opener.closest('[atl-key]') ? regionKey(opener.closest('[atl-key]')) : '');
+    return key ? openNew({ region: key }) : warn('This button names no Region to start a Thread on.', 'host');
   }
   if (getSelection().toString()) return;
   const hit = cache.find(it => {                     // clicking anchored text or an anchored element opens its card
@@ -189,7 +210,28 @@ document.addEventListener('keydown', e => {
   if (active && !$('#atl-drawer:popover-open')) { active = null; render(); }   // the draft stays in `kept`
 });
 
-// ===== what the margin shows ========================================================
+// ===== hosts: where Threads and Proposals appear =====================================
+// The author places hosts; the kernel never creates one. An item goes to the host whose `for` is the
+// longest whole-path prefix of its Region Key (c6 never claims c64), else to the one catch-all.
+function hostIndex() {
+  const byFor = new Map(), dup = []; let all = null;
+  for (const h of document.querySelectorAll('atelier-host')) {
+    const f = (h.getAttribute('for') || '').trim();
+    if (!f) { if (all) dup.push('a second catch-all <atelier-host>'); else all = h; }
+    else if (byFor.has(f)) dup.push(`a second <atelier-host for="${f}">`); else byFor.set(f, h);
+  }
+  return { byFor, all, dup };
+}
+function route(it, idx) {
+  let own = null;
+  for (let k = it.region || ''; k && !own; k = k.slice(0, Math.max(0, k.lastIndexOf('/')))) own = idx.byFor.get(k) || null;
+  return strays.has(it.id) || !it.res ? idx.all || own : own || idx.all;
+}
+let queued = false;
+const queueRender = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; render(); }); } };
+// A host draws itself when it enters the page, so hosts a Ready swaps in need no setup.
+customElements.define('atelier-host', class extends HTMLElement { connectedCallback() { queueRender(); } });
+
 let cache = [];
 function items() {
   const out = [], all = Object.values(S.threads || {}).flat();
@@ -200,12 +242,11 @@ function items() {
     const owner = pr.threadId && all.find(c => c.id === pr.threadId);
     out.push({ kind: 'proposal', id: pr.id, region: pr.region, anchor: pr.anchor || owner?.anchor, pr });
   }
-  return out.map(it => ({ ...it, res: resolve(it.anchor, it.region) }));
+  const map = new Map(regionEls().map(r => [regionKey(r), r]));
+  // A question still waiting for the human comes first in its host.
+  const first = it => it.kind === 'proposal' && it.pr.status !== 'decided' ? 0 : 1;
+  return out.map(it => ({ ...it, res: resolve(it.anchor, it.region, map) })).sort((a, b) => first(a) - first(b));
 }
-
-customElements.define('atelier-margin', class extends HTMLElement {
-  connectedCallback() { this.setAttribute('role', 'complementary'); if (!this.hasAttribute('aria-label')) this.setAttribute('aria-label', 'Threads'); }
-});
 
 const STATE = { open: 'Sent', acknowledged: 'Seen by agent', in_progress: 'Agent working', implemented: 'Done — check it', accepted: 'Accepted', rejected: 'Reopened' };
 function where(it) {
@@ -213,104 +254,133 @@ function where(it) {
   return it.res.detached ? '<div class="atl-detached">The part this pointed at has changed.</div>' : '';
 }
 const CLOSE = '<button class="atl-close" data-close aria-label="Close" title="Close (Esc)">×</button>';
+const errHTML = id => errs.has(id) ? `<div class="atl-error" role="alert">Not sent: ${esc(errs.get(id))}. Your text is kept.</div>` : '';
 const imgs = urls => urls?.length ? `<div class="atl-atts">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Pasted image"></a>`).join('')}</div>` : '';
 const pendingImgs = key => { const u = atts.get(key) || [];
   return u.length ? `<div class="atl-atts">${u.map((x, i) => `<span class="atl-att"><img src="${esc(x)}" alt="Pasted image"><button class="atl-att-x" data-unattach="${esc(key)}" data-i="${i}" aria-label="Remove image">×</button></span>`).join('')}</div>` : ''; };
-// A decision is two steps: pick an option, then Decide. One stray click never commits, and a
-// decided Proposal can be reopened and changed.
-function proposalHTML(it, open) {
-  const pr = it.pr, decided = pr.status === 'decided';
-  const choice = pr.custom || pr.options?.[pr.choiceIndex] || '';
-  if (decided && !open) return `<button class="atl-card atl-card--line atl-card--decided" data-open="${it.id}">✓ <b>Decided</b> · ${esc(clean(String(choice)).split(/[.:;(]/)[0])}</button>`;
-  if (!open) return `<button class="atl-card atl-card--line atl-card--ask" data-open="${it.id}"><span class="atl-first"><b>Decide:</b> ${esc(pr.question)}</span><span class="atl-meta">${(pr.options || []).length} options</span></button>`;
-  const picked = kept.get(it.id + '|choice') ?? (decided ? (pr.custom ? 'custom' : String(pr.choiceIndex)) : '');
+const clean = o => String(o).replace(/\s*\((recommended|empfohlen)\)\s*$/i, '');
+const secs = until => `${Math.max(0, Math.ceil((until - Date.now()) / 1000))} s`;
+const ask = (key, summary, field, button) => `<details class="atl-ask" data-keep="${esc(key)}"><summary>${summary}</summary>
+  <textarea ${field} placeholder="${button === 'Ask' ? 'What is unclear?' : 'Your answer…'}  (⌘+Enter sends)"></textarea>`;
+// An open question shows its options as buttons: one click chooses, and Undo stays beside the
+// choice until the server's window closes. Only then does the agent hear of it.
+function proposalHTML(it) {
+  const pr = it.pr, id = it.id, chosen = pr.custom || clean(pr.options?.[pr.choiceIndex] ?? '');
+  if (pr.status === 'decided' && id !== active)
+    return `<button class="atl-card atl-card--line atl-card--decided" data-open="${id}">✓ <b>Decided</b> · ${esc(chosen.split(/[.:;(]/)[0])}</button>`;
+  const head = `<div class="atl-card atl-card--decision${pr.status === 'pending' ? ' is-pending' : ''}" data-card="${id}">${pr.status === 'decided' ? CLOSE : ''}${where(it)}
+    <p class="atl-q">${esc(pr.question)}</p>`;
+  if (pr.status === 'decided') return `${head}<div class="atl-state">Decided: ${esc(chosen)}</div></div>`;
+  if (pr.status === 'pending') return `${head}<div class="atl-pending" role="status">Chosen: <b>${esc(chosen)}</b> ·
+    <button class="atl-btn" data-undo="${id}">Undo (<span data-until="${pr.undoUntil}">${secs(pr.undoUntil)}</span>)</button></div>${errHTML(id)}</div>`;
   const opt = (o, i) => {
     const req = pr.explanationRequests?.[i], ex = pr.explanations?.[i];
-    return `<label class="atl-choice ${picked === String(i) ? 'is-picked' : ''}"><input type="radio" name="atl-${it.id}" data-choose="${it.id}" value="${i}" ${picked === String(i) ? 'checked' : ''}>
-      <span>${esc(clean(o))}${i === 0 ? ' <span class="atl-rec">Recommended</span>' : ''}</span></label>
+    return `<div class="atl-option"><button class="atl-btn atl-choice" data-choose="${id}" data-i="${i}">${esc(clean(o))}${i === 0 ? ' <span class="atl-rec">Recommended</span>' : ''}</button>
       ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? '<div class="atl-explain atl-meta">Explanation requested</div>'
-        : `<details class="atl-ask"><summary>Why?</summary><textarea data-explain-text="${it.id}:${i}" placeholder="What is unclear?"></textarea><button class="atl-btn" data-explain="${it.id}" data-i="${i}">Ask</button></details>`}`;
+        : `${ask(`${id}|explain:${i}`, 'Explain', `data-explain-text="${id}:${i}"`, 'Ask')}<button class="atl-btn" data-explain="${id}" data-i="${i}">Ask</button></details>`}</div>`;
   };
-  return `<div class="atl-card atl-card--decision is-open" data-card="${it.id}">${CLOSE}${where(it)}
-    <div class="atl-kicker">${decided ? 'Decided' : 'Decision needed'}</div>
-    <p class="atl-q">${esc(pr.question)}</p>
-    <div class="atl-choices" role="radiogroup">${(pr.options || []).map(opt).join('')}
-      <label class="atl-choice ${picked === 'custom' ? 'is-picked' : ''}"><input type="radio" name="atl-${it.id}" data-choose="${it.id}" value="custom" ${picked === 'custom' ? 'checked' : ''}><span>Something else</span></label>
-      ${picked === 'custom' ? `<textarea data-custom="${it.id}" placeholder="Your answer…">${esc(pr.custom || '')}</textarea>` : ''}</div>
-    <div class="atl-row"><button class="atl-btn atl-btn--primary" data-decide="${it.id}" ${picked ? '' : 'disabled'}>${decided ? 'Change decision' : 'Decide'}</button></div>
-  </div>`;
+  return `${head}<div class="atl-options">${(pr.options || []).map(opt).join('')}</div>
+    ${ask(`${id}|custom`, 'Something else…', `data-custom="${id}"`, 'Send answer')}<button class="atl-btn atl-btn--primary" data-answer="${id}">Send answer</button></details>${errHTML(id)}</div>`;
 }
-const clean = o => o.replace(/\s*\((recommended|empfohlen)\)\s*$/i, '');
 function cardHTML(it) {
   const open = it.id === active;
-  if (it.kind === 'proposal') return proposalHTML(it, open);
+  if (it.kind === 'proposal') return proposalHTML(it);
   const c = it.c, st = S.commentState[c.id]?.value, replies = S.replies[c.id] || [];
   const quote = it.anchor?.quote ? `<blockquote>${esc(it.anchor.quote.slice(0, 140))}</blockquote>` : '';
   if (it.kind === 'new' && !open) return `<button class="atl-card atl-card--line" data-open="${it.id}">
-      <span class="atl-first">✎ ${esc(kept.get(it.id + '|new') || c.text || 'Unsent Thread')}</span><span class="atl-meta">Not sent</span></button>`;
-  if (it.kind === 'new') return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}
+      <span class="atl-first">✎ ${esc(kept.get(it.id + '|new') || c.text || 'Unsent Thread')}</span><span class="atl-meta">Not sent${errs.has(it.id) ? ' · failed' : ''}</span></button>`;
+  if (it.kind === 'new') return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}${it.anchor?.quote ? '' : `<div class="atl-meta">${esc(labelOf(it.region))}</div>`}
       <textarea data-new placeholder="Start a Thread…  (⌘+Enter sends; paste images)">${esc(c.text || '')}</textarea>${pendingImgs(it.id + '|new')}
-      <div class="atl-row"><button class="atl-btn atl-btn--primary" data-send="${it.id}">Send</button><button class="atl-link" data-discard="${it.id}">Discard</button></div></div>`;
+      <div class="atl-row"><button class="atl-btn atl-btn--primary" data-send="${it.id}">Send</button><button class="atl-link" data-discard="${it.id}">Discard</button></div>${errHTML(it.id)}</div>`;
   if (!open) return `<button class="atl-card atl-card--line ${st === 'implemented' ? 'is-yours' : ''}" data-open="${it.id}">
-      <span class="atl-first">${esc(c.text)}</span><span class="atl-meta">${replies.length ? replies.length + (replies.length > 1 ? ' replies' : ' reply') + ' · ' : ''}${STATE[st] || ''}</span></button>`;
+      <span class="atl-first">${esc(c.text)}</span><span class="atl-meta">${replies.length ? replies.length + (replies.length > 1 ? ' replies' : ' reply') + ' · ' : ''}${STATE[st] || ''}${kept.get(it.id + '|reply') ? ' · ✎ draft' : ''}</span></button>`;
   return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}${where(it)}
       <div class="atl-msg atl-msg--you">${esc(c.text)}${imgs(c.attachments)}</div>
       ${replies.map(r => `<div class="atl-msg ${r.author === 'human' ? 'atl-msg--you' : ''}"><span class="atl-who">${r.author === 'human' ? 'You' : 'Agent'}</span>${esc(r.msg)}${imgs(r.attachments)}</div>`).join('')}
       <div class="atl-state">${STATE[st] || ''}</div>
       <textarea data-reply-text="${it.id}" placeholder="${st === 'implemented' ? 'Reply, or say what is still wrong…' : 'Reply…'}  (⌘+Enter sends)"></textarea>${pendingImgs(it.id + '|reply')}
       <div class="atl-row"><button class="atl-btn ${st === 'implemented' ? '' : 'atl-btn--primary'}" data-reply="${it.id}">Reply</button>
-      ${st === 'implemented' ? `<button class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}</div></div>`;
+      ${st === 'implemented' ? `<button class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}</div>${errHTML(it.id)}</div>`;
+}
+
+const textareaKind = t => t.dataset.replyText ? 'reply' : t.dataset.custom ? 'custom' : t.dataset.explainText ? 'explain:' + t.dataset.explainText.split(':').pop() : 'new';
+const fieldKey = t => t.closest('[data-card]')?.dataset.card + '|' + textareaKind(t);
+const syncKept = () => { for (const t of document.querySelectorAll('atelier-host textarea')) kept.set(fieldKey(t), t.value); };
+function captureFocus() {
+  const t = document.activeElement;
+  return t?.matches?.('atelier-host textarea') ? { key: fieldKey(t), start: t.selectionStart, end: t.selectionEnd } : null;
+}
+function restoreFocus(f) {
+  const t = f && [...document.querySelectorAll('atelier-host textarea')].find(x => fieldKey(x) === f.key);
+  // preventScroll: an anchored card is placed after this, and focusing it unplaced scrolls the page
+  if (t) { t.focus({ preventScroll: true }); t.setSelectionRange(f.start, f.end); }
 }
 
 const highlights = typeof Highlight !== 'undefined' && CSS.highlights;
-function render() {
-  const margin = $('atelier-margin');
+function render(focus = captureFocus()) {
+  syncKept();
   cache = items();
-  document.querySelectorAll('.atl-el-anchor,.atl-el-active').forEach(e => e.classList.remove('atl-el-anchor', 'atl-el-active'));
+  const idx = hostIndex();
+  for (const it of cache) it.host = route(it, idx);
+  warn(idx.dup.length ? `Each address needs exactly one host, but this page has ${idx.dup.join(' and ')}.` : '', 'hosts');
+  document.querySelectorAll('[atl-anchor],[atl-active]').forEach(e => { e.removeAttribute('atl-anchor'); e.removeAttribute('atl-active'); });
   if (highlights) {
     CSS.highlights.set('atl-anchor', new Highlight(...cache.filter(i => i.res?.range && i.id !== active).map(i => i.res.range)));
     CSS.highlights.set('atl-active', new Highlight(...cache.filter(i => i.res?.range && i.id === active).map(i => i.res.range)));
   }
-  for (const it of cache) if (it.res?.el && !it.res.range && !it.res.detached && it.anchor && it.res.el !== it.res.root)
-    it.res.el.classList.add(it.id === active ? 'atl-el-active' : 'atl-el-anchor');
-  if (margin) {
-    const focused = margin.querySelector('textarea:focus');
-    for (const t of margin.querySelectorAll('textarea')) kept.set(keyOf(t), t.value);
-    margin.innerHTML = `<div class="atl-margin-head">Threads</div>` +
-      cache.map(it => `<div class="atl-slot" data-slot="${it.id}">${cardHTML(it)}</div>`).join('');
-    for (const t of margin.querySelectorAll('textarea')) { const v = kept.get(keyOf(t)); if (v) t.value = v; }
-    const ta = focused && findTextarea(margin, focused.closest('[data-card]')?.dataset.card, textareaKind(focused));
-    // preventScroll: the card is not placed yet, and focusing it at its unplaced spot scrolls the page
-    if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(focused.selectionStart, focused.selectionEnd); }
-    layout();
-  }
+  for (const it of cache) if (marksElement(it)) it.res.el.setAttribute(it.id === active ? 'atl-active' : 'atl-anchor', '');
+  for (const h of document.querySelectorAll('atelier-host'))
+    h.innerHTML = cache.filter(it => it.host === h).map(it => `<div class="atl-slot" data-slot="${it.id}">${cardHTML(it)}</div>`).join('');
+  for (const t of document.querySelectorAll('atelier-host textarea')) { const v = kept.get(fieldKey(t)); if (v) t.value = v; }
+  for (const d of document.querySelectorAll('atelier-host details[data-keep]'))
+    d.open = opened.has(d.dataset.keep) || !!d.querySelector('textarea')?.value;
+  restoreFocus(focus);
+  layout();
   renderActivity();
-}
-const textareaKind = t => t.dataset.replyText ? 'reply' : t.dataset.custom ? 'custom' : t.dataset.explainText ? 'explain:' + t.dataset.explainText : 'new';
-const keyOf = t => t.closest('[data-card]')?.dataset.card + '|' + textareaKind(t);
-const findTextarea = (m, id, kind) => [...m.querySelectorAll(`[data-card="${id}"] textarea`)].find(t => textareaKind(t) === kind);
-
-// Each card sits level with its anchor, pushed down to avoid overlap; the active card is exact.
-function layout() {
-  const margin = $('atelier-margin');
-  if (!margin || getComputedStyle(margin).position === 'fixed') return;
-  const base = margin.getBoundingClientRect().top;
-  const slots = cache.map(it => ({ it, el: margin.querySelector(`[data-slot="${it.id}"]`), want: it.res ? topOf(it.res) - base : null }))
-    .filter(s => s.el).sort((a, b) => (a.want ?? Infinity) - (b.want ?? Infinity));
-  // The active card is exact; any other card that would overlap it moves below it.
-  const act = slots.find(s => s.it.id === active && s.want != null);
-  const A = act ? Math.max(36, act.want) : null, AEnd = act ? A + act.el.offsetHeight + 8 : null;
-  if (act) act.el.style.top = A + 'px';
-  let y = 36;
-  for (const s of slots) {
-    if (s === act) continue;
-    if (s.want != null) y = Math.max(y, s.want);
-    const h = s.el.offsetHeight + 8;
-    if (act && y < AEnd && y + h > A) y = AEnd;
-    s.el.style.top = y + 'px'; y += h;
+  if (booted) {
+    const list = cache.filter(i => i.kind === 'thread' || i.kind === 'proposal').map(i => i.kind === 'thread'
+      ? { kind: 'thread', id: i.id, region: i.region, status: S.commentState[i.id]?.value || 'open', waiting: S.commentState[i.id]?.value === 'implemented' }
+      : { kind: 'proposal', id: i.id, region: i.region, status: i.pr.status, waiting: i.pr.status === 'open' });
+    for (const u of Object.values(S.updates || {})) list.push({ kind: 'update', id: u.id, region: u.region, status: u.dismissedAt ? 'dismissed' : 'open', waiting: false });
+    snapshot = { state: S, items: list };
+    document.dispatchEvent(new CustomEvent('atelier:state', { detail: snapshot }));
   }
-  y = Math.max(y, AEnd ?? 0);
-  margin.style.minHeight = y + 'px';
+}
+// The store and every Thread, Proposal and Update with whether it waits for the human; null
+// before the first state arrives. Read-only: change state through the protocol endpoints.
+export const getState = () => snapshot;
+
+// layout="anchored": each card sits level with its anchor, pushed down to avoid overlap, while the
+// host sits beside its content. Fixed, or stacked under its content, the host is plain block flow.
+function aligned(h) {
+  if (getComputedStyle(h).position === 'fixed') return false;
+  const f = (h.getAttribute('for') || '').trim(), col = (f && regionEl(f)) || cache.find(it => it.host === h && it.res)?.res.root;
+  if (!col) return false;
+  const r = h.getBoundingClientRect(), c = col.getBoundingClientRect();
+  return r.left >= c.right - 1 || r.right <= c.left + 1;
+}
+function layout() {
+  for (const h of document.querySelectorAll('atelier-host[layout="anchored"]')) {
+    const on = aligned(h), slots = [...h.querySelectorAll(':scope > [data-slot]')];
+    h.toggleAttribute('atl-aligned', on);
+    if (!on) { slots.forEach(s => { s.style.top = ''; }); h.style.minHeight = ''; continue; }
+    const base = h.getBoundingClientRect().top;
+    const placed = slots.map(el => { const it = itemOf(el.dataset.slot); return { it, el, want: it?.res ? topOf(it.res) - base : null }; })
+      .sort((a, b) => (a.want ?? Infinity) - (b.want ?? Infinity));
+    // The active card is exact; any other card that would overlap it moves below it.
+    const act = placed.find(s => s.it?.id === active && s.want != null);
+    const A = act ? Math.max(0, act.want) : null, AEnd = act ? A + act.el.offsetHeight + 8 : null;
+    if (act) act.el.style.top = A + 'px';
+    let y = 0;
+    for (const s of placed) {
+      if (s === act) continue;
+      if (s.want != null) y = Math.max(y, s.want);
+      const height = s.el.offsetHeight + 8;
+      if (act && y < AEnd && y + height > A) y = AEnd;
+      s.el.style.top = y + 'px'; y += height;
+    }
+    h.style.minHeight = Math.max(y, AEnd ?? 0) + 'px';
+  }
 }
 let raf = 0;
 const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(layout); };
@@ -322,91 +392,119 @@ new ResizeObserver(schedule).observe(document.documentElement);
 new MutationObserver(ms => { if (ms.some(m => m.target.dataset?.diagramReady === 'true')) render(); })
   .observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-diagram-ready'] });
 document.addEventListener('atelier:rendered', () => render());
+// A choice's undo countdown ticks in place; the server, not this timer, closes the window.
+setInterval(() => { for (const el of document.querySelectorAll('[data-until]')) el.textContent = secs(+el.dataset.until); }, 250);
 
-// ===== margin actions ===============================================================
+// ===== card and drawer actions ======================================================
 const itemOf = id => cache.find(i => i.id === id);
+const token = () => Math.random().toString(36).slice(2, 12);
+const busy = new Set();
+// Nothing the human wrote is cleared before the server answers 2xx; a failure stays on the card.
+async function act(id, fn) {
+  if (busy.has(id)) return;
+  busy.add(id);
+  try { await fn(); errs.delete(id); } catch (e) { errs.set(id, e.message); }
+  finally { busy.delete(id); }
+  await refresh().catch(() => render());
+}
+const forget = (...keys) => {
+  for (const t of document.querySelectorAll('atelier-host textarea')) if (keys.includes(fieldKey(t))) t.value = '';
+  for (const k of keys) { kept.delete(k); atts.delete(k); opened.delete(k); }
+  saveKept();
+};
+const fieldText = (sel, key) => ($(sel)?.value ?? kept.get(key) ?? '').trim();
 async function sendNew(id) {
-  const p = pending.get(id), text = $(`[data-card="${id}"] textarea`)?.value.trim(), images = atts.get(id + '|new') || [];
+  const p = pending.get(id), text = fieldText(`[data-card="${id}"] [data-new]`, id + '|new'), images = atts.get(id + '|new') || [];
   if (!p || (!text && !images.length)) return;
-  (S.threads[p.region] ||= []).push({ id, text, anchor: p.anchor, ...(images.length ? { attachments: images } : {}) });
-  await post('/api/state', { threads: S.threads });
+  const thread = { id, text, anchor: p.anchor, ...(images.length ? { attachments: images } : {}) };
+  await post('/api/state', { threads: { ...S.threads, [p.region]: [...(S.threads[p.region] || []).filter(c => c.id !== id), thread] } });
   await post('/api/send', { region: p.region, id });
-  pending.delete(id); kept.delete(id + '|new'); atts.delete(id + '|new'); saveDrafts(); await refresh();
+  pending.delete(id); forget(id + '|new'); saveDrafts();
+}
+async function undo(id) {
+  const pr = S.proposals[id];
+  if (pr) await act(id, () => post('/api/undo-decision', { id, attempt: pr.attempt }));
 }
 document.addEventListener('click', async e => {
-  const b = e.target.closest?.('atelier-margin button'); if (!b) return;
-  const d = b.dataset, value = sel => $(sel)?.value.trim();
+  const b = e.target.closest?.('atelier-host button, atelier-activity button, .atl-warnings button'); if (!b) return;
+  const d = b.dataset, drawer = $('#atl-drawer');
   if ('open' in d) {
     active = d.open || null;
-    const it = active && itemOf(active); unfold(it?.res?.range ? it.res.range.startContainer.parentElement : it?.res?.el);
+    const it = active && itemOf(active); unfold(anchorEl(it?.res));
     render();
     const r = active && $(`[data-card="${active}"]`)?.getBoundingClientRect();
     if (r && r.bottom > innerHeight - 12) scrollBy({ top: Math.min(r.bottom - innerHeight + 24, r.top - 80), behavior: 'smooth' });
     return;
   }
   if ('close' in d) { active = null; return render(); }
+  if ('unwarn' in d) return warn();
   if (d.unattach) { atts.get(d.unattach)?.splice(+d.i, 1); if (d.unattach.endsWith('|new')) saveDrafts(); return render(); }
-  if (d.send) return sendNew(d.send);
-  if (d.discard) { pending.delete(d.discard); saveDrafts(); active = null; return render(); }
-  if (d.reply) { const msg = value(`[data-reply-text="${d.reply}"]`), images = atts.get(d.reply + '|reply') || [];
+  if (d.send) return act(d.send, () => sendNew(d.send));
+  if (d.discard) { pending.delete(d.discard); forget(d.discard + '|new'); saveDrafts(); active = null; return render(); }
+  if (d.reply) { const msg = fieldText(`[data-reply-text="${d.reply}"]`, d.reply + '|reply'), images = atts.get(d.reply + '|reply') || [];
     if (!msg && !images.length) return;
-    await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg, attachments: images });
-    $(`[data-reply-text="${d.reply}"]`).value = ''; atts.delete(d.reply + '|reply'); return refresh(); }
-  if (d.accept) { await post('/api/comment-state', { region: itemOf(d.accept).region, id: d.accept, state: 'accepted' }); return refresh(); }
+    return act(d.reply, async () => { await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg, attachments: images }); forget(d.reply + '|reply'); }); }
+  if (d.accept) return act(d.accept, () => post('/api/comment-state', { region: itemOf(d.accept).region, id: d.accept, state: 'accepted' }));
   if (d.reject) { const ta = $(`[data-reply-text="${d.reject}"]`), msg = ta.value.trim();
     if (!msg) { ta.placeholder = 'Say what is still wrong, then Reopen'; return ta.focus({ preventScroll: true }); }
-    await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); ta.value = ''; return refresh(); }
-  if (d.decide) {
-    const picked = kept.get(d.decide + '|choice'); if (!picked) return;
-    if (picked === 'custom') { const custom = value(`[data-custom="${d.decide}"]`); if (!custom) return $(`[data-custom="${d.decide}"]`)?.focus({ preventScroll: true });
-      await post('/api/decide', { id: d.decide, choiceIndex: null, custom }); }
-    else await post('/api/decide', { id: d.decide, choiceIndex: +picked });
-    kept.delete(d.decide + '|choice'); kept.delete(d.decide + '|custom'); active = null; return refresh();
-  }
-  if (d.explain) { const answer = value(`[data-explain-text="${d.explain}:${d.i}"]`); if (!answer) return;
-    await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); return refresh(); }
+    return act(d.reject, async () => { await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); forget(d.reject + '|reply'); }); }
+  if (d.choose) { if (active === d.choose) active = null;
+    return act(d.choose, () => post('/api/decide', { id: d.choose, choiceIndex: +d.i, attempt: token() })); }
+  if (d.answer) { const custom = fieldText(`[data-custom="${d.answer}"]`, d.answer + '|custom');
+    if (!custom) return $(`[data-custom="${d.answer}"]`)?.focus({ preventScroll: true });
+    if (active === d.answer) active = null;
+    return act(d.answer, async () => { await post('/api/decide', { id: d.answer, custom, attempt: token() }); forget(d.answer + '|custom'); }); }
+  if (d.explain) { const key = `${d.explain}|explain:${d.i}`, answer = fieldText(`[data-explain-text="${d.explain}:${d.i}"]`, key); if (!answer) return;
+    return act(d.explain, async () => { await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); forget(key); }); }
+  if (d.undo) return undo(d.undo);
+  if ('pick' in d) return setPicking(!picking);
+  if ('notify' in d) { localStorage.setItem(NOTIFY, notifyOn() ? 'off' : 'on');
+    if (hasNotify && Notification.permission === 'default') await Notification.requestPermission(); return renderActivity(); }
+  if (d.dismiss) return act(d.dismiss, () => post('/api/update-dismiss', { id: d.dismiss }));
+  if (d.ack) return act(d.ack, () => post('/api/ack', { region: d.ack }));
+  if (d.go) { drawer?.hidePopover(); return reveal({ region: d.go }); }
+  if (d.reveal) { drawer?.hidePopover(); return reveal(d.reveal); }
 });
+document.addEventListener('toggle', e => {
+  const k = e.target.dataset?.keep; if (k) e.target.open ? opened.add(k) : opened.delete(k);
+}, true);
 document.addEventListener('mouseover', e => {
-  const card = e.target.closest?.('atelier-margin [data-slot]');
-  document.querySelectorAll('.atl-el-hover').forEach(x => x.classList.remove('atl-el-hover'));
+  const card = e.target.closest?.('atelier-host [data-slot]');
+  document.querySelectorAll('[atl-hover]').forEach(x => x.removeAttribute('atl-hover'));
   if (highlights) CSS.highlights.delete('atl-hover');
   const it = card && itemOf(card.dataset.slot);
   if (it?.res?.range && highlights) CSS.highlights.set('atl-hover', new Highlight(it.res.range));
-  else if (it?.res?.el && it.anchor && it.res.el !== it.res.root) it.res.el.classList.add('atl-el-hover');
+  else if (it && marksElement(it)) it.res.el.setAttribute('atl-hover', '');
 });
 document.addEventListener('keydown', e => {
-  const ta = e.target.closest?.('atelier-margin textarea'); if (!ta || e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+  const ta = e.target.closest?.('atelier-host textarea'); if (!ta || e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
   e.preventDefault();
-  (ta.closest('details') || ta.closest('[data-card]')).querySelector('[data-send],[data-reply],[data-decide],[data-explain]')?.click();
-});
-document.addEventListener('change', e => {
-  const r = e.target.closest?.('atelier-margin [data-choose]'); if (!r) return;
-  kept.set(r.dataset.choose + '|choice', r.value); render();
+  (ta.closest('details') || ta.closest('[data-card]')).querySelector('[data-send],[data-reply],[data-answer],[data-explain]')?.click();
 });
 document.addEventListener('input', e => {
-  const t = e.target.closest?.('atelier-margin textarea'); if (!t) return;
-  kept.set(keyOf(t), t.value);
+  const t = e.target.closest?.('atelier-host textarea'); if (!t) return;
+  kept.set(fieldKey(t), t.value); saveKept();
   if (t.matches('[data-new]')) saveDrafts();
 });
 
 // Pasting or dropping an image into a new Thread or a reply uploads it and attaches it there.
 const IMAGE = /^image\/(png|jpeg|gif|webp)$/;
 async function attachFiles(ta, files) {
-  const key = keyOf(ta), list = atts.get(key) || [];
+  const key = fieldKey(ta), list = atts.get(key) || [];
   for (const f of files) {
     const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(f); });
-    const res = await post('/api/attach', { name: f.name || 'pasted', type: f.type, data });
-    if (res.url) list.push(res.url); else warn(`Image not attached: ${res.error || 'upload failed'}`);
+    try { list.push((await post('/api/attach', { name: f.name || 'pasted', type: f.type, data })).url); }
+    catch (e) { warn(`Image not attached: ${e.message}`, 'attach'); }
   }
   atts.set(key, list); kept.set(key, ta.value);
   if (key.endsWith('|new')) saveDrafts();
   render();
 }
-const imageTarget = e => { const ta = e.target.closest?.('atelier-margin [data-new], atelier-margin [data-reply-text]');
+const imageTarget = e => { const ta = e.target.closest?.('atelier-host [data-new], atelier-host [data-reply-text]');
   const files = [...(e.clipboardData || e.dataTransfer)?.files || []].filter(f => IMAGE.test(f.type));
   return ta && files.length ? [ta, files] : null; };
 document.addEventListener('paste', e => { const hit = imageTarget(e); if (hit) { e.preventDefault(); attachFiles(...hit); } });
-document.addEventListener('dragover', e => { if (e.target.closest?.('atelier-margin textarea')) e.preventDefault(); });
+document.addEventListener('dragover', e => { if (e.target.closest?.('atelier-host textarea')) e.preventDefault(); });
 document.addEventListener('drop', e => { const hit = imageTarget(e); if (hit) { e.preventDefault(); attachFiles(...hit); } });
 
 // ===== notifications: on by default, asked for on the first gesture ==================
@@ -418,89 +516,126 @@ document.addEventListener('pointerdown', () => {
 }, { once: true });
 const notify = (title, body) => { if (notifyOn() && document.hidden) new Notification(title, { body }); };
 
-// ===== <atelier-activity>: header tools + one drawer ================================
+// ===== reveal: make an item reachable, then show and focus its card ===================
+// The page owns selection, tabs and filters; one resolver lets it show the target first.
+let resolver = null;
+export function setRevealResolver(fn) { resolver = typeof fn === 'function' ? fn : null; }
+const unfold = el => { for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true; };
+const visible = el => !!el?.getClientRects().length;
+function showCard(id) {
+  const card = $(`[data-card="${id}"]`) || $(`[data-slot="${id}"]`);
+  unfold(card);
+  if (!visible(card)) return false;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const control = card.querySelector('button:not(.atl-close), textarea');
+  if (control) control.focus({ preventScroll: true }); else { card.tabIndex = -1; card.focus({ preventScroll: true }); }
+  return true;
+}
+// reveal(id) or reveal({ region, id?, kind? }) -> Promise<boolean>. On failure the page says so and
+// the item moves to the catch-all host, so it is never out of reach.
+export async function reveal(target) {
+  const id = typeof target === 'string' ? target : target?.id, it = id && itemOf(id);
+  const t = { ...(typeof target === 'object' ? target : {}), id, region: target?.region || it?.region, kind: target?.kind || it?.kind };
+  const fail = why => {
+    const what = it ? (it.kind === 'proposal' ? 'the question' : 'the Thread') : 'the section';
+    warn(`Could not show ${what}${t.region ? ' in ' + labelOf(t.region) : ''}: ${why}.`, 'reveal');
+    if (it) { strays.add(id); active = id; render(); showCard(id); }
+    return false;
+  };
+  if (!t.region) return fail('it is not on this page');
+  try {
+    if (resolver) await Promise.race([resolver(t), new Promise((_, no) => setTimeout(() => no(new Error('the page did not show it within 2 s')), 2000))]);
+  } catch (e) { return fail(e.message || String(e)); }
+  if (it) {
+    strays.delete(id); active = id; render();
+    unfold(anchorEl(itemOf(id)?.res));
+    if (!showCard(id)) return fail('its host is hidden');
+  } else {
+    const el = regionEl(t.region);
+    unfold(el);
+    if (!visible(el)) return fail('it is hidden');
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  warn('', 'reveal');
+  return true;
+}
+
+// ===== <atelier-activity>: Pick, the drawer, notifications ===========================
 customElements.define('atelier-activity', class extends HTMLElement {
   connectedCallback() {
     if (this._built) return; this._built = true;
     this.innerHTML = `<div class="atl-tools"></div><div class="atl-drawer" id="atl-drawer" popover></div>`;
-    this.addEventListener('click', async e => {
-      const b = e.target.closest('button'); if (!b) return;
-      const d = b.dataset, drawer = $('#atl-drawer');
-      if ('pick' in d) return setPicking(!picking);
-      if ('notify' in d) { localStorage.setItem(NOTIFY, notifyOn() ? 'off' : 'on');
-        if (hasNotify && Notification.permission === 'default') await Notification.requestPermission(); return renderActivity(); }
-      if (d.dismiss) { await post('/api/update-dismiss', { id: d.dismiss }); return refresh(); }
-      if (d.ack) { await post('/api/ack', { region: d.ack }); return refresh(); }
-      if (d.go) { drawer.hidePopover(); regionEl(d.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-      if (d.reveal) { drawer.hidePopover(); reveal(d.reveal); }
-    });
+    renderActivity();
   }
 });
-// Scroll to an interaction's anchor and expand its card.
-const unfold = el => { for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true; };
-export function reveal(id) {
-  const it = itemOf(id); if (!it) return;
-  const target = it.res?.range ? it.res.range.startContainer.parentElement : it.res?.el;
-  unfold(target);
-  target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  active = id; render();
-}
 function renderActivity() {
   const el = $('atelier-activity'); if (!el?._built) return;
   const ups = Object.values(S.updates || {}).filter(u => !u.dismissedAt);
   const changed = Object.keys(S.changed || {}).filter(k => regionEl(k));
   const waiting = cache.filter(i => i.kind === 'proposal' && i.pr.status === 'open' || i.kind === 'thread' && S.commentState[i.id]?.value === 'implemented');
+  const chosen = cache.filter(i => i.kind === 'proposal' && i.pr.status === 'pending');
   const news = ups.length + changed.length;
   el.querySelector('.atl-tools').innerHTML = `
     <button class="atl-btn ${picking ? 'atl-btn--primary' : ''}" data-pick title="Or hold Alt and click">${picking ? 'Click anything… (Esc)' : '💬 Comment on…'}</button>
     <button class="atl-btn ${waiting.length ? 'atl-btn--warn' : ''}" popovertarget="atl-drawer">${waiting.length ? `${waiting.length} waiting for you` : 'Activity'}${news ? ` · ${news} new` : ''}</button>`;
   el.querySelector('.atl-drawer').innerHTML = `
     <div class="atl-drawer-head"><b>Activity</b><button class="atl-link" popovertarget="atl-drawer" popovertargetaction="hide">Close</button></div>
-    ${waiting.length ? `<h4>Waiting for you</h4>${waiting.map(i => `<button class="atl-feed-item atl-feed-btn" data-reveal="${i.id}">${i.kind === 'proposal' ? '<b>Decide:</b> ' + esc(i.pr.question) : '<b>Check:</b> ' + esc(i.c.text)}<span>${esc(labelOf(i.anchor?.region || i.region))}</span></button>`).join('')}` : ''}
+    ${waiting.length ? `<h4>Waiting for you</h4>${waiting.map(i => `<button class="atl-feed-item atl-feed-btn" data-reveal="${i.id}">${i.kind === 'proposal' ? '<b>Decide:</b> ' + esc(i.pr.question) : '<b>Check:</b> ' + esc(i.c.text)}<span>${esc(labelOf(i.region))}</span></button>`).join('')}` : ''}
+    ${chosen.length ? `<h4>Just chosen</h4>${chosen.map(i => `<div class="atl-feed-item"><button class="atl-link" data-reveal="${i.id}">${esc(i.pr.question)}</button><p>Chosen: ${esc(i.pr.custom || clean(i.pr.options[i.pr.choiceIndex]))}</p><button class="atl-btn" data-undo="${i.id}">Undo (<span data-until="${i.pr.undoUntil}">${secs(i.pr.undoUntil)}</span>)</button></div>`).join('')}` : ''}
     ${changed.length ? `<h4>Changed since you looked</h4>${changed.map(k => `<div class="atl-feed-item"><button class="atl-link" data-go="${esc(k)}">${esc(labelOf(k))}</button> <button class="atl-link" data-ack="${esc(k)}">✓ Seen</button></div>`).join('')}` : ''}
-    ${ups.length ? `<h4>Updates</h4>${ups.map(u => `<div class="atl-feed-item"><b>${esc(u.title)}</b>${u.body ? `<p>${esc(u.body)}</p>` : ''}<button class="atl-link" data-dismiss="${u.id}">Dismiss</button></div>`).join('')}` : ''}
-    ${waiting.length || news ? '' : '<p class="atl-hint">Nothing new.</p>'}
+    ${ups.length ? `<h4>Updates</h4>${ups.map(u => `<div class="atl-feed-item"><b>${esc(u.title)}</b>${u.body ? `<p>${esc(u.body)}</p>` : ''}<button class="atl-link" data-go="${esc(u.region)}">Go to ${esc(labelOf(u.region))}</button> <button class="atl-link" data-dismiss="${u.id}">Dismiss</button></div>`).join('')}` : ''}
+    ${waiting.length || chosen.length || news ? '' : '<p class="atl-hint">Nothing new.</p>'}
     <button class="atl-link" data-notify>${notifyOn() ? '🔔 Desktop notifications on' : '🔕 Desktop notifications off'}</button>`;
-  document.querySelectorAll('atelier-region.atl-changed').forEach(r => r.classList.remove('atl-changed'));
-  changed.forEach(k => regionEl(k)?.classList.add('atl-changed'));
+  document.querySelectorAll('[atl-changed]').forEach(r => r.removeAttribute('atl-changed'));
+  changed.forEach(k => regionEl(k)?.setAttribute('atl-changed', ''));
 }
 
 // ===== warnings =====================================================================
 // The server keeps no Region registry, so a mistyped key in a Ready can only be caught here.
-function warn(message) {
+const warnings = new Map();
+function warn(message, key) {
+  if (key === undefined) warnings.clear(); else if (message) warnings.set(key, message); else warnings.delete(key);
   let stack = $('.atl-warnings');
-  if (!message) { stack?.remove(); return; }
+  if (!warnings.size) { stack?.remove(); return; }
   if (!stack) { stack = document.createElement('div'); stack.className = 'atl-warnings'; stack.setAttribute('role', 'alert'); document.body.append(stack); }
-  stack.textContent = message;
+  stack.innerHTML = `<button class="atl-close" data-unwarn aria-label="Close">×</button>${[...warnings.values()].map(m => `<div>${esc(m)}</div>`).join('')}`;
 }
 
 // ===== Ready: swap only the named Regions into the open page ========================
-// The margin, header and drawer sit outside every Region, so drafts, open cards and focus survive;
-// the browser's scroll anchoring keeps the reading place.
+// Hosts inside a swapped Region draw themselves again; drafts, focus and caret come back from the
+// kernel's own record, and the browser's scroll anchoring keeps the reading place.
 async function onReady(named) {
   if (!named?.length) return;
   let doc;
   try { doc = new DOMParser().parseFromString(await (await fetch(location.pathname, { cache: 'no-store' })).text(), 'text/html'); }
   catch { return; }
-  const path = el => { const ks = []; for (let e = el; e; e = e.parentElement?.closest('atelier-region')) ks.unshift(e.getAttribute('key')); return ks.join('/'); };
-  const incoming = new Map([...doc.querySelectorAll('atelier-region')].map(el => [path(el), el]));
+  const incoming = new Map([...doc.querySelectorAll('[atl-key]')].map(el => [regionKey(el), el]));
+  syncKept(); saveKept();
   // ponytail: a Region new to the page reloads rather than being inserted; insert it if Readys add Regions often
   if (named.some(k => incoming.has(k) && !regionEl(k))) {
     saveDrafts(); try { sessionStorage.setItem('atelier:active', active || ''); } catch {}
     return location.reload();
   }
+  const focus = captureFocus();
   for (const key of named) { const cur = regionEl(key), next = incoming.get(key); if (cur && next) cur.replaceWith(document.importNode(next, true)); }
   const unknown = named.filter(k => !incoming.has(k));
-  warn(unknown.length ? `Ready named ${unknown.length} Region(s) this page does not contain: ${unknown.join(', ')}` : '');
+  warn(unknown.length ? `Ready named ${unknown.length} Region(s) this page does not contain: ${unknown.join(', ')}` : '', 'ready');
+  render(null);
+  // The page re-applies its own view state (selected record, open tab) before focus returns.
   document.dispatchEvent(new CustomEvent('atelier:ready', { detail: { changed: named, unknown } }));
+  restoreFocus(focus);
+  layout();
 }
 
 // ===== state + live loop ============================================================
-export async function refresh() { S = await fetch('/api/state', { cache: 'no-store' }).then(r => r.json()); render(); }
+export async function refresh() { S = await fetch('/api/state', { cache: 'no-store' }).then(r => r.json()); booted = true; render(); }
+// The page's own cursor advances only past events it has handled; a refresh never moves it.
+let cursor = null;
 async function loop() {
   for (;;) {
     try {
-      const r = await fetch('/api/poll?cursor=' + S.seq).then(x => x.json());
+      if (cursor === null) { await refresh(); cursor = S.seq; }
+      const r = await fetch('/api/poll?cursor=' + cursor).then(x => x.json());
       document.documentElement.removeAttribute('data-atl-offline');
       if (!r.events?.length) continue;
       for (const ev of r.events) {
@@ -509,6 +644,7 @@ async function loop() {
         if (ev.kind === 'proposal') notify('Decision needed', labelOf(ev.region));
         if (ev.kind === 'update') notify(ev.title || 'Update', labelOf(ev.region));
       }
+      cursor = r.cursor;
       await refresh();
     } catch {
       document.documentElement.setAttribute('data-atl-offline', '');
@@ -522,7 +658,6 @@ async function loop() {
 async function boot() {
   document.body.append(float);
   try { active = sessionStorage.getItem('atelier:active') || null; sessionStorage.removeItem('atelier:active'); } catch {}
-  try { await refresh(); } catch { document.documentElement.setAttribute('data-atl-offline', ''); }
   loop();
 }
 document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', boot) : boot();

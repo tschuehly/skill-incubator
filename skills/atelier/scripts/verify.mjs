@@ -2,7 +2,7 @@
 // Atelier kernel verification — every kernel behavior, checked in a real browser.
 //
 //   node scripts/verify.mjs            all checks
-//   node scripts/verify.mjs ready      only checks whose name contains "ready"
+//   node scripts/verify.mjs proposal   only checks whose name contains "proposal"
 //
 // Starts its own kernel on a free port against a throwaway fixture in a temp directory, so the
 // Ready checks can rewrite the document without touching anything in the repo.
@@ -18,34 +18,50 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
 const SESSION = 'atelier-verify';
 const FILTER = process.argv[2] || '';
+const UNDO_MS = 8000;           // shorter than the 30 s default, longer than a few agent-browser round trips
 
 // ---- fixture -------------------------------------------------------------------------
-// Deliberately library-free: verification must not depend on a CDN being reachable. The layout
-// is the contract every Surface follows: a header holding <atelier-activity>, the content, and one
-// <atelier-margin> outside every Region.
-const surface = (alpha = 'the quick brown fox jumps over the lazy dog', extra = '', flow = ['draft-0', 'high-1']) => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>verify</title>
+// Deliberately library-free and frame-free: a document with an anchored host beside it, a table
+// with keyed rows, a list/detail pair of records with a host each and a reveal resolver, a Region
+// no host claims, and a catch-all. `tail` replaces the catch-all to build broken variants.
+const surface = ({ alpha = 'the quick brown fox jumps over the lazy dog', beta = 'beta body', c64 = 'c64 body', extra = '',
+  flow = ['draft-0', 'high-1'], tail = '<atelier-host></atelier-host>' } = {}) => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>verify</title>
 <link rel="stylesheet" href="/atelier.css">
 <script type="module" src="/atelier.mjs"></script>
 <style>
-  body{font-family:system-ui;margin:0}
-  header{position:sticky;top:0;z-index:20;display:flex;gap:12px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #ccc}
-  .page{display:grid;grid-template-columns:minmax(0,1fr) clamp(340px,32vw,520px);gap:24px;padding:16px 24px}
-  @media (max-width:1100px){.page{grid-template-columns:minmax(0,1fr)}}
+  body{font-family:system-ui;margin:0;padding:8px 16px}
+  .doc{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:24px}
+  @media (max-width:900px){.doc{display:block}}
 </style>
 </head><body>
-<header><b>Verify</b><atelier-activity></atelier-activity></header>
-<div class="page"><main>
-<atelier-region key="v">
+<div><b>Verify</b> <atelier-activity></atelier-activity></div>
+<div class="doc"><main atl-key="v">
   <h1>Verify</h1>
-  <atelier-region key="alpha" label="Alpha"><h2>Alpha</h2><p id="alpha-body">${alpha}</p><div style="height:900px"></div></atelier-region>
-  <atelier-region key="list" label="List"><ul><li>first item</li><li>second item</li><li>third item</li></ul><div style="height:600px"></div></atelier-region>
-  <atelier-region key="fig" label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg>
-    <svg id="flow-svg" width="400" height="60" viewBox="0 0 400 60" style="max-width:100%">${flow.map((n, i) => `<g class="node" id="mermaid-${Date.now()}-flowchart-${n}" transform="translate(${10 + i * 130},10)"><rect width="110" height="40" fill="#ddd"/><text x="10" y="25">${n.split('-')[0]}</text></g>`).join('')}</svg><div style="height:600px"></div></atelier-region>
-  <atelier-region key="beta" label="Beta"><h2>Beta</h2><p>beta body</p><div style="height:600px"></div></atelier-region>
-  <atelier-region key="late" label="Late"><details id="late-box"><summary>file</summary><div id="late-view"></div></details></atelier-region>
-${extra}</atelier-region>
-</main><atelier-margin></atelier-margin></div>
+  <section atl-key="alpha" atl-label="Alpha"><h2>Alpha</h2><p id="alpha-body">${alpha}</p><div style="height:900px"></div></section>
+  <section atl-key="list" atl-label="List"><ul><li>first item</li><li>second item</li><li>third item</li></ul><div style="height:600px"></div></section>
+  <section atl-key="fig" atl-label="Figure"><svg id="fig-svg" width="400" height="200" viewBox="0 0 400 200" style="max-width:100%"><rect width="400" height="200" fill="#eee"/></svg>
+    <svg id="flow-svg" width="400" height="60" viewBox="0 0 400 60" style="max-width:100%">${flow.map((n, i) => `<g class="node" id="mermaid-${Date.now()}-flowchart-${n}" transform="translate(${10 + i * 130},10)"><rect width="110" height="40" fill="#ddd"/><text x="10" y="25">${n.split('-')[0]}</text></g>`).join('')}</svg><div style="height:600px"></div></section>
+  <section atl-key="beta" atl-label="Beta"><h2>Beta</h2><p>${beta}</p><div style="height:600px"></div></section>
+  <section atl-key="late" atl-label="Late"><details id="late-box"><summary>file</summary><div id="late-view"></div></details></section>
+  <section atl-key="tbl" atl-label="Table"><table><tbody><tr atl-key="r1"><td>row one</td><td>12 ms</td></tr><tr atl-key="r2"><td>row two</td><td>40 ms</td></tr></tbody></table></section>
+${extra}</main>
+<atelier-host for="v" layout="anchored"></atelier-host></div>
+<section id="records"><nav><button data-show="c64">c64</button> <button data-show="c65">c65</button> waiting on c65: <span id="count"></span></nav>
+  <article atl-key="c64"><h2>Record c64</h2><p>${c64}</p><button atl-thread>Comment on c64</button><atelier-host for="c64"></atelier-host></article>
+  <article atl-key="c65" hidden><h2>Record c65</h2><p>c65 body</p><atelier-host for="c65"></atelier-host></article>
+</section>
+<section atl-key="loose" atl-label="Loose"><p>a Region no host claims</p></section>
+${tail}
+<script type="module">
+  import { setRevealResolver } from '/atelier.mjs';
+  const show = id => { for (const a of document.querySelectorAll('#records > article')) a.hidden = a.getAttribute('atl-key') !== id; window.__shown = id; };
+  document.addEventListener('click', e => { const b = e.target.closest('[data-show]'); if (b) show(b.dataset.show); });
+  setRevealResolver(async ({ region }) => { const r = region.split('/')[0]; if (r === 'c64' || r === 'c65') show(r); });
+  document.addEventListener('atelier:ready', () => show(window.__shown || 'c64'));
+  document.addEventListener('atelier:state', e => {
+    document.querySelector('#count').textContent = e.detail.items.filter(i => i.region === 'c65' && i.waiting).length; });
+</script>
 <script>setTimeout(() => { document.querySelector('#late-view').textContent = 'rendered late by a viewer';
   document.dispatchEvent(new CustomEvent('atelier:rendered')); }, 600);</script>
 </body></html>`;
@@ -87,7 +103,7 @@ let server = null;
 function startServer(port, dir){
   server = spawn(process.execPath, [path.join(SKILL, 'assets', 'server.mjs')], {
     cwd: dir,
-    env: { ...process.env, PORT:String(port), HOST:'127.0.0.1', UI:'surface.html', ROOT:'.', STORE:'verify' },
+    env: { ...process.env, PORT:String(port), HOST:'127.0.0.1', UI:'surface.html', ROOT:'.', STORE:'verify', UNDO_MS:String(UNDO_MS) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   server.stderr.on('data', d => process.env.ATL_DEBUG && process.stderr.write(String(d)));
@@ -117,19 +133,29 @@ const api = async (route, body) => {
   const r = await fetch(base + route, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
   return { status:r.status, body: await r.json().catch(()=>({})) };
 };
-const writeSurface = (...args) => fs.writeFileSync(path.join(dir, 'surface.html'), surface(...args));
+const writeSurface = (options) => fs.writeFileSync(path.join(dir, 'surface.html'), surface(options));
 const state = async () => (await fetch(base + '/api/state')).json();
 const threadOf = async (region, text) => ((await state()).threads[region] || []).find(c => c.text === text);
-// Top of a margin card and of its anchor, in page coordinates.
+const proposalOf = async (question) => Object.values((await state()).proposals).find(p => p.question === question);
+const decisionsOf = async (id) => (await state()).log.filter(e => e.kind === 'decision' && e.proposalId === id).length;
+const reload = async (ms = 1300) => { browser(['reload']); await sleep(ms); };
+const preflight = () => {
+  const r = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'], { encoding:'utf8', timeout:300000 });
+  return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
+};
+// Top of a host card and of its anchor, in page coordinates.
 const tops = (id, anchorJs) => probe(`JSON.stringify({ card: Math.round(document.querySelector('[data-slot="${id}"]').getBoundingClientRect().top),
   anchor: Math.round((${anchorJs}).getBoundingClientRect().top) })`);
 const level = (t, what) => assert(Math.abs(t.card - t.anchor) <= 2, `${what}: card at ${t.card}, anchor at ${t.anchor}`);
 const typeNewAndSend = async (text) => {
-  act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value=${JSON.stringify(text)}; t.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('atelier-margin [data-send]').click()})()`);
+  act(`(()=>{const t=document.querySelector('atelier-host [data-new]'); t.value=${JSON.stringify(text)}; t.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('atelier-host [data-send]').click()})()`);
   await sleep(700);
 };
+const typeInto = (sel, text) => act(`(()=>{const t=document.querySelector(${JSON.stringify(sel)}); t.value=${JSON.stringify(text)}; t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
 const altClick = (js, fx = 0.5, fy = 0.5) => act(`(()=>{const el=${js}; el.scrollIntoView({block:'center'}); const r=el.getBoundingClientRect();
   el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,altKey:true,clientX:r.left+r.width*${fx},clientY:r.top+r.height*${fy}}))})()`);
+const cardText = (id) => probe(`JSON.stringify(document.querySelector('[data-slot="${id}"]')?.innerText || '')`);
+const hostOf = (id) => probe(`JSON.stringify(document.querySelector('[data-slot="${id}"]')?.closest('atelier-host')?.getAttribute('for') ?? null)`);
 
 writeSurface();
 startServer(port, dir);
@@ -151,16 +177,15 @@ try {
   });
 
   // ---- regions ----
-  await check('regions: path keys come from ancestors', async () => {
-    eq(probe(`JSON.stringify([...document.querySelectorAll('atelier-region')].map(e=>e.regionKey))`),
-      ['v','v/alpha','v/list','v/fig','v/beta','v/late'], 'region keys');
-  });
-
-  await check('regions: the kernel inserts nothing into authored content', async () => {
-    const injected = probe(`JSON.stringify([...document.querySelectorAll('atelier-region *')]
-      .filter(e => /^ATELIER-(?!REGION)/.test(e.tagName) || [...e.classList].some(c => /^atl-(bar|card|slot|compose|input|float)/.test(c)))
-      .map(e => e.tagName + '.' + e.className))`);
-    eq(injected, [], 'kernel nodes inside Regions');
+  await check('regions: atl-key on any element, a table row included, builds the path', async () => {
+    eq(probe(`JSON.stringify({ row: document.querySelector('[atl-key=r1]').parentElement.tagName,
+      unknown: [...document.querySelectorAll('atelier-region, atelier-margin')].length })`), { row:'TBODY', unknown:0 }, 'markup');
+    altClick(`document.querySelector('[atl-key=r2] td')`);
+    await sleep(200);
+    await typeNewAndSend('row thread');
+    const c = await threadOf('v/tbl/r2', 'row thread');
+    assert(c?.anchor?.selector, `no Thread on v/tbl/r2: ${JSON.stringify((await state()).threads)}`);
+    eq([await hostOf(c.id), probe(`JSON.stringify((td => td.hasAttribute('atl-anchor') || td.hasAttribute('atl-active'))(document.querySelector('[atl-key=r2] td')))`)], ['v', true], 'host and mark');
   });
 
   // ---- anchors ----
@@ -178,33 +203,34 @@ try {
     eq([c.anchor.region, c.anchor.quote], ['v/alpha', 'brown fox'], 'anchor');
   });
 
-  await check('anchor: the margin card sits level with its text', async () => {
+  await check('anchor: an anchored host places the card level with its text', async () => {
     const c = await threadOf('v/alpha', 'selection thread');
+    eq(probe(`JSON.stringify(document.querySelector('atelier-host[for=v]').hasAttribute('atl-aligned'))`), true, 'host aligned beside its content');
     const t = probe(`JSON.stringify((()=>{const r=[...CSS.highlights.get('atl-anchor'), ...CSS.highlights.get('atl-active')].find(r=>r.toString()==='brown fox');
       return { card: Math.round(document.querySelector('[data-slot="${c.id}"]').getBoundingClientRect().top), anchor: Math.round(r.getBoundingClientRect().top) }})())`);
     level(t, 'selection card');
   });
 
   await check('anchor: Alt+click anchors an element', async () => {
-    altClick(`document.querySelectorAll('atelier-region[key=list] li')[1]`);
+    altClick(`document.querySelectorAll('[atl-key=list] li')[1]`);
     await sleep(200);
     await typeNewAndSend('element thread');
     const c = await threadOf('v/list', 'element thread');
     assert(c?.anchor?.selector, 'no selector stored');
-    eq(probe(`JSON.stringify(document.querySelector('atelier-region[key=list]').querySelector(${JSON.stringify(c.anchor.selector)}).textContent)`), 'second item', 'selector target');
-    level(tops(c.id, `document.querySelectorAll('atelier-region[key=list] li')[1]`), 'element card');
+    eq(probe(`JSON.stringify(document.querySelector('[atl-key=list]').querySelector(${JSON.stringify(c.anchor.selector)}).textContent)`), 'second item', 'selector target');
+    level(tops(c.id, `document.querySelectorAll('[atl-key=list] li')[1]`), 'element card');
   });
 
   await check('anchor: Pick mode anchors without Alt, and Escape leaves it', async () => {
     act(`document.querySelector('atelier-activity [data-pick]').click()`);
-    eq(probe(`JSON.stringify(document.documentElement.classList.contains('atl-picking'))`), true, 'pick mode on');
+    eq(probe(`JSON.stringify(document.documentElement.hasAttribute('atl-picking'))`), true, 'pick mode on');
     act(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
-    eq(probe(`JSON.stringify(document.documentElement.classList.contains('atl-picking'))`), false, 'Escape left pick mode');
+    eq(probe(`JSON.stringify(document.documentElement.hasAttribute('atl-picking'))`), false, 'Escape left pick mode');
     act(`document.querySelector('atelier-activity [data-pick]').click()`);
-    act(`document.querySelectorAll('atelier-region[key=list] li')[2].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}))`);
+    act(`document.querySelectorAll('[atl-key=list] li')[2].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}))`);
     await sleep(200);
-    eq(probe(`JSON.stringify(!!document.querySelector('atelier-margin [data-new]'))`), true, 'composer opened');
-    act(`document.querySelector('atelier-margin [data-discard]').click()`);
+    eq(probe(`JSON.stringify(!!document.querySelector('atelier-host [data-new]'))`), true, 'composer opened');
+    act(`document.querySelector('atelier-host [data-discard]').click()`);
   });
 
   await check('anchor: a point on an image or SVG is stored relative to it', async () => {
@@ -223,10 +249,10 @@ try {
     await typeNewAndSend('box thread');
     const c = await threadOf('v/fig', 'box thread');
     eq(c?.anchor?.selector, ':scope g.node[id*="-flowchart-high-"]', 'box selector');
-    writeSurface(undefined, undefined, ['concept-0', 'draft-1', 'high-2']);
+    writeSurface({ flow:['concept-0', 'draft-1', 'high-2'] });
     await api('/api/ready', { changed:['v/fig'] });
     await sleep(1500);
-    eq(probe(`JSON.stringify(document.querySelector('#flow-svg .atl-el-anchor, #flow-svg .atl-el-active')?.textContent)`), 'high', 'anchored box after Ready');
+    eq(probe(`JSON.stringify(document.querySelector('#flow-svg [atl-anchor], #flow-svg [atl-active]')?.textContent)`), 'high', 'anchored box after Ready');
     writeSurface();
     await api('/api/ready', { changed:['v/fig'] });
     await sleep(1200);
@@ -235,22 +261,39 @@ try {
   await check('anchor: text a viewer renders late resolves, and revealing it opens its details', async () => {
     await api('/api/state', { threads: { ...(await state()).threads, 'v/late': [{ id: 'c-late', text: 'late thread', anchor: { region: 'v/late', quote: 'rendered late' } }] } });
     await api('/api/send', { region: 'v/late', id: 'c-late' });
-    browser(['reload']); await sleep(1800);
+    await reload(1800);
     const hl = probe(`JSON.stringify([...CSS.highlights.get('atl-anchor')].map(r => r.toString()))`);
     assert(hl.includes('rendered late'), `highlights: ${JSON.stringify(hl)}`);
     eq(probe(`JSON.stringify(document.querySelector('#late-box').open)`), false, 'details open before reveal');
-    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('c-late')).then(() => 'ok')`]);
+    eq(JSON.parse(browser(['eval', `import('/atelier.mjs').then(k => k.reveal('c-late'))`])), true, 'reveal result');
     await sleep(500);
     eq(probe(`JSON.stringify(document.querySelector('#late-box').open)`), true, 'details open after reveal');
   });
 
   await check('anchor: ⌘+Enter sends a new Thread', async () => {
-    altClick(`document.querySelector('atelier-region[key=beta] p')`);
+    altClick(`document.querySelector('[atl-key=beta] p')`);
     await sleep(300);
-    act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value='keyboard thread'; t.focus()})()`);
+    act(`(()=>{const t=document.querySelector('atelier-host [data-new]'); t.value='keyboard thread'; t.focus()})()`);
     browser(['press', 'Meta+Enter']);
     await sleep(800);
     assert(await threadOf('v/beta', 'keyboard thread'), 'not sent by ⌘+Enter');
+  });
+
+  await check('anchor: an atl-thread button opens a whole-Region Thread in that Region\'s host', async () => {
+    act(`document.querySelector('[atl-key=c64] [atl-thread]').click()`);
+    await sleep(300);
+    eq(probe(`JSON.stringify(!!document.querySelector('atelier-host[for=c64] [data-new]'))`), true, 'draft in the c64 host');
+    await typeNewAndSend('record thread');
+    const c = await threadOf('c64', 'record thread');
+    eq([c?.anchor, await hostOf(c?.id)], [{ region:'c64' }, 'c64'], 'whole-Region anchor in its host');
+  });
+
+  await check('state: the kernel marks authored elements with attributes, never classes or nodes', async () => {
+    const r = probe(`JSON.stringify({ classes: [...document.querySelectorAll('[class*="atl-"]')].filter(e => !e.closest('atelier-host,atelier-activity,.atl-float,.atl-warnings') && !e.matches('.atl-float,.atl-warnings')).map(e => e.tagName + '.' + e.className),
+      nodes: [...document.querySelectorAll('[atl-key] *')].filter(e => !e.closest('atelier-host') && /^ATELIER-(?!HOST)/.test(e.tagName)).length,
+      marked: document.querySelectorAll('[atl-anchor],[atl-active]').length })`);
+    eq([r.classes, r.nodes], [[], 0], 'kernel classes or nodes in authored content');
+    assert(r.marked >= 2, `anchored elements marked: ${r.marked}`);
   });
 
   // ---- thread conversation ----
@@ -273,6 +316,7 @@ try {
     eq(s.replies[c.id].at(-1), { ...s.replies[c.id].at(-1), msg:'human follow-up', author:'human' }, 'stored follow-up');
     const ev = s.log.at(-1);
     eq([ev.kind, ev.id, ev.followUp], ['sent', c.id, 'human follow-up'], 'wake event');
+    eq(probe(`JSON.stringify(document.querySelector('[data-reply-text="${c.id}"]')?.value ?? '')`), '', 'sent reply left in the box');
   });
 
   await check('thread: Accept closes an implemented Thread', async () => {
@@ -299,21 +343,21 @@ try {
   });
 
   await check('thread: an unsent new Thread survives a reload', async () => {
-    altClick(`document.querySelector('atelier-region[key=beta] h2')`);
+    altClick(`document.querySelector('[atl-key=beta] h2')`);
     await sleep(200);
-    act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value='draft kept'; t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-    browser(['reload']); await sleep(1300);
-    assert(probe(`JSON.stringify(document.querySelector('atelier-margin').innerText)`).includes('✎ draft kept'), 'unsent Thread not listed after reload');
-    act(`[...document.querySelectorAll('atelier-margin [data-open]')].find(b=>b.innerText.includes('draft kept')).click()`);
-    eq(probe(`JSON.stringify(document.querySelector('atelier-margin [data-new]')?.value)`), 'draft kept', 'draft after reload');
-    act(`document.querySelector('atelier-margin [data-discard]').click()`);
+    typeInto('atelier-host [data-new]', 'draft kept');
+    await reload();
+    assert(probe(`JSON.stringify(document.querySelector('atelier-host[for=v]').innerText)`).includes('✎ draft kept'), 'unsent Thread not listed after reload');
+    act(`[...document.querySelectorAll('atelier-host [data-open]')].find(b=>b.innerText.includes('draft kept')).click()`);
+    eq(probe(`JSON.stringify(document.querySelector('atelier-host [data-new]')?.value)`), 'draft kept', 'draft after reload');
+    act(`document.querySelector('atelier-host [data-discard]').click()`);
   });
 
-  await check('margin: ×, Escape and a click outside close a card and keep its draft', async () => {
+  await check('thread: ×, Escape and a click outside close a card and keep its draft', async () => {
     const c = await threadOf('v/beta', 'keyboard thread');
     const isOpen = () => probe(`JSON.stringify(!!document.querySelector('[data-card="${c.id}"].is-open'))`);
     act(`document.querySelector('[data-open="${c.id}"]').click()`);
-    act(`(()=>{const t=document.querySelector('[data-reply-text="${c.id}"]'); t.value='kept draft'; t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    typeInto(`[data-reply-text="${c.id}"]`, 'kept draft');
     act(`document.querySelector('[data-card="${c.id}"] [data-close]').click()`);
     eq(isOpen(), false, 'open after ×');
     act(`document.querySelector('[data-open="${c.id}"]').click()`);
@@ -322,10 +366,38 @@ try {
     browser(['press', 'Escape']);
     eq(isOpen(), false, 'open after Escape');
     act(`document.querySelector('[data-open="${c.id}"]').click()`);
-    act(`document.querySelector('atelier-region[key=beta] h2').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}))`);
+    act(`document.querySelector('[atl-key=beta] h2').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}))`);
     eq(isOpen(), false, 'open after clicking the page');
-    act(`(()=>{document.querySelector('[data-open="${c.id}"]').click(); document.querySelector('[data-reply-text="${c.id}"]').value='';
-      document.querySelector('[data-reply-text="${c.id}"]').dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-close]').click()})()`);
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    typeInto(`[data-reply-text="${c.id}"]`, '');
+    act(`document.querySelector('[data-card="${c.id}"] [data-close]').click()`);
+  });
+
+  await check('thread: a reply draft survives a failed send, a Ready of its Region and a reload', async () => {
+    const c = await threadOf('c64', 'record thread');
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    typeInto(`[data-reply-text="${c.id}"]`, 'draft that must survive');
+    act(`(()=>{const f=window.fetch; window.__fetch=f; window.fetch=(u,o)=>String(u)==='/api/thread-message'
+      ? Promise.resolve(new Response('{"ok":false,"error":"store unavailable"}',{status:500,headers:{'Content-Type':'application/json'}})) : f(u,o)})()`);
+    act(`document.querySelector('[data-reply="${c.id}"]').click()`);
+    await sleep(700);
+    const failed = probe(`JSON.stringify({ text: document.querySelector('[data-card="${c.id}"]').innerText, draft: document.querySelector('[data-reply-text="${c.id}"]').value })`);
+    assert(failed.text.includes('Not sent: store unavailable'), `no failure shown: ${failed.text}`);
+    eq(failed.draft, 'draft that must survive', 'draft after a failed send');
+    eq(((await state()).replies[c.id] || []).length, 0, 'replies stored');
+    act(`window.fetch = window.__fetch`);
+    writeSurface({ c64:'c64 body, edited' });
+    await api('/api/ready', { changed:['c64'] });
+    await sleep(1500);
+    eq(probe(`JSON.stringify({ body: document.querySelector('[atl-key=c64] p').textContent, draft: document.querySelector('[data-reply-text="${c.id}"]')?.value })`),
+      { body:'c64 body, edited', draft:'draft that must survive' }, 'after a Ready swapped the Region and its host');
+    await reload();
+    act(`document.querySelector('[data-open="${c.id}"]').click()`);
+    eq(probe(`JSON.stringify(document.querySelector('[data-reply-text="${c.id}"]')?.value)`), 'draft that must survive', 'draft after reload');
+    act(`document.querySelector('[data-reply="${c.id}"]').click()`);
+    await sleep(700);
+    eq([((await state()).replies[c.id] || []).at(-1)?.msg, probe(`JSON.stringify(document.querySelector('[data-reply-text="${c.id}"]')?.value ?? '')`)],
+      ['draft that must survive', ''], 'sent once the server answered 2xx');
   });
 
   const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -333,11 +405,11 @@ try {
     dt.items.add(new File([b],'shot.png',{type:'image/png'})); document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:dt}))})()`);
 
   await check('thread: a pasted image uploads, shows, and goes out with a new Thread', async () => {
-    altClick(`document.querySelector('atelier-region[key=beta] p')`);
+    altClick(`document.querySelector('[atl-key=beta] p')`);
     await sleep(200);
-    pasteInto('atelier-margin [data-new]');
+    pasteInto('atelier-host [data-new]');
     await sleep(800);
-    eq(probe(`JSON.stringify(document.querySelectorAll('atelier-margin .atl-att img').length)`), 1, 'thumbnails before sending');
+    eq(probe(`JSON.stringify(document.querySelectorAll('atelier-host .atl-att img').length)`), 1, 'thumbnails before sending');
     await typeNewAndSend('image thread');
     const c = await threadOf('v/beta', 'image thread');
     assert(/^\/\.review\/attachments\/[\w.-]+\.png$/.test(c?.attachments?.[0] || ''), `attachments ${JSON.stringify(c?.attachments)}`);
@@ -361,27 +433,76 @@ try {
   });
 
   // ---- proposals ----
-  await check('proposal: sits in the margin at its Region and records a choice', async () => {
-    const { body } = await api('/api/propose', { region:'v/fig', question:'Which figure?', options:['Keep it', 'Drop it'] });
+  await check('proposal: one posted after load appears open, with its options, in a hidden record\'s host', async () => {
+    const { body } = await api('/api/propose', { region:'c65', question:'Ship c65 as is?', options:['Ship it (recommended)', 'Hold it back'] });
     await sleep(900);
-    level(tops(body.id, `document.querySelector('atelier-region[key=fig]')`), 'proposal card');
-    assert(probe(`JSON.stringify(document.querySelector('[data-slot="${body.id}"]').innerText)`).startsWith('Decide:'), 'open Proposal is not collapsed');
-    act(`document.querySelector('[data-open="${body.id}"]').click()`);
-    eq(probe(`JSON.stringify(document.querySelector('[data-decide="${body.id}"]').disabled)`), true, 'Decide enabled before a choice');
-    act(`document.querySelector('[data-choose="${body.id}"][value="0"]').closest('label').click()`);
-    await sleep(200);
-    eq((await state()).proposals[body.id].status, 'open', 'picking an option decided it');
-    act(`document.querySelector('[data-decide="${body.id}"]').click()`);
+    const r = probe(`JSON.stringify((()=>{const h=document.querySelector('atelier-host[for=c65]'), card=h.querySelector('[data-card="${body.id}"]');
+      return { hidden: !!h.closest('[hidden]'), options: card ? [...card.querySelectorAll('[data-choose]')].map(b=>b.innerText.trim()) : null,
+        twoStep: !!card?.querySelector('[data-decide],input[type=radio]'), count: document.querySelector('#count').textContent }})())`);
+    eq(r, { hidden:true, options:['Ship it Recommended', 'Hold it back'], twoStep:false, count:'1' }, 'hidden record host');
+  });
+
+  await check('proposal: a drawer row reveals it through the resolver and focuses its card', async () => {
+    const pr = await proposalOf('Ship c65 as is?');
+    act(`document.querySelector('[popovertarget=atl-drawer]').click()`);
+    act(`document.querySelector('#atl-drawer [data-reveal="${pr.id}"]').click()`);
+    await sleep(900);
+    eq(probe(`JSON.stringify((()=>{const card=document.querySelector('[data-card="${pr.id}"]'), b=card.getBoundingClientRect();
+      return { shown: !document.querySelector('[atl-key=c65]').hidden, drawer: document.querySelector('#atl-drawer').matches(':popover-open'),
+        focus: document.activeElement.closest('[data-card]')?.dataset.card, option: document.activeElement.matches('[data-choose]'),
+        inView: b.top >= 0 && b.bottom <= innerHeight }})())`),
+      { shown:true, drawer:false, focus:pr.id, option:true, inView:true }, 'after reveal');
+  });
+
+  await check('proposal: one click makes the choice pending, with an undo countdown at the click', async () => {
+    const pr = await proposalOf('Ship c65 as is?');
+    act(`document.querySelector('[data-choose="${pr.id}"][data-i="1"]').click()`);
+    await sleep(500);
+    const p = await proposalOf('Ship c65 as is?');
+    eq([p.status, p.choiceIndex, typeof p.attempt, await decisionsOf(pr.id)], ['pending', 1, 'string', 0], 'after one click');
+    const text = await cardText(pr.id);
+    assert(/Chosen: Hold it back/.test(text) && /Undo \(\d s\)/.test(text), `card: ${text}`);
+  });
+
+  await check('proposal: Undo reopens it and the agent hears nothing', async () => {
+    const pr = await proposalOf('Ship c65 as is?');
+    act(`document.querySelector('[data-undo="${pr.id}"]').click()`);
     await sleep(600);
-    eq((await state()).proposals[body.id].choiceIndex, 0, 'choice');
-    assert(probe(`JSON.stringify(document.querySelector('[data-slot="${body.id}"]').innerText)`).startsWith('✓'), 'decided card did not collapse');
+    const p = await proposalOf('Ship c65 as is?');
+    eq([p.status, p.choiceIndex, await decisionsOf(pr.id)], ['open', null, 0], 'after Undo');
+    eq(probe(`JSON.stringify(document.querySelectorAll('[data-card="${pr.id}"] [data-choose]').length)`), 2, 'options back');
+    await sleep(UNDO_MS + 500);
+    eq(await decisionsOf(pr.id), 0, 'decision events after the window');
+  });
+
+  await check('proposal: when the undo window closes, exactly one decision event is logged', async () => {
+    const pr = await proposalOf('Ship c65 as is?');
+    act(`document.querySelector('[data-choose="${pr.id}"][data-i="0"]').click()`);
+    await sleep(UNDO_MS + 1500);
+    const p = await proposalOf('Ship c65 as is?');
+    eq([p.status, p.choiceIndex, await decisionsOf(pr.id)], ['decided', 0, 1], 'after the window');
+    assert((await cardText(pr.id)).startsWith('✓ Decided'), 'decided card did not collapse');
+  });
+
+  await check('proposal: the server rejects an invalid choice and a second click, and repeats a retried one', async () => {
+    const { body } = await api('/api/propose', { region:'c64', question:'Crop c64?', options:['Crop', 'Keep'] });
+    const decide = b => api('/api/decide', { id: body.id, ...b });
+    eq([(await decide({ choiceIndex:7, attempt:'t1' })).status, (await decide({ attempt:'t1' })).status,
+      (await decide({ choiceIndex:0, custom:'both', attempt:'t1' })).status, (await decide({ choiceIndex:0 })).status,
+      (await api('/api/decide', { id:'prop-none', choiceIndex:0, attempt:'t1' })).status], [400, 400, 400, 400, 404], 'invalid requests');
+    eq((await decide({ choiceIndex:0, attempt:'t1' })).status, 200, 'first click');
+    const again = await decide({ choiceIndex:0, attempt:'t1' });
+    eq([again.status, again.body.repeated], [200, true], 'the same click retried');
+    eq([(await decide({ choiceIndex:1, attempt:'t2' })).status, (await api('/api/propose', { region:'c64', question:'Other?', options:['x'] })).status,
+      (await api('/api/undo-decision', { id: body.id, attempt:'t2' })).status], [409, 409, 409], 'second click, replacement, stale undo');
+    eq((await api('/api/undo-decision', { id: body.id, attempt:'t1' })).status, 200, 'undo');
+    eq((await decide({ choiceIndex:0, attempt:'t1' })).status, 409, 'an undone click retried');
   });
 
   await check('proposal: an anchor places it beside the exact text', async () => {
     const { body } = await api('/api/propose', { region:'v/alpha', question:'Lazy?', options:['Yes', 'No'], anchor:{ region:'v/alpha', quote:'lazy dog' } });
     await sleep(900);
     eq((await state()).proposals[body.id].anchor.quote, 'lazy dog', 'stored anchor');
-    // It shares a line with the selection Thread, so it is pushed below it until it becomes active.
     browser(['eval', `import('/atelier.mjs').then(k => k.reveal('${body.id}')).then(() => 'ok')`]);
     await sleep(700);
     const t = probe(`JSON.stringify((()=>{const r=[...CSS.highlights.get('atl-active')].find(r=>r.toString()==='lazy dog');
@@ -389,61 +510,85 @@ try {
     level(t, 'anchored proposal');
   });
 
-  await check('proposal: a custom answer is recorded and a decision can be changed', async () => {
+  await check('proposal: Something else sends the human\'s own answer, which Undo takes back', async () => {
     const { body } = await api('/api/propose', { region:'v/beta', question:'Name?', options:['A', 'B'] });
     await sleep(900);
-    act(`document.querySelector('[data-open="${body.id}"]').click()`);
-    act(`document.querySelector('[data-choose="${body.id}"][value="custom"]').closest('label').click()`);
-    await sleep(200);
-    act(`(()=>{const t=document.querySelector('[data-custom="${body.id}"]'); t.value='my own'; t.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-decide="${body.id}"]').click()})()`);
+    act(`document.querySelector('[data-card="${body.id}"] [data-keep$="|custom"] summary').click()`);
+    typeInto(`[data-custom="${body.id}"]`, 'my own');
+    act(`document.querySelector('[data-answer="${body.id}"]').click()`);
     await sleep(600);
     const p = (await state()).proposals[body.id];
-    eq([p.status, p.custom], ['decided', 'my own'], 'custom decision');
-    act(`document.querySelector('[data-open="${body.id}"]').click()`);
-    act(`document.querySelector('[data-choose="${body.id}"][value="1"]').closest('label').click()`);
-    await sleep(200);
-    act(`document.querySelector('[data-decide="${body.id}"]').click()`);
+    eq([p.status, p.custom, p.choiceIndex], ['pending', 'my own', null], 'custom answer');
+    assert((await cardText(body.id)).includes('Chosen: my own'), 'custom answer not shown');
+    act(`document.querySelector('[data-undo="${body.id}"]').click()`);
     await sleep(600);
-    const q = (await state()).proposals[body.id];
-    eq([q.choiceIndex, q.custom], [1, null], 'changed decision');
+    eq((await state()).proposals[body.id].status, 'open', 'after Undo');
   });
 
   await check('proposal: an option explanation is asked and answered in place', async () => {
     const { body } = await api('/api/propose', { region:'v/list', question:'Order?', options:['Alphabetical', 'By date'] });
     await sleep(900);
-    act(`document.querySelector('[data-open="${body.id}"]').click()`);
-    act(`(()=>{document.querySelector('[data-explain-text="${body.id}:1"]').value='why date?'; document.querySelector('[data-explain="${body.id}"][data-i="1"]').click()})()`);
+    act(`document.querySelector('[data-keep="${body.id}|explain:1"] summary').click()`);
+    typeInto(`[data-explain-text="${body.id}:1"]`, 'why date?');
+    act(`document.querySelector('[data-explain="${body.id}"][data-i="1"]').click()`);
     await sleep(600);
     eq((await state()).proposals[body.id].explanationRequests['1'].answer, 'why date?', 'request');
     await api('/api/explain', { id:body.id, optionIndex:1, text:'dates match the audit' });
     await sleep(900);
-    assert(probe(`JSON.stringify(document.querySelector('[data-card="${body.id}"]').innerText)`).includes('dates match the audit'), 'explanation not shown');
+    assert((await cardText(body.id)).includes('dates match the audit'), 'explanation not shown');
   });
 
   await check('proposal: a second question cannot displace an open Proposal', async () => {
     eq((await api('/api/propose', { region:'v/list', question:'Replace?', options:['x'] })).status, 409, 'status');
   });
 
-  // ---- activity drawer ----
-  await check('activity: the drawer groups what waits, what changed, and Updates', async () => {
+  // ---- hosts ----
+  await check('host: an item no host claims lands in the catch-all', async () => {
+    const { body } = await api('/api/propose', { region:'loose', question:'Keep the loose Region?', options:['Keep', 'Drop'] });
+    await sleep(900);
+    eq(probe(`JSON.stringify(!!document.querySelector('atelier-host:not([for]) [data-card="${body.id}"]'))`), true, 'card in the catch-all');
+  });
+
+  await check('host: c6 never claims c64, and the longest whole-path prefix wins', async () => {
+    writeSurface({ tail:'<atelier-host for="c6"></atelier-host><atelier-host for="v/tbl"></atelier-host><atelier-host></atelier-host>' });
+    await reload();
+    const row = await threadOf('v/tbl/r2', 'row thread'), rec = await threadOf('c64', 'record thread');
+    eq([await hostOf(row.id), await hostOf(rec.id)], ['v/tbl', 'c64'], 'hosts');
+    writeSurface();
+    await reload();
+  });
+
+  // ---- activity ----
+  await check('activity: the drawer groups what waits, what was just chosen, what changed, and Updates', async () => {
     await api('/api/update', { region:'v/beta', title:'Batch finished', body:'six Regions re-rendered' });
     await api('/api/ready', { changed:['v/beta'] });
     await sleep(1200);
+    const loose = await proposalOf('Keep the loose Region?');
+    act(`document.querySelector('[data-choose="${loose.id}"][data-i="0"]').click()`);
+    await sleep(600);
+    const s = await state();
+    const waiting = Object.values(s.proposals).filter(p => p.status === 'open').length
+      + Object.values(s.commentState).filter(c => c.value === 'implemented').length;
     const tools = probe(`JSON.stringify(document.querySelector('atelier-activity .atl-tools').innerText)`);
-    assert(/2 waiting for you/.test(tools), `tools: ${tools}`);
+    assert(tools.includes(`${waiting} waiting for you`), `tools: ${tools}, expected ${waiting}`);
     act(`document.querySelector('[popovertarget=atl-drawer]').click()`);
     const d = probe(`JSON.stringify({ open: document.querySelector('#atl-drawer').matches(':popover-open'), text: document.querySelector('#atl-drawer').innerText })`);
     eq(d.open, true, 'drawer open');
-    for (const want of ['waiting for you', 'decide: lazy?', 'changed since you looked', 'beta', 'updates', 'batch finished']) assert(d.text.toLowerCase().includes(want), `drawer lacks "${want}"`);
-    eq(probe(`JSON.stringify(document.querySelector('atelier-region[key=beta]').classList.contains('atl-changed'))`), true, 'changed marker');
+    for (const want of ['waiting for you', 'decide: lazy?', 'just chosen', 'chosen: keep', 'changed since you looked', 'beta', 'updates', 'batch finished'])
+      assert(d.text.toLowerCase().includes(want), `drawer lacks "${want}"`);
+    eq(probe(`JSON.stringify(document.querySelector('[atl-key=beta]').hasAttribute('atl-changed'))`), true, 'changed marker');
+    act(`document.querySelector('#atl-drawer [data-undo="${loose.id}"]').click()`);
+    await sleep(600);
+    eq((await proposalOf('Keep the loose Region?')).status, 'open', 'Undo from the drawer');
   });
 
   await check('activity: a waiting item reveals and opens its exact card', async () => {
-    const id = Object.values((await state()).proposals).find(p => p.question === 'Lazy?').id;
+    const id = (await proposalOf('Lazy?')).id;
+    if (!probe(`JSON.stringify(document.querySelector('#atl-drawer').matches(':popover-open'))`)) act(`document.querySelector('[popovertarget=atl-drawer]').click()`);
     act(`document.querySelector('#atl-drawer [data-reveal="${id}"]').click()`);
     await sleep(700);
-    eq(probe(`JSON.stringify({ open: document.querySelector('#atl-drawer').matches(':popover-open'), active: !!document.querySelector('[data-card="${id}"].is-open') })`),
-      { open:false, active:true }, 'after reveal');
+    eq(probe(`JSON.stringify({ open: document.querySelector('#atl-drawer').matches(':popover-open'), focus: document.activeElement.closest('[data-card]')?.dataset.card })`),
+      { open:false, focus:id }, 'after reveal');
   });
 
   await check('activity: ✓ Seen and Dismiss clear their rows', async () => {
@@ -459,7 +604,7 @@ try {
   });
 
   await check('activity: desktop notifications are requested on the first gesture', async () => {
-    browser(['reload']); await sleep(1200);
+    await reload(1200);
     act(`(()=>{window.__asked=0; Object.defineProperty(Notification,'permission',{get:()=>'default',configurable:true});
       Notification.requestPermission=()=>{window.__asked++; return Promise.resolve('default')}})()`);
     browser(['click', 'h1']);
@@ -467,20 +612,29 @@ try {
     eq(probe(`JSON.stringify(window.__asked)`), 1, 'permission requests');
   });
 
+  await check('state: getState and atelier:state list every item and whether it waits', async () => {
+    const s = await state(), lazy = await proposalOf('Lazy?'), rec = await threadOf('c64', 'record thread');
+    const items = JSON.parse(JSON.parse(browser(['eval', `import('/atelier.mjs').then(k => JSON.stringify(k.getState().items))`])));
+    const of = id => items.find(i => i.id === id);
+    eq(of(lazy.id), { kind:'proposal', id:lazy.id, region:'v/alpha', status:'open', waiting:true }, 'open Proposal');
+    eq(of(rec.id), { kind:'thread', id:rec.id, region:'c64', status:'open', waiting:false }, 'Thread');
+    eq(items.filter(i => i.kind === 'update').length, Object.keys(s.updates).length, 'Updates');
+  });
+
   // ---- ready ----
   await check('ready: swaps only the named Region and keeps draft, caret, focus, scroll and anchors', async () => {
     const c = await threadOf('v/alpha', 'selection thread');
     act(`(()=>{document.querySelector('[data-open="${c.id}"]')?.click(); scrollTo(0, 400); window.__noReload=true;
       const t=document.querySelector('[data-reply-text="${c.id}"]'); t.focus({preventScroll:true}); t.value='half typed'; t.setSelectionRange(4,4)})()`);
-    const before = probe(`JSON.stringify({ y: scrollY, beta: document.querySelector('atelier-region[key=beta]').innerHTML })`);
-    writeSurface('the quick brown fox jumps over the lazy dog, edited');
+    const before = probe(`JSON.stringify({ y: scrollY, beta: document.querySelector('[atl-key=beta]').innerHTML })`);
+    writeSurface({ alpha:'the quick brown fox jumps over the lazy dog, edited' });
     await api('/api/ready', { changed:['v/alpha'] });
     await sleep(1500);
     const after = probe(`JSON.stringify({ reload: !window.__noReload, y: scrollY, text: document.querySelector('#alpha-body').textContent,
-      beta: document.querySelector('atelier-region[key=beta]').innerHTML, focused: document.activeElement.dataset.replyText,
+      beta: document.querySelector('[atl-key=beta]').innerHTML, focused: document.activeElement.dataset.replyText,
       draft: document.activeElement.value, caret: document.activeElement.selectionStart,
       anchored: [...CSS.highlights.get('atl-active')].concat([...CSS.highlights.get('atl-anchor')]).some(r=>r.toString()==='brown fox'),
-      changed: document.querySelector('atelier-region[key=alpha]').classList.contains('atl-changed') })`);
+      changed: document.querySelector('[atl-key=alpha]').hasAttribute('atl-changed') })`);
     eq(after.reload, false, 'page reloaded');
     assert(after.text.endsWith('edited'), 'Region not swapped');
     eq(after.beta, before.beta, 'unnamed Region changed');
@@ -488,21 +642,50 @@ try {
     eq([after.focused, after.draft, after.caret, after.anchored, after.changed], [c.id, 'half typed', 4, true, true], 'preserved state');
   });
 
+  await check('ready: a swapped record redraws its host, and the page keeps its selection', async () => {
+    act(`document.querySelector('[data-show=c65]').click()`);
+    writeSurface({ alpha:'the quick brown fox jumps over the lazy dog, edited', extra:'' });
+    const html = fs.readFileSync(path.join(dir, 'surface.html'), 'utf8').replace('c65 body', 'c65 body, edited');
+    fs.writeFileSync(path.join(dir, 'surface.html'), html);
+    await api('/api/ready', { changed:['c65'] });
+    await sleep(1500);
+    const pr = await proposalOf('Ship c65 as is?');
+    eq(probe(`JSON.stringify({ body: document.querySelector('[atl-key=c65] p').textContent, shown: !document.querySelector('[atl-key=c65]').hidden,
+      card: !!document.querySelector('atelier-host[for=c65] [data-slot="${pr.id}"]') })`), { body:'c65 body, edited', shown:true, card:true }, 'after Ready');
+    act(`document.querySelector('[data-show=c64]').click()`);
+  });
+
+  await check('ready: an event that arrives while the page refreshes is not skipped', async () => {
+    act(`(()=>{const f=window.fetch; window.__fetch=f; window.fetch=(u,o)=>String(u).startsWith('/api/state') && !o?.method
+      ? new Promise(r=>setTimeout(r,800)).then(()=>f(u,o)) : f(u,o)})()`);
+    writeSurface({ alpha:'alpha after the first Ready', beta:'beta after the second Ready' });
+    await api('/api/ready', { changed:['v/alpha'] });
+    await sleep(250);
+    await api('/api/ready', { changed:['v/beta'] });
+    await sleep(2500);
+    act(`window.fetch = window.__fetch`);
+    eq(probe(`JSON.stringify([document.querySelector('#alpha-body').textContent, document.querySelector('[atl-key=beta] p').textContent])`),
+      ['alpha after the first Ready', 'beta after the second Ready'], 'both Readys applied');
+    writeSurface();
+    await api('/api/ready', { changed:['v/alpha', 'v/beta'] });
+    await sleep(1200);
+  });
+
   await check('ready: an anchor whose text is gone says so and fails preflight', async () => {
-    writeSurface('a sentence without the fox');
+    writeSurface({ alpha:'a sentence without the fox' });
     await api('/api/ready', { changed:['v/alpha'] });
     await sleep(1500);
     const c = await threadOf('v/alpha', 'selection thread');
     act(`document.querySelector('[data-open="${c.id}"]')?.click()`);
-    assert(probe(`JSON.stringify(document.querySelector('[data-card="${c.id}"]').innerText)`).includes('has changed'), 'no detached note');
-    const result = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'], { encoding:'utf8', timeout:120000 });
-    assert(result.status === 1 && /no longer find their target/.test(result.stderr), `preflight: ${result.status} ${result.stderr.slice(0, 300)}`);
+    assert((await cardText(c.id)).includes('has changed'), 'no detached note');
+    const result = preflight();
+    assert(result.status === 1 && /no longer find their target/.test(result.out), `preflight: ${result.status} ${result.out.slice(0, 400)}`);
     writeSurface();
     await api('/api/ready', { changed:['v/alpha'] });
     await sleep(1200);
   });
 
-  await check('ready: an unknown Region key warns on the page', async () => {
+  await check('ready: an unknown Region key warns on the page until a good Ready', async () => {
     await api('/api/ready', { changed:['v/nope'] });
     await sleep(1200);
     assert(probe(`JSON.stringify(document.querySelector('.atl-warnings')?.textContent || '')`).includes('v/nope'), 'no warning');
@@ -512,22 +695,87 @@ try {
   });
 
   await check('ready: a Region new to the page reloads and keeps unsent Threads', async () => {
-    altClick(`document.querySelector('atelier-region[key=beta] h2')`);
+    altClick(`document.querySelector('[atl-key=beta] h2')`);
     await sleep(200);
-    act(`(()=>{const t=document.querySelector('atelier-margin [data-new]'); t.value='survives reload'; t.dispatchEvent(new Event('input',{bubbles:true})); window.__noReload=true})()`);
-    writeSurface(undefined, '<atelier-region key="gamma"><h2>Gamma</h2><p>new</p></atelier-region>');
+    act(`(()=>{const t=document.querySelector('atelier-host [data-new]'); t.value='survives reload'; t.dispatchEvent(new Event('input',{bubbles:true})); window.__noReload=true})()`);
+    writeSurface({ extra:'<section atl-key="gamma"><h2>Gamma</h2><p>new</p></section>' });
     await api('/api/ready', { changed:['v/gamma'] });
     await sleep(2200);
-    eq(probe(`JSON.stringify({ reload: !window.__noReload, gamma: !!document.querySelector('atelier-region[key=gamma]'), draft: document.querySelector('atelier-margin [data-new]')?.value })`),
+    eq(probe(`JSON.stringify({ reload: !window.__noReload, gamma: !!document.querySelector('[atl-key=gamma]'), draft: document.querySelector('atelier-host [data-new]')?.value })`),
       { reload:true, gamma:true, draft:'survives reload' }, 'after structural Ready');
-    act(`document.querySelector('atelier-margin [data-discard]').click()`);
+    act(`document.querySelector('atelier-host [data-discard]').click()`);
+    writeSurface();
+    await reload();
   });
 
-  await check('preflight: the fixture passes the render gates', async () => {
-    const result = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'], { encoding:'utf8', timeout:120000 });
-    assert(result.status === 0, `preflight exited ${result.status}: ${result.stderr.slice(0, 400)}`);
+  // ---- phones ----
+  await check('phone: 390×844 has no horizontal overflow, and the anchored host flows under its content', async () => {
+    viewport(390, 844);
+    await reload();
+    eq(probe(`JSON.stringify({ overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      aligned: document.querySelector('atelier-host[for=v]').hasAttribute('atl-aligned') })`), { overflow:false, aligned:false }, 'at 390');
+    viewport(1440, 900);
+    await reload();
   });
 
+  // ---- preflight ----
+  await check('preflight: the fixture passes the render gates at all three sizes', async () => {
+    const result = preflight();
+    assert(result.status === 0, `preflight exited ${result.status}: ${result.out.slice(0, 600)}`);
+    for (const line of ['PASS RENDER_DESKTOP', 'PASS RENDER_PHONE:', 'PASS RENDER_PHONE_LARGE', 'INFO LAYOUT_DESKTOP: 1440x900, page height'])
+      assert(result.out.includes(line), `missing "${line}"`);
+  });
+
+  // The kernel warning on this page is also what proves preflight reads .atl-warnings: the probe
+  // used to look for .atl-warn, which the kernel never renders, and passed every warning.
+  await check('preflight: duplicate hosts, two catch-alls and two Activities fail, and so does the page\'s warning', async () => {
+    try {
+      writeSurface({ tail:'<atelier-host for="c64"></atelier-host><atelier-host></atelier-host><atelier-host></atelier-host><atelier-activity></atelier-activity>' });
+      await reload();
+      assert(probe(`JSON.stringify(document.querySelector('.atl-warnings')?.textContent || '')`).includes('<atelier-host for="c64">'), 'no duplicate-host warning');
+      const { status, out } = preflight();
+      assert(status === 1, `preflight exited ${status}`);
+      for (const want of ['found 2 <atelier-activity>', 'found 2 catch-all', 'two hosts share for="c64"', 'kernel warning'])
+        assert(out.includes(want), `missing "${want}": ${out.slice(0, 500)}`);
+    } finally { writeSurface(); await reload(); }
+  });
+
+  await check('preflight: an open item with no host fails, and so does one whose host cannot be shown', async () => {
+    try {
+      writeSurface({ tail:'' });
+      const unhosted = preflight();
+      assert(unhosted.status === 1 && /have no host on the page: prop-\d+ in loose/.test(unhosted.out), `no host: ${unhosted.out.slice(0, 500)}`);
+      writeSurface({ tail:'<div hidden><atelier-host for="loose"></atelier-host></div>' });
+      const hidden = preflight();
+      assert(hidden.status === 1 && /cannot be brought on screen with reveal\(\): prop-\d+ in loose \(reveal failed\)/.test(hidden.out), `hidden host: ${hidden.out.slice(0, 500)}`);
+    } finally { writeSurface(); await reload(); }
+  });
+
+  await check('preflight: browser errors fail the handoff gate', async () => {
+    try {
+      writeSurface({ extra:`<script>setTimeout(()=>{throw new Error('preflight sentinel')},0)</script>` });
+      const result = preflight();
+      assert(result.status === 1, `preflight exited ${result.status}`);
+      assert(result.out.includes('preflight sentinel'), 'preflight did not report the browser error');
+    } finally {
+      writeSurface();
+    }
+  });
+
+  await check('preflight: a sentence about the page is a warning naming its Region; subject-UI steps are not', async () => {
+    try {
+      writeSurface({ extra:`<section atl-key="intro" atl-label="Intro"><p>Six decisions, most dangerous first. Reads switch region by region.</p>
+        <p data-subject-ui>Select any sentence, then press Thread.</p></section>` });
+      const { status, out } = preflight();
+      assert(status === 0 && out.includes('WARN PROSE: 1 sentence') && !out.includes('FAIL PROSE'), `preflight: ${status} ${out.slice(0, 400)}`);
+      assert(out.includes('"Six decisions, most dangerous first." (Region v/intro;'), 'the offending sentence and its Region are not listed');
+      assert(out.includes('Repair:') && !out.includes('Reads switch') && !out.includes('Select any'), 'wrong sentences listed or no repair text');
+    } finally {
+      writeSurface();
+    }
+  });
+
+  // ---- resilience ----
   await check('resilience: a malformed request body is rejected without killing the server', async () => {
     const bad = await api('/api/propose', { region:'', question:'', options:[] });
     eq(bad.status, 400, 'status for a malformed body');
@@ -554,6 +802,7 @@ try {
   });
 
   await check('resilience: the page says so when the server goes away, and recovers', async () => {
+    await reload(1200);
     await stopServer();
     await sleep(4200);                                  // the poll loop backs off for 3s before retrying
     eq(probe(`JSON.stringify(document.documentElement.hasAttribute('data-atl-offline'))`), true, 'no offline state while the server was down');
@@ -561,33 +810,6 @@ try {
     await waitForServer(base);
     await sleep(4200);
     eq(probe(`JSON.stringify(document.documentElement.hasAttribute('data-atl-offline'))`), false, 'offline state stuck after the server returned');
-  });
-
-  await check('preflight: browser errors fail the handoff gate', async () => {
-    try {
-      writeSurface('alpha body v3', `<script>setTimeout(()=>{throw new Error('preflight sentinel')},0)</script>`);
-      const result = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'],
-        { encoding:'utf8', timeout:120000 });
-      assert(result.status === 1, `preflight exited ${result.status}`);
-      assert(`${result.stdout}\n${result.stderr}`.includes('preflight sentinel'), 'preflight did not report the browser error');
-    } finally {
-      writeSurface('alpha body v3');
-    }
-  });
-
-  await check('preflight: a sentence about the page fails the prose gate; subject-UI steps do not', async () => {
-    try {
-      writeSurface('alpha body v3', `<atelier-region key="intro" label="Intro"><p>Six decisions, most dangerous first. Reads switch region by region.</p>
-        <p data-subject-ui>Select any sentence, then press Thread.</p></atelier-region>`);
-      const result = spawnSync(process.execPath, [path.join(HERE, 'preflight.mjs'), '--url', base, '--skip-poller'],
-        { encoding:'utf8', timeout:120000 });
-      const out = `${result.stdout}\n${result.stderr}`;
-      assert(result.status === 1 && out.includes('FAIL PROSE: 1 sentence'), `preflight: ${result.status} ${out.slice(0, 400)}`);
-      assert(out.includes('"Six decisions, most dangerous first." (Region intro;'), 'the offending sentence and its Region are not listed');
-      assert(out.includes('Repair:') && !out.includes('Reads switch') && !out.includes('Select any'), 'wrong sentences listed or no repair text');
-    } finally {
-      writeSurface('alpha body v3');
-    }
   });
 
 } finally {
