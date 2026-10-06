@@ -135,8 +135,6 @@ const BAD = [
   ['compare with one side', 'BLOCKS', 'needs before= and after=', page('<section atl-key="r"><atelier-compare before="/a.png"></atelier-compare></section>')],
   ['misspelt block', 'BLOCKS', '<atelier-diagram>: unknown element', page('<section atl-key="r"><atelier-diagram></atelier-diagram></section>')],
   ['claim without its sentence', 'BLOCKS', 'first child must be a <p>', page('<atelier-claims><section atl-key="c"><h3>Kernel</h3></section></atelier-claims>')],
-  ['six claims under one parent', 'BLOCKS', '6 claims under one parent', page(`<atelier-claims>${[1, 2, 3, 4, 5, 6].map(i => `<section atl-key="c${i}"><p>Claim ${i} holds.</p></section>`).join('')}</atelier-claims>`)],
-  ['four claim levels', 'BLOCKS', 'deeper than 3 levels', page('<atelier-claims><section atl-key="a"><p>A holds.</p><section atl-key="b"><p>B holds.</p><section atl-key="c"><p>C holds.</p><section atl-key="d"><p>D holds.</p></section></section></section></section></atelier-claims>')],
   ['kernel loaded as a classic script', 'KIT_TAGS', '<script type="module" src="/atelier.mjs"> is missing',
     page('<section atl-key="r"><p>x</p></section>').replace('<script type="module" src="/atelier.mjs">', '<script src="/atelier.mjs">')],
   ['kernel CSS linked without rel=stylesheet', 'KIT_TAGS', '<link rel="stylesheet" href="/atelier.css"> is missing',
@@ -146,8 +144,6 @@ const BAD = [
   ['decision with one option', 'BLOCKS', 'needs at least two options', page('<section atl-key="r"><atelier-decision><script type="text/plain">? Go?\n* Yes</script></atelier-decision></section>')],
   ['flow branch in parallel with nothing', 'BLOCKS', 'runs in parallel with nothing', page('<section atl-key="r"><atelier-flow><script type="text/plain">S1: a\n  || Gate: b</script></atelier-flow></section>')],
   ['tabs with one tab', 'BLOCKS', 'needs at least two child atl-key Regions as tabs', page('<section atl-key="r"><atelier-tabs><section atl-key="a"><p>x</p></section></atelier-tabs></section>')],
-  ['option context in a table below the decision', 'DECISION_CONTEXT', '<table> right after the decision',
-    page('<section atl-key="r"><atelier-decision><script type="text/plain">? Go?\n* A · yes\n- B · no</script></atelier-decision><table><tr><th>A</th><td>keeps undo</td></tr></table></section>')],
   ['German page under lang="en"', 'LANG', 'the page reads German',
     page('<section atl-key="r"><p>Die Karte zeigt nicht nur die Stufen, sondern auch die Prüfungen, und wir sehen, dass die meisten Durchfälle bei den echten Fotos liegen. Das ist für die nächste Runde wichtig, weil es auch im Schnitt noch zu lange dauert.</p></section>')],
   ['English page under lang="de"', 'LANG', 'the page reads English',
@@ -157,8 +153,10 @@ const BAD = [
   ['blocks without the blocks module', 'KIT_TAGS', 'without <script type="module" src="/atelier-blocks.mjs">',
     page('<section atl-key="r"><atelier-compare before="/a.png" after="/b.png"></atelier-compare></section>').replace('<script type="module" src="/atelier-blocks.mjs"></script>', '')],
 ];
-// Prose that may describe the page is a warning, never a failure (ADR 0006).
+// Heuristics warn, never fail: page-describing prose (ADR 0006), material after a decision.
 const WARN = [
+  ['option context in a table below the decision', 'DECISION_CONTEXT', '<table> right after the decision',
+    page('<section atl-key="r"><atelier-decision><script type="text/plain">? Go?\n* A · yes\n- B · no</script></atelier-decision><table><tr><th>A</th><td>keeps undo</td></tr></table></section>')],
   ['page-describing prose', 'PROSE', '"Six decisions, most dangerous first." (Region r/intro;', page('<section atl-key="r"><section atl-key="intro"><p>Six decisions, most dangerous first. Reads switch region by region.</p><p data-subject-ui>Select any sentence, then press Thread.</p></section></section>')],
   ['meta sentence in a block caption', 'PROSE', 'Green boxes are gates', page('<section atl-key="r"><atelier-mock caption="Green boxes are gates." alt="A form."><template>x</template></atelier-mock></section>')],
 ];
@@ -167,7 +165,6 @@ const CLEAN_TEMPLATE = page('<section atl-key="r"><p>x</p><template><atelier-hos
 // A German page under lang="de" is clean, and draws its findings' labels in German.
 const CLEAN_DE = page(`<section atl-key="r"><p>Die Karte zeigt nicht nur die Stufen, sondern auch die Prüfungen, und wir sehen, dass die meisten Durchfälle bei den echten Fotos liegen.</p>
   <atelier-findings><script type="text/plain">disliked: Das Video ist viel zu klein, und es läuft neben einem zweiten, das niemand vergleicht.</script></atelier-findings></section>`).replace('<html>', '<html lang="de">');
-const LONG = page(`<section atl-key="r"><p>${'Every write lands in both indexes for two weeks before reads move. '.repeat(13)}</p></section>`);
 const BAD_STATE = [
   ['Proposal without a suggested option', 'PROPOSALS', 'p9 in plan/a', { ...STATE, proposals: { ...STATE.proposals, p9: { id: 'p9', region: 'plan/a', options: ['A', 'B'], suggested: 2 } } }],
   ['anchor quote no longer in the source', 'ANCHORS', 'quote "brown fox" is gone', { ...STATE, threads: { ...STATE.threads, 'plan/a': [{ id: 'c1', text: 'x', anchor: { region: 'plan/a', quote: 'brown fox' } }] } }],
@@ -188,6 +185,12 @@ const gates = r => r.failures.map(f => f.gate);
   const r = await lintSurface(CLEAN_TEMPLATE);
   if (r.failures.length) { failed++; console.log(`TEMPLATE PAYLOAD COUNTED  ${JSON.stringify(r.failures)}`); }
 }
+// A wide or deep claim tree is content, not a defect: no limit makes the author cut claims.
+{
+  const deep = '<section atl-key="a"><p>A holds.</p><section atl-key="b"><p>B holds.</p><section atl-key="c"><p>C holds.</p><section atl-key="d"><p>D holds.</p></section></section></section></section>';
+  const r = await lintSurface(page(`<atelier-claims>${deep}${[1, 2, 3, 4, 5].map(i => `<section atl-key="w${i}"><p>Claim ${i} holds.</p></section>`).join('')}</atelier-claims>`));
+  if (r.failures.length) { failed++; console.log(`CLAIM LIMIT STILL ENFORCED  ${JSON.stringify(r.failures)}`); }
+}
 // A quote that may sit in text no static reader can project (a drawn diagram) is UNMEASURED, not gone.
 {
   const state = { ...STATE, proposals: { ...STATE.proposals, p8: { id: 'p8', region: 'plan/flow', options: ['A'], suggested: 0, anchor: { region: 'plan/flow', quote: 'Feature flag drawn' } } } };
@@ -199,8 +202,7 @@ const gates = r => r.failures.map(f => f.gate);
 {
   const r = await lintSurface(CLEAN_DE, { state: { proposals: {}, threads: { r: [{ id: 'g1', text: 'x', anchor: { region: 'r', quote: 'Stört Das Video' } }] }, sent: { g1: 'ts' } } });
   if (r.failures.length) { failed++; console.log(`CLEAN GERMAN FAILED  ${JSON.stringify(r.failures)}`); }
-  const w = (await lintSurface(LONG)).warnings.find(x => x.gate === 'WORDS'), cleanWarn = (await lintSurface(CLEAN)).warnings;
-  if (!w?.message.includes('r: 156 words — over the 120-word budget') || (await lintSurface(LONG)).failures.length) { failed++; console.log(`WORDS NOT WARNED  ${JSON.stringify(w)}`); }
+  const cleanWarn = (await lintSurface(CLEAN)).warnings;
   if (cleanWarn.length) { failed++; console.log(`CLEAN WARNED  ${JSON.stringify(cleanWarn)}`); }
 }
 // An open item no host claims is out of reach; with a catch-all, everything lands somewhere.

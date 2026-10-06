@@ -24,7 +24,7 @@ and `atelier/docs/judging-2026-10-06-verdicts.json`.
 | 2026-10-06 | Content patterns and standard renderers ship as building blocks in the kit — components, not copyable snippets — so the agent writes a short body instead of markup and renderer code (token efficiency), despite a bigger kit. | Decision relayed by the lead session; no verbatim quote recorded. | `assets/atelier-blocks.{mjs,css}`: claims, mermaid, chart, file, video, compare, mock, findings, decision, flow, timeline, tabs. Content, not protocol. |
 | 2026-10-06 | A decision records whether its options were seen: kept as proposed, changed, opened but undecided, or not opened. A default nobody opened is not agreement. | Decision relayed by the lead session. | `suggested`, `openedAt`, `/api/proposal-opened`, `GET /api/state` `decisions`, `poll.sh --decisions`. Opened means the options reached the screen; a failed report is retried until acknowledged. |
 | 2026-10-06 | Offer a catalog of content shapes, chosen per problem; none is mandatory or the default for every Surface. | "we should offer different content shapes depending on the problem" | `references/composition.md#content-shapes`. |
-| 2026-10-06 | No variant wins alone; traits are combined (B's look, tabs and a foldable side nav, inline labels, icons, German copy under `lang="de"`, large videos one at a time, decision context inside the option, a Thread panel that folds and reserves no width). | Marks on the live variants, e.g. "Die tabs statt alles als langer text" (B), "Viel zu viel Text" (C); the owner confirmed the consolidated verdict as the spec. | Kit defaults in `atelier.css`, `atelier.mjs`, the blocks; lint gates DECISION_CONTEXT, LANG, VIDEO, WORDS (warning). |
+| 2026-10-06 | No variant wins alone; traits are combined (B's look, tabs and a foldable side nav, inline labels, icons, German copy under `lang="de"`, large videos one at a time, decision context inside the option, a Thread panel that folds and reserves no width). | Marks on the live variants, e.g. "Die tabs statt alles als langer text" (B), "Viel zu viel Text" (C); the owner confirmed the consolidated verdict as the spec. | Kit defaults in `atelier.css`, `atelier.mjs`, the blocks; lint gates LANG, VIDEO, DECISION_CONTEXT (warning). |
 | 2026-10-01 | Atelier is a kernel plus interaction interfaces that extend HTML; ADR 0006 stays the base. | "Atelier should just provide the kernel and interaction interfaces … like htmx extends HTML" | Every item above is expressed in 0006's terms: hosts instead of a margin, `collapsible` instead of a margin fold, HOSTS instead of a frame gate. |
 
 ## Admission check (docs/principles.md)
@@ -48,7 +48,7 @@ and `atelier/docs/judging-2026-10-06-verdicts.json`.
 - Preflight no longer sees browser errors, kernel warnings, overflow, layout, real rendering, or
   whether `reveal()` reaches an item. The lint reports what it could not see as `UNMEASURED`, never as
   a pass. The kernel's in-page warnings still show the human a doubled host or an unknown Ready key.
-- PROSE stays a warning, as ADR 0006 decided; WORDS is a warning; the other verdict rules fail.
+- PROSE and DECISION_CONTEXT are warnings; LANG and VIDEO fail.
 - Kernel chrome is no longer English-only: labels follow `<html lang>` (German or English).
   Warnings about authoring defects stay English.
 - A copied kit has four browser files; KIT drift covers all of them.

@@ -236,21 +236,20 @@ export async function lintSurface(html, { state = null, readFile = async () => n
     const err = BLOCKS[el.tag](el, sourceOf(el));
     if (err) blockErrors.push(`${where}: ${err}`);
   }
-  // A claim tree: each claim opens with its sentence, at most 5 children and 3 levels.
+  // A claim tree: each claim opens with its sentence. No count or depth limit: a limit makes the
+  // author cut content (2026-10-06 trial: length limits deleted information instead of folding it).
   for (const tree of all.filter(e => e.tag === 'atelier-claims')) {
     const kids = el => elements(el).filter(r => isRegion(r) && closest(r, e => isRegion(e) || e.tag === 'atelier-claims') === el);
-    const walk = (el, depth) => {
+    const walk = el => {
       const children = kids(el);
-      if (children.length > 5) blockErrors.push(`line ${el.line}: ${children.length} claims under one parent; at most 5`);
       for (const c of children) {
-        if (depth > 3) { blockErrors.push(`line ${c.line} claim ${regionKey(c)}: deeper than 3 levels`); continue; }
         const first = c.children.find(n => n.tag !== '#text' || n.text.trim());
         if (first?.tag !== 'p') blockErrors.push(`line ${c.line} claim ${regionKey(c)}: its first child must be a <p> holding the claim`);
-        walk(c, depth + 1);
+        walk(c);
       }
     };
     if (!kids(tree).length) blockErrors.push(`line ${tree.line} <atelier-claims>: holds no atl-key claims`);
-    walk(tree, 1);
+    walk(tree);
   }
   const blockCount = all.filter(e => BLOCKS[e.tag]).length;
   if (blockErrors.length) fail('BLOCKS', blockErrors.join('\n  '));
@@ -267,12 +266,13 @@ export async function lintSurface(html, { state = null, readFile = async () => n
 
   // Decision context belongs inside each option (2026-10-06, variant D: the options' table sat in a
   // separate element below the question, so the human compared answers without their reasons).
+  // A warning: a table after a decision is often legitimate material of its own.
   const after = [];
   for (const d of all.filter(e => e.tag === 'atelier-decision')) {
     const sibs = d.parent.children.filter(c => c.tag !== '#text' && c.tag !== 'script'), next = sibs[sibs.indexOf(d) + 1];
     if (next && ['table', 'dl', 'details', 'ul', 'ol'].includes(next.tag)) after.push(`line ${next.line} <${next.tag}> right after the decision at line ${d.line}`);
   }
-  if (after.length) fail('DECISION_CONTEXT', `${after.join('; ')}: an option's reasons go in its own indented lines inside <atelier-decision>, not in an element below it`);
+  if (after.length) warning('DECISION_CONTEXT', `${after.join('; ')}: an option's reasons go in its own indented lines inside <atelier-decision>, not in an element below it`);
   else pass('DECISION_CONTEXT', `${all.filter(e => e.tag === 'atelier-decision').length} decision(s), none followed by a separate context element`);
 
   // Kernel labels follow <html lang> (2026-10-06: German pages carried English chrome and read
@@ -298,11 +298,6 @@ export async function lintSurface(html, { state = null, readFile = async () => n
   if (crowded.length) fail('VIDEO', `videos visible at once without a comparison: ${crowded.join(', ')}; make them sibling <atelier-video>s (one at a time) or mark a real comparison with compare`);
   else pass('VIDEO', 'no Region shows several videos at once unless marked compare');
 
-  // Word budget: a warning, not a failure (2026-10-06, variant C: "far too much text").
-  const perRegion = new Map();
-  for (const p of prose) perRegion.set(p.region, (perRegion.get(p.region) || 0) + (p.text.match(/\p{L}[\p{L}\p{N}'’-]*/gu) || []).length);
-  const long = [...perRegion].filter(([, n]) => n > WORD_BUDGET);
-  if (long.length) warning('WORDS', `${long.map(([r, n]) => `${r}: ${n} words`).join(', ')} — over the ${WORD_BUDGET}-word budget per Region; keep only what changes the decision`);
 
   if (!state) return { failures, passes, unmeasured, warnings };
 
@@ -381,9 +376,6 @@ export async function lintSurface(html, { state = null, readFile = async () => n
   return { failures, passes, unmeasured, warnings };
 }
 
-// A Region's own prose, in words, before WORDS warns. 120 is about half a screen of reading at
-// 1440px; it is a budget, not a rule, so going over warns and never fails.
-export const WORD_BUDGET = 120;
 const DE_WORDS = new Set('der die das und ist nicht mit für auf ein eine einen dem den des zu von wir ich du sie es auch noch nur aber oder wenn weil dass wird werden sind hat haben im ins zum zur bei nach über schon'.split(' '));
 const EN_WORDS = new Set('the and is not with for on a to of we you it this that are were be has have at by from but or if because only also which'.split(' '));
 

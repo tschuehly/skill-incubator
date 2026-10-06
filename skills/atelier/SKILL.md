@@ -115,11 +115,11 @@ without the transcript. The first browser load needs no Ready.
 
    It fails silent handoff defects without a browser — store, poller, kit drift, and a static lint
    of the page source: `atl-key` Regions, Activity and hosts, building-block bodies,
-   page-describing prose, the verdict rules (decision context inside the option, `<html lang>`
-   matching the text, one video at a time), suggested options, open items no host would show, and
+   page-describing prose, the verdict rules (`<html lang>` matching the text, one video at a
+   time), suggested options, open items no host would show, and
    anchors whose quote is gone. Rewrite or delete each sentence `WARN PROSE` names; steps for an
-   interface under review go in an element marked `data-subject-ui`. `WARN WORDS` flags a Region
-   over about 120 words: keep only what changes the decision. `UNMEASURED` means the lint could not
+   interface under review go in an element marked `data-subject-ui`. `WARN DECISION_CONTEXT` flags
+   material right after a decision: move each option's reasons into the option. `UNMEASURED` means the lint could not
    see (a drawn diagram, a diff) — not a pass. `--lint-only <file>` lints a page with no server.
    `--skip-poller` and `--allow-kit-drift` are never a handoff.
 

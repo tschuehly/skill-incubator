@@ -74,7 +74,7 @@ The material decides what the human looks at. Before writing prose, ask what sho
 | A question with real alternatives | `<atelier-decision>`, each option's context inside it |
 | A pipeline the human drills into, stage by stage | `<atelier-flow>`: overview → stage → gate, beside its explanation |
 | How one item went through a process | `<atelier-timeline>`: each step with screenshots and reviewers' comments |
-| A flow, sequence, or state machine to read whole | `<atelier-mermaid>`, as a [flow explainer](#flow-explainer) |
+| A small fixed sequence or state machine to read whole | `<atelier-mermaid>` |
 | Options judged on shared criteria | A table, one row per option |
 | Numbers, or settings × values | `<atelier-chart>` (Vega-Lite), or a heatmap |
 | A graph whose layout matters, or whose every node carries a Thread | Graphviz, [by hand](#a-renderer-of-your-own) |
@@ -102,7 +102,9 @@ queue, media, or a comparison. Adapted from html-plan
   suggested option being the claim as written.
 - **The closed tree is the summary.** Read the top-level claims alone; they must tell the whole
   story, so write no TL;DR and no list of sections.
-- **At most 5 children and 3 levels.** The lint enforces both, and that each claim opens with its `<p>`.
+- **Group, never drop.** About 5 children per claim and 3 levels read well; when there are more,
+  group claims under a new parent instead of cutting them. The lint checks that each claim opens with
+  its `<p>`.
 
 `<atelier-claims>` numbers the claims (1, 1.2, 1.2.1) and folds each into a `<details>`; `open="1"`
 starts the first level open. Every claim is an ordinary `atl-key` Region, so it takes Threads, Proposals and
@@ -146,17 +148,19 @@ When a worker shows that a change works, the human accepts or sends back each cl
 ### Flow explainer
 
 When the human judges a pipeline or process — its stages, its gates, whether they are enough — the
-diagram carries the page.
+map carries the page (owner verdict 2026-10-06, pipeline P1).
 
-- **The diagram is on the first screen**, after at most about 60 words naming the subject, the
-  finding, and the decision. Mark each gap on its node (color, a badge). Its fallback caption stays
-  hidden once it draws. Check that every node is readable and nothing is clipped.
-- **Draw the forward route in stage order.** Stage 1 and its first gates sit at the top. Put a side
-  lane beside the stage it branches from, and draw feedback as a labelled note or a short local
-  return. Keep labels full-size and the whole route within its column at 1440px; when it will not
-  fit, split it into consecutive diagrams that link to each other.
-- **One Region per stage, one per gate inside it.** A gate's Region says what it checks, what it
-  proves, and — only where it changes the verdict — its gap, in one sentence.
+- **Map beside its explanation.** `<atelier-flow>` takes about half the screen and the selected
+  node's explanation the other half; selecting a node zooms from the whole pipeline to one stage to
+  one gate. Show which checks run in sequence and which in parallel, and mark each gap on its node.
+- **Draw the forward route in stage order.** Stage 1 and its first gates come first. A side lane
+  branches from its stage; feedback is a labelled note or a short local return.
+- **One Region per stage, one per gate inside it.** A gate's Region states what it checks, what it
+  proves, and what it does not prove, with the script or file that runs it as a link. Its full
+  evidence — exact conditions, known vacuous passes, receipts — sits in the same Region behind a
+  `<details>`, never deleted.
+- **One item through the pipeline** is an `<atelier-timeline>`: every production step with its
+  screenshots and reviewers' comments.
 - **Each finding lives at its gate** as a Proposal anchored there. A cross-stage finding gets one
   Region of its own and is named nowhere else.
 
@@ -268,8 +272,14 @@ export const LIMIT = 50;
 Every sentence is about the subject. Write the finding, not the process: current facts, the
 recommendation, and what the human must judge.
 
-- **Open on the subject.** The first screen states the subject, the current finding, its
-  consequence, and the decision the human owns, in about 60 words; the material follows directly.
+- **Open with what it's about, in plain words.** One or two everyday sentences state the subject,
+  the current finding, and the decision the human owns; the material follows directly.
+- **Less up front, nothing lost.** Each Region opens with one or two sentences the human can judge
+  from. Details, receipts, exact conditions, and file names stay in the same Region behind a
+  `<details>` or in a drill-down — never deleted to make the page shorter. Cut only repetition and
+  sentences about the page itself. *Defect:* "far too much text" (variant C) and "is that really
+  important?" on a receipts line (A) asked for less up front; a word budget instead made the
+  2026-10-06 pipeline trial drop what each gate proves.
 - **Every sentence stays true with the layout removed.** Read each sentence as plain text in a
   chat and keep only sentences about the subject. Carry the meaning in the material itself: label
   the box "Gate: lint", title the list "Unverified: paste, drag-and-drop", name the rule you mean. A
@@ -294,22 +304,18 @@ recommendation, and what the human must judge.
 Each rule names the defect the owner marked on a live variant (private evidence:
 atelier/docs/variant-verdict-20261006.md).
 
-- **Tabs over one long page.** Put independent questions in `<atelier-tabs>`, one each. *Source:*
+- **Tabs over one long page.** Put *independent* questions in `<atelier-tabs>`, one each; a connected
+  flow or argument stays on one page. *Source:*
   variant B's tabs were marked "the tabs instead of everything as long text"; the single long pages
   of A and C drew "far too much text".
 - **Decision context inside the option.** Each option carries its own reasons; nothing about an
   option sits in a separate element below the question. *Defect:* variant D put the options' table
-  under the decision, so the answer and its reasons were apart. The lint fails a table, list or
+  under the decision, so the answer and its reasons were apart. The lint warns on a table, list or
   `<details>` right after an `<atelier-decision>` (`DECISION_CONTEXT`); the kernel's Proposal card
   keeps each option's explanation inside the option.
-- **Only what changes the decision.** Cut evidence lines and receipts that would not move the
-  answer; keep each Region under about 120 words of prose. *Defect:* "far too much text" (C) and "is
-  that really important?" on a receipts line (A). The lint warns over the budget (`WORDS`).
 - **Write the page language natively.** Write German as German, not translated English, and set
   `<html lang>` to it so the kernel's labels match. *Defect:* German that "sounds odd" (A, B). The
   lint fails a German page under `lang="en"` and the reverse (`LANG`).
-- **Open with a plain "what it's about".** One or two sentences in everyday words before any
-  evidence. *Source:* C opened with "what it's about" in plain words and was marked "good explanation".
 
 - **Icons, compact and horizontal.** Kernel and block actions are icons whose label is the tooltip
   and accessible name; labels sit inline before their text. *Defect:* text buttons ("Explain") cost
