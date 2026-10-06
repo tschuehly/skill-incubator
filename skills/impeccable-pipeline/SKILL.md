@@ -19,7 +19,8 @@ the commands; they never replace them.
 
 1. Resolve the Impeccable skill root: prefer the target repository's
    `.agents/skills/impeccable/`, then `~/.agents/skills/impeccable/`, then
-   `~/.claude/skills/impeccable/`.
+   `~/.claude/skills/impeccable/`, then the vendored copy at `../../vendored/pbakaus/impeccable/`
+   relative to this skill's directory.
 2. Read its `SKILL.md` completely.
 3. Run its context script once for the exact target. Keep the working directory at the target
    repository and follow the resulting directives.
