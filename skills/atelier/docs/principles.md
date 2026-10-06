@@ -65,7 +65,7 @@ only when Principle 4 admits it.
 
 ## 6. Hold the direction
 
-*Proposed 2026-10-06, awaiting the owner's approval.*
+*Approved by the owner 2026-10-06.*
 
 A direction the owner decided stays decided until the owner decides otherwise. Atelier went in circles when
 it did not: an 18-commit rewrite to the margin model on 09-25 was later reversed; the 10-01 kernel
@@ -89,8 +89,7 @@ Before changing Atelier, answer:
 - Which session steps are added and removed?
 - Why are HTML, native behavior, or a local Surface fix insufficient?
 - What bounded check will prove the change without overstating its result?
-- Which ADR does this follow or supersede? *(Proposed 2026-10-06 with Principle 6, awaiting
-  the owner's approval.)*
+- Which ADR does this follow or supersede?
 
 A missing answer means the change does not belong in Atelier.
 
