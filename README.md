@@ -85,3 +85,4 @@ Workbench.
 | `atelier` | removed 2026-10-06 | Removed by the owner to be rebuilt from scratch as a component framework native to Pi Workbench. Last version: `skills/atelier/` at 291a315. |
 | `write-for-humans` | incubating | Makes documentation and other human-facing prose clear while preserving technical meaning, conditions, and uncertainty. |
 | `retro` | incubating | Human-invoked retrospective on one Pi session: finds changes to the agent environment (pointers, checks, standards, steering, tools, information access, skills), each with evidence. Adapted from mattpocock/skills `retro`. |
+| `impeccable-pipeline` | incubating | User-invoked sequential runner for the Impeccable commands critique → distill → clarify → adapt → harden → polish → audit on one target. Not yet evaluated end to end. |
