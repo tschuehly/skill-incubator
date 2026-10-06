@@ -180,10 +180,10 @@
     "pbakaus/impeccable": {
       "source": "pbakaus/impeccable",
       "sourceUrl": "https://github.com/pbakaus/impeccable.git",
-      "sourceRevision": "a075d89bdbe60b2b00220cb0527fb5091e84215e",
+      "sourceRevision": "508d7e8955de3b3caf2d8676e85206723d41a887",
       "skillPath": ".agents/skills/impeccable/SKILL.md",
-      "vendoredFromHash": "34dba77eda1ba50d2ab0386b3ecd7b85a1160e29",
-      "upstreamUpdatedAt": "2026-08-05T15:28:17-07:00"
+      "vendoredFromHash": "08f8aeb10beb9b8f70f90660f0a1634551304926",
+      "upstreamUpdatedAt": "2026-10-02T02:34:09Z"
     },
     "shadcn/improve": {
       "source": "shadcn/improve",
