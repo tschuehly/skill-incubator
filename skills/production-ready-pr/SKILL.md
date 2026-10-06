@@ -125,12 +125,17 @@ system outcome without requiring codebase context. Use these sections in order:
 
 1. **Goal** — the concrete problem, desired behavior, and originating issue or specification.
 2. **What changed** — the implementation in plain language; name code symbols only when needed.
+   When the shape takes a paragraph to explain, show the smallest visual instead: pseudocode, a
+   call tree, a file tree with +/- markers, or a Mermaid diagram.
 3. **Result** — the observable behavior, with a concrete example when it clarifies the outcome.
 4. **Boundaries** — intentionally unsupported behavior, material risks, compatibility notes, and
-   accepted limitations or decisions.
+   accepted limitations or decisions. Open with **Door:** one-way (hard to undo after merge:
+   migrations, published APIs, deleted data) or two-way, and **Blast radius:** one word (none,
+   module, service, users).
 5. **Verification** — the commands, checks, and results that support the claims. Quote a numeric
    result only from successful output that can be cited; otherwise name the command and its pass or
-   fail result.
+   fail result. For a behavioral or visual change, pair **Before** and **After** from real output
+   or screenshots.
 
 For a stacked PR, explain this layer's distinct outcome and its dependency on adjacent layers.
 
