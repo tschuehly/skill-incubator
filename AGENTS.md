@@ -4,10 +4,9 @@ This repository is the experimental laboratory for skills and harness capabiliti
 graduated into Pi Workbench. Keep an incubating capability's source, documentation, plans, and
 evidence here until the owner explicitly promotes or retires it.
 
-Atelier is a temporary standalone review Surface while the native Pi Workbench UI is incomplete.
-Improve and validate Atelier under `skills/atelier/`; transfer proven interaction lessons to Pi
-Workbench separately. Do not move or register Atelier in Pi Workbench as part of its repair.
-Before changing Atelier, read `skills/atelier/docs/principles.md` and `skills/atelier/docs/adr/`.
+Atelier was removed on 2026-10-06 (owner decision): it is being rebuilt from scratch as a
+component framework native to Pi Workbench. Its history, principles and ADRs remain at
+`skills/atelier/` in commit 291a315; read them there when they inform the rebuild.
 
 For creating, reviewing, or editing agent-facing documents, use
 `~/.agents/skills/writing-for-agents/SKILL.md`; load its `SKILL-MECHANICS.md` branch
