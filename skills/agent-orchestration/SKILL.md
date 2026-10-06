@@ -5,7 +5,7 @@ description: >-
   surface while keeping the lead thread thin. Use when work spans multiple feedback rounds,
   must survive compaction or session boundaries, or combines an agent-owned task with a
   delegated surface, reviewer, researcher, or advisor. Defines agent interaction and
-  continuity; pair with the active runtime's model-orchestration capability for model selection and atelier for review surfaces.
+  continuity; pair with the active runtime's model-orchestration capability for model selection.
 ---
 
 # Agent Orchestration
@@ -109,8 +109,5 @@ mapping.
 
 ## Composition boundaries
 
-- Use `/atelier` when the human needs a task-shaped HTML interaction surface. Follow its copied
-  kernel, stable-key, protocol, and supported poller contracts; do not duplicate its API or
-  client mechanics here.
 - Keep domain semantics in the composing skill. Interview cadence, review criteria,
   ratification rules, and completion gates do not belong in this base protocol.
