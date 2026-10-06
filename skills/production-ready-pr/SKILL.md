@@ -45,8 +45,11 @@ request for the current branch; never create a duplicate. If the branch belongs 
 stack, load `gh-stack` and preserve the stack's branch and PR boundaries. Treat the stack as one
 delivery unit: one review contract over the combined diff from the bottom layer's merge-base to the
 top layer, and one full gate on the top layer. Fix each finding in the layer that owns it and run
-that layer's affected checks. Record each layer's branch, PR, base, and head SHA, and apply
-sections 4–7 to every layer's PR; the stack is decision-ready only when every layer is.
+that layer's affected checks. Record each layer's branch, PR, base, and head SHA, and bind the
+shared review contract and top-layer full gate to that recorded stack revision: while it is
+unchanged, they satisfy every layer's review and full-gate requirements. Each layer still needs its
+own affected checks and remote evidence. Apply sections 4–7 to every layer's PR; the stack is
+decision-ready only when every layer is.
 
 Record the current head SHA. Every check and review below applies to a named SHA; a push invalidates
 remote evidence for the previous SHA.
@@ -112,7 +115,9 @@ re-reviews**: rerun only the lenses that reported material findings, give each i
 and the diff since the SHA it reviewed, and ask it to confirm each fix and check the touched code
 for regressions. The **review contract** for a SHA is the latest full round plus every later
 passing delta; lenses that passed earlier carry forward, with their reviewed SHA recorded as
-evidence. A **scope-expanding** change, one that adds a code path, schema, permission, or behavior
+evidence, once every change since the full round has passing delta coverage. A change that no
+lens flagged, such as a fix for a gate failure, gets its delta re-review from the lead at `low`,
+otherwise from one fresh cross-family readiness reviewer. A **scope-expanding** change, one that adds a code path, schema, permission, or behavior
 beyond the finding it fixes, starts a new full round. A rebase or restack keeps the review contract
 when `git range-diff` shows unchanged patches. A hand-resolved conflict always gets a delta
 re-review of the resolution, even when every lens passed: by the lead at `low`, otherwise by one
