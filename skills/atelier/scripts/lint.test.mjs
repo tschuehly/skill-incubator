@@ -64,12 +64,14 @@ const CLEAN = page(`<section atl-key="plan">
         It was tried twice.
     </script></atelier-decision>
     <p>Writes stay dual for two weeks.</p>
-    <atelier-flow><script type="text/plain">
-      S0 Backlog: Concepts come from the variety matrix.
-      S5 Verify: The final checks run on the master.
-        Sound to the end: 101 pass.
-        || Freeze: 87 pass, 14 fail.
-    </script></atelier-flow>
+    <atelier-flow>
+      <section atl-key="s0" atl-label="S0 Backlog"><p>Concepts come from the variety matrix.</p></section>
+      <section atl-key="s5" atl-label="S5 Verify"><p>The final checks run on the master.</p>
+        <section atl-key="sound" atl-label="Sound"><p>Sound runs to the end: 101 pass.</p></section>
+        <section atl-key="freeze" atl-label="Freeze" parallel><p>Freeze: 87 pass, 14 fail.</p>
+          <details><summary>Receipts</summary><p>The 14 failures are all on real photos.</p></details></section>
+      </section>
+    </atelier-flow>
     <atelier-timeline><script type="text/plain">
       Round 0 · first master
         ![The hook frame at 0:03](/frames/r0.png)
@@ -142,7 +144,8 @@ const BAD = [
   ['the only Region sits in an inert <template>', 'REGIONS', 'no element carries atl-key', page('<template><section atl-key="r"><p>x</p></section></template><p>Nothing addressable.</p>')],
   ['finding of an unknown kind', 'BLOCKS', 'a finding is "liked|disliked|fact|gap: text"', page('<section atl-key="r"><atelier-findings><script type="text/plain">liked: x\nmaybe: y</script></atelier-findings></section>')],
   ['decision with one option', 'BLOCKS', 'needs at least two options', page('<section atl-key="r"><atelier-decision><script type="text/plain">? Go?\n* Yes</script></atelier-decision></section>')],
-  ['flow branch in parallel with nothing', 'BLOCKS', 'runs in parallel with nothing', page('<section atl-key="r"><atelier-flow><script type="text/plain">S1: a\n  || Gate: b</script></atelier-flow></section>')],
+  ['flow step in parallel with nothing', 'BLOCKS', 'runs in parallel with nothing', page('<section atl-key="r"><atelier-flow><section atl-key="a" parallel><p>A runs.</p></section></atelier-flow></section>')],
+  ['flow holding a step that is not a Region', 'BLOCKS', 'holds <div> outside a step', page('<section atl-key="r"><atelier-flow><section atl-key="a"><p>A runs.</p></section><div>B runs.</div></atelier-flow></section>')],
   ['tabs with one tab', 'BLOCKS', 'needs at least two child atl-key Regions as tabs', page('<section atl-key="r"><atelier-tabs><section atl-key="a"><p>x</p></section></atelier-tabs></section>')],
   ['German page under lang="en"', 'LANG', 'the page reads German',
     page('<section atl-key="r"><p>Die Karte zeigt nicht nur die Stufen, sondern auch die Prüfungen, und wir sehen, dass die meisten Durchfälle bei den echten Fotos liegen. Das ist für die nächste Runde wichtig, weil es auch im Schnitt noch zu lange dauert.</p></section>')],

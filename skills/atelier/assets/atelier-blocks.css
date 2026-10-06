@@ -79,12 +79,15 @@ atelier-video[compare] { display: inline-block; width: calc(50% - 8px); vertical
 .atl-b-con::before { content: "−"; color: var(--atl-bad, #9a2f22); }
 .atl-b-note::before { content: "·"; color: var(--atl-muted, #59665e); }
 
-/* flow: half map, half explanation; one level at a time; parallel steps stack */
-.atl-b-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 16px; align-items: start; }
-.atl-b-flow-map { min-width: 0; }
-.atl-b-crumbs { font-size: 13px; margin-bottom: 8px; }
+/* flow: map beside its steps; one level at a time; parallel steps stack; narrow screens stack */
+atelier-flow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); column-gap: 20px; align-items: start; }
+atelier-flow > .atl-b-flow-map { grid-column: 1; grid-row: 1 / span 100; position: sticky; top: 56px; min-width: 0; }
+atelier-flow > [atl-key] { grid-column: 2; min-width: 0; }
+atelier-flow .atl-b-sel { outline: 2px solid var(--atl-accent, #305b45); outline-offset: 4px; border-radius: 4px; }
+@media (max-width: 900px) { atelier-flow { display: block; } atelier-flow > .atl-b-flow-map { position: static; } }
+.atl-b-crumbs { font-size: 13px; margin: 0 0 8px; }
 .atl-b-crumbs button { border: 0; background: none; padding: 0; color: var(--atl-accent, #305b45); font: inherit; cursor: pointer; text-decoration: underline; }
-.atl-b-lane { display: flex; gap: 22px; align-items: center; margin: 0; padding: 4px 4px 12px; list-style: none; overflow-x: auto; }
+.atl-b-lane { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; margin: 0; padding: 4px 4px 12px; list-style: none; }
 .atl-b-step { position: relative; display: grid; gap: 6px; flex: none; }
 .atl-b-step + .atl-b-step::before { content: "→"; position: absolute; left: -18px; top: 50%; transform: translateY(-50%); color: var(--atl-muted, #59665e); }
 .atl-b-step.is-parallel { padding: 18px 8px 8px; border: 1px dashed var(--atl-line, #d8ded4); border-radius: 8px; }
@@ -93,12 +96,6 @@ atelier-video[compare] { display: inline-block; width: calc(50% - 8px); vertical
   color: inherit; font: 600 13px/1.3 system-ui, sans-serif; text-align: left; cursor: pointer; }
 .atl-b-node small { font-weight: 400; color: var(--atl-muted, #59665e); }
 .atl-b-node.is-sel { border-color: var(--atl-accent, #305b45); background: var(--atl-accent-soft, #e4ede6); }
-.atl-b-flow-pane { min-width: 0; max-height: 70vh; overflow: auto; border-left: 1px solid var(--atl-line, #d8ded4); padding-left: 14px; }
-.atl-b-fnode { margin: 2px 0; }
-.atl-b-fnode > summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
-.atl-b-fnode > :not(summary) { margin-left: 16px; }
-.atl-b-fnode.is-sel > summary { color: var(--atl-accent, #305b45); }
-.atl-b-fnode p { margin: 2px 0 6px; }
 
 /* timeline: steps side by side, scrolled sideways; screenshots large in their step */
 .atl-b-timeline { display: flex; gap: 14px; margin: 0; padding: 0 0 10px; list-style: none; overflow-x: auto; scroll-snap-type: x proximity; }

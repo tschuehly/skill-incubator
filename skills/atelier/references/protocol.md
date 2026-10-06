@@ -3,7 +3,7 @@
 Everything here is what `assets/atelier.mjs` and `assets/server.mjs` implement and `assets/poll.sh`
 speaks. Extend beside it, not through it: `poll.sh`, `preflight.mjs`, `lint.mjs` and future agents
 rely on these shapes. Building blocks (`assets/atelier-blocks.mjs`) are content, not protocol; their
-syntax is in [composition.md](composition.md#building-blocks).
+syntax is in [blocks.md](blocks.md).
 
 The division of labor never moves. **You author the page:** layout, navigation, selection, counts,
 styling, phone layout. **The kernel supplies** addresses, durable state, the event loop, and the
@@ -279,46 +279,9 @@ default stands, NOT agreement) and exits.
 - **`decision-pending` and `decision-undone`** are an answer still inside its undo window. The
   agent must not act on it; `decision` follows when the window closes.
 
-## Event kinds to react to
+## Events and agent-side snippets
 
-- **`sent`** — a Thread was dispatched, its `anchor` inline. Acknowledge → triage → fix → reply.
-  With `followUp`, the human wrote again in an existing Thread. Images arrive as `attachments`
-  URLs; read the file at `<ROOT><url>`.
-- **`decision`** — final, after the undo window. `proposalId` names the Proposal; `choiceIndex`
-  the option; `custom`, when present, is the human's own wording and wins; `verdict` says `kept as
-  proposed` or `changed from the suggestion`. Act, then reply. Before acting on a batch, read
-  `poll.sh --decisions`: a Proposal `not opened; default stands` was never seen.
-- **`explain-request`** — the human asked what an option means; answer through `/api/explain`.
-- **`comment-rejected`** — an implemented Thread was judged incomplete; `msg` says why.
-- **`command`** — a human action posted with `wake:true`; `action` carries the bespoke kind.
-
-## Agent-side snippets
-
-```bash
-BASE_URL=http://127.0.0.1:<port>
-
-# acknowledge within seconds, before fixing — piggyback the lifecycle bump
-curl -s -X POST "$BASE_URL/api/reply" -H 'Content-Type: application/json' \
-  -d '{"region":"v03","id":"<commentId>","msg":"Picked up: <plan>","state":"acknowledged"}'
-
-# ask beside the exact evidence; `suggested` marks the recommended option
-curl -s -X POST "$BASE_URL/api/propose" -H 'Content-Type: application/json' \
-  -d '{"region":"v03","question":"Release v03 with its caption inside the button row?",
-       "options":["Move the caption up 40 px, then release","Release as is"],"suggested":0,
-       "anchor":{"region":"v03/safe-zone","selector":":scope > td:nth-of-type(1)"}}'
-
-# answer an explanation request (proposal id + optionIndex come from the event)
-curl -s -X POST "$BASE_URL/api/explain" -H 'Content-Type: application/json' \
-  -d '{"id":"prop-12","optionIndex":0,"text":"This option … Tradeoff: … Choose it when …"}'
-
-# tell the human something without asking for anything
-curl -s -X POST "$BASE_URL/api/update" -H 'Content-Type: application/json' \
-  -d '{"region":"v01","title":"All eight renders finished","body":"Three fail a check."}'
-
-# publish rewritten content into the open page
-curl -s -X POST "$BASE_URL/api/ready" -H 'Content-Type: application/json' \
-  -d '{"changed":["v03/safe-zone","v04"]}'
-```
+What the agent does with each event, and the `curl` calls for it: [loop.md](loop.md#event-kinds-to-react-to).
 
 ## Extending
 

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[Subject] · comparison</title>
+<!--
+  Skeleton: COMPARISON — several options judged on the same criteria (variants, tools, designs).
+  Copy it, keep the structure, replace every [bracket].
+
+    Level 1 · overview  the plain "what it's about", then the table: one row per option, one column
+                        per criterion, the recommendation marked
+    Level 2 · unit      one atl-key row per option, so a Thread or Proposal sits on that option
+    Level 3 · detail    <details> in the row's last cell: measurements, sources — never deleted
+
+  The choice is one Proposal on the table's Region with `suggested`; its options name the rows.
+  Visual options go in <atelier-compare> or sibling <atelier-video>s inside their row's detail.
+  Try it from the skill directory:
+    env PORT=4804 UI=recipes/comparison.html ROOT=. STORE=try-comparison node assets/server.mjs
+-->
+<link rel="stylesheet" href="/atelier.css">
+<link rel="stylesheet" href="/atelier-blocks.css">
+<script type="module" src="/atelier.mjs"></script>
+<script type="module" src="/atelier-blocks.mjs"></script>
+</head>
+<body>
+<header class="atl-top"><span>[Subject]</span><atelier-activity></atelier-activity></header>
+<div class="atl-page"><main>
+<section atl-key="options" atl-label="[Subject]">
+  <h1>[Which option for what purpose?]</h1>
+  <p>[Two everyday sentences: what is being chosen, the criterion that decides it, and the recommendation.]</p>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr><th>Option</th><th>[Criterion 1]</th><th>[Criterion 2]</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr atl-key="a" atl-label="A · [Option]"><th>A · [Option] (recommended)</th><td>[value]</td><td>[value]</td>
+        <td><details><summary>Evidence</summary><p>[How each value was measured, with sources.]</p></details></td></tr>
+      <tr atl-key="b" atl-label="B · [Option]"><th>B · [Option]</th><td>[value]</td><td>[value]</td>
+        <td><details><summary>Evidence</summary><p>[How each value was measured, with sources.]</p></details></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+</main><atelier-host layout="anchored" collapsible></atelier-host></div>
+</body>
+</html>

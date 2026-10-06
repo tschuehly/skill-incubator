@@ -10,7 +10,7 @@
 //   <atelier-mock>     a UI mockup from a <template>, isolated in a shadow root and scaled to fit
 //   <atelier-findings> liked / disliked / fact / gap lines, each label inline
 //   <atelier-decision> a question whose options each carry their own context, all visible
-//   <atelier-flow>     a zoomable flow (overview → stage → gate) beside an explanation pane
+//   <atelier-flow>     child Regions as steps, with a zoomable map (overview → step → sub-step) beside them
 //   <atelier-timeline> steps with screenshots and reviewer comments, scrolled sideways
 //   <atelier-tabs>     child Regions as tabs (or a foldable side nav) instead of one long page
 //
@@ -309,60 +309,50 @@ customElements.define('atelier-decision', class extends Block {
   }
 });
 
-// ===== <atelier-flow> — "Name: what it does", children indented below their parent; a line
-// starting "|| " runs in parallel with the sibling before it. The map shows one level at a time
-// (overview → a stage → a gate); every node's explanation stays in the pane beside it. ===========
-export function parseFlow(text) {
-  const root = { name: '', children: [], depth: -1 }, stack = [root];
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    const indent = line.match(/^\s*/)[0].length, t = line.trim(), par = t.startsWith('||');
-    const m = /^(?:\|\|\s*)?([^:]+?)\s*(?::\s*(.*))?$/.exec(t);
-    while (stack.length > 1 && stack.at(-1).indent >= indent) stack.pop();
-    const parent = stack.at(-1);
-    if (par && !parent.children.length) throw new Error(`"${t.slice(0, 40)}" runs in parallel with nothing: "||" needs a sibling before it`);
-    const node = { name: m[1], text: m[2] || '', parallel: par, indent, children: [], path: '' };
-    node.path = (parent.path ? parent.path + '.' : '') + (parent.children.length + 1);
-    parent.children.push(node); stack.push(node);
-  }
-  if (!root.children.length) throw new Error('has no nodes');
-  return root;
-}
+// ===== <atelier-flow> — its child atl-key Regions are the steps; a step's own child Regions are its
+// sub-steps; `parallel` on a step runs it beside the sibling before. A map beside the steps shows one
+// level at a time (overview → step → sub-step); choosing a node scrolls to its Region. Every unit is a
+// Region, so the human comments on and decides about any step, and its detail stays in it. ==========
+const flowKids = (el, root) => [...el.querySelectorAll('[atl-key]')].filter(r => r.parentElement.closest('[atl-key], atelier-flow') === el && r.closest('atelier-flow') === root);
 const flowState = new Map();
-customElements.define('atelier-flow', class extends Block {
-  draw() {
-    const root = parseFlow(sourceOf(this)), key = keyOf(this), st = flowState.get(key) || { zoom: '', sel: '' };
-    flowState.set(key, st);
-    const find = path => { let n = root; for (const i of path ? path.split('.') : []) n = n?.children[i - 1]; return n; };
-    const wrap = make('div', 'atl-b-flow'), map = make('div', 'atl-b-flow-map'), pane = make('div', 'atl-b-flow-pane');
-    // the pane: every node, nested details, so text a Thread quotes always exists
-    const tree = n => `<details class="atl-b-fnode" data-path="${n.path}"><summary>${esc(n.name)}</summary>${n.text ? `<p>${inline(n.text)}</p>` : ''}${n.children.map(tree).join('')}</details>`;
-    pane.innerHTML = root.children.map(tree).join('');
-    const steps = list => list.reduce((out, n) => { n.parallel && out.length ? out.at(-1).push(n) : out.push([n]); return out; }, []);
-    const drawMap = () => {
-      const at = find(st.zoom) || root, crumbs = [];
-      for (let p = st.zoom; p; p = p.split('.').slice(0, -1).join('.')) crumbs.unshift(p);
-      map.innerHTML = `<nav class="atl-b-crumbs"><button type="button" data-zoom="">${say('Overview', 'Überblick')}</button>${crumbs.map(p => ` › <button type="button" data-zoom="${p}">${esc(find(p).name)}</button>`).join('')}</nav>
-        <ol class="atl-b-lane">${steps(at.children).map(g => `<li class="atl-b-step${g.length > 1 ? ' is-parallel' : ''}">${g.length > 1 ? `<span class="atl-b-par">${say('parallel', 'parallel')}</span>` : ''}${g.map(n =>
-          `<button type="button" class="atl-b-node${n.path === st.sel ? ' is-sel' : ''}" data-node="${n.path}" aria-pressed="${n.path === st.sel}">${esc(n.name)}${n.children.length ? ` <small>${n.children.length} ›</small>` : ''}</button>`).join('')}</li>`).join('')}</ol>`;
-    };
-    const select = (path, scroll) => {
-      const n = find(path); if (!n) return;
-      st.sel = path; st.zoom = n.children.length ? path : path.split('.').slice(0, -1).join('.');
-      for (let p = path; p; p = p.split('.').slice(0, -1).join('.')) { const d = pane.querySelector(`[data-path="${p}"]`); if (d) d.open = true; }
-      pane.querySelectorAll('.is-sel').forEach(d => d.classList.remove('is-sel'));
-      const d = pane.querySelector(`[data-path="${path}"]`); d?.classList.add('is-sel');
-      if (scroll) d?.scrollIntoView({ block: 'nearest' });
-      drawMap();
-    };
-    map.addEventListener('click', e => {
-      const b = e.target.closest('button'); if (!b) return;
-      if ('zoom' in b.dataset) { st.zoom = b.dataset.zoom; drawMap(); } else select(b.dataset.node, true);
+customElements.define('atelier-flow', class extends HTMLElement {
+  connectedCallback() {
+    if (this._built) return; this._built = true;
+    queueMicrotask(() => {
+      const kids = el => flowKids(el, this), byKey = k => k ? [...this.querySelectorAll('[atl-key]')].find(r => regionKey(r) === k) : null;
+      const st = flowState.get(keyOf(this)) || { zoom: '', sel: '' }; flowState.set(keyOf(this), st);
+      const map = make('nav', 'atl-b-flow-map'); map.setAttribute('aria-label', say('Map', 'Karte'));
+      const steps = list => list.reduce((out, r) => { r.hasAttribute('parallel') && out.length ? out.at(-1).push(r) : out.push([r]); return out; }, []);
+      const draw = () => {
+        const at = byKey(st.zoom) || this, crumbs = [];
+        for (let r = at; r && r !== this; r = r.parentElement.closest('[atl-key], atelier-flow')) crumbs.unshift(r);
+        map.innerHTML = `<p class="atl-b-crumbs"><button type="button" data-zoom="">${say('Overview', 'Überblick')}</button>${crumbs.map(r => ` › <button type="button" data-zoom="${esc(regionKey(r))}">${esc(labelOf(r))}</button>`).join('')}</p>
+          <ol class="atl-b-lane">${steps(kids(at)).map(g => `<li class="atl-b-step${g.length > 1 ? ' is-parallel' : ''}">${g.length > 1 ? `<span class="atl-b-par">${say('parallel', 'parallel')}</span>` : ''}${g.map(r => {
+            const k = regionKey(r), n = kids(r).length;
+            return `<button type="button" class="atl-b-node${k === st.sel ? ' is-sel' : ''}" data-node="${esc(k)}" aria-pressed="${k === st.sel}">${esc(labelOf(r))}${n ? ` <small>${n} ›</small>` : ''}</button>`; }).join('')}</li>`).join('')}</ol>`;
+      };
+      const select = (k, scroll) => {
+        const r = byKey(k); if (!r) return;
+        const parent = r.parentElement.closest('[atl-key], atelier-flow');
+        st.sel = k; st.zoom = kids(r).length ? k : parent === this ? '' : regionKey(parent);
+        this.querySelectorAll('.atl-b-sel').forEach(e => e.classList.remove('atl-b-sel')); r.classList.add('atl-b-sel');
+        if (scroll) r.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        draw();
+      };
+      map.addEventListener('click', e => {
+        const b = e.target.closest('button'); if (!b) return;
+        if ('zoom' in b.dataset) { st.zoom = b.dataset.zoom; draw(); } else select(b.dataset.node, true);
+      });
+      document.addEventListener('atelier:reveal', e => {
+        if (!this.isConnected || !this.contains(e.detail.target)) return;
+        let r = e.detail.target.closest?.('[atl-key]'); while (r && r.closest('atelier-flow') !== this) r = r.parentElement?.closest('[atl-key]');
+        if (r && this.contains(r) && r !== this) select(regionKey(r), false);
+      });
+      document.addEventListener('atelier:ready', () => { if (this.isConnected) { if (!this.contains(map)) this.prepend(map); st.sel ? select(st.sel, false) : draw(); } });
+      this.prepend(map);
+      st.sel ? select(st.sel, false) : draw();
+      this.dataset.rendered = 'true'; document.dispatchEvent(new CustomEvent('atelier:rendered'));
     });
-    // a Thread revealed inside the pane selects its node, so the map shows where it sits
-    document.addEventListener('atelier:reveal', e => { const d = this.isConnected && this.contains(e.detail.target) && e.detail.target.closest?.('.atl-b-fnode'); if (d) select(d.dataset.path, false); });
-    wrap.append(map, pane); this.place(wrap);
-    st.sel ? select(st.sel, false) : drawMap();
   }
 });
 

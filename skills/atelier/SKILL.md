@@ -2,165 +2,105 @@
 name: atelier
 description: >-
   Build and operate a live HTML Surface where the human reads, comments on, and decides the work
-  instead of reading the session transcript. Use for reviewing many records, plans and documents,
-  grilling sessions, comparisons, code or media review, and other work where anchored feedback and
-  durable decisions improve the result.
+  instead of reading the session transcript. Use for workflows and pipelines, direction rounds and
+  review queues, plans and designs, comparisons, code or media review, and other work where anchored
+  feedback and durable decisions improve the result.
 ---
 
 # Atelier
 
-Atelier extends HTML the way htmx does. You build whatever page the task needs — a list/detail
-workspace, a document, a table, a prototype, media. The kernel adds what a page cannot have: an
-address for each thing the human judges, a durable conversation at each address, and the event
-loop between the human and you.
+Atelier extends HTML the way htmx does. You write the page; attributes and a few elements give each
+thing the human judges an address, a durable conversation at that address, and the event loop
+between the human and you. **You own** layout, content and styling. **The kernel owns** addresses,
+the store, Threads, Proposals with undo, Updates, Ready, drafts, and reveal.
 
-**You own** layout, navigation, selection, counts, styling, and the phone layout. **The kernel
-owns** addresses, the store, polling, Threads, Proposals, Updates, Ready, safe submission
-(validation, retries, undo), drafts, the cards inside hosts, and reveal. It inserts nothing into
-your content uninvited and imposes no frame.
+Terms are defined in [CONTEXT.md](CONTEXT.md). `<skill-dir>` is the directory containing this file.
 
-Capitalized terms are defined in [CONTEXT.md](CONTEXT.md). Before changing Atelier itself, read
-[the principles](docs/principles.md) and [the ADRs](docs/adr/). `<skill-dir>` is the directory
-containing this file.
+## Every page has three levels
 
-## The interface
+| Level | Holds | How |
+|---|---|---|
+| 1 · Overview | What it's about in two everyday sentences, and the map of all units | First screen |
+| 2 · Unit | One step, question, claim or option: what the human comments on and decides | One `atl-key` Region each |
+| 3 · Detail | Evidence, conditions, files, receipts | `<details>` inside the unit — never deleted to shorten the page |
 
-| You write | The kernel does |
-|---|---|
-| `atl-key="provider"` on any element (`<tr>`, `<li>`, `<article>`, `<g>`), optional `atl-label` | Makes it a Region. Nesting builds the Region Key `rollout/provider`, the address in every API call. One local key, no slash, unique path. |
-| `<atelier-host for="rollout">` | Shows the Threads and Proposals of that key and below. The longest whole-path `for` wins (`c6` never claims `c64`). |
-| `<atelier-host>` without `for` | The one catch-all: unclaimed items, Threads whose Region left, failed reveals. |
-| `layout="anchored"` on a host | Cards level with their anchors while the host sits beside its content; normal flow otherwise. |
-| `collapsible` on a host | The human folds it away with Activity's ⇥ icon; folded, it reserves no width; any card opening unfolds it. |
-| `<atelier-activity>`, exactly one, anywhere | Pick-to-comment, the "N waiting" drawer, desktop notifications. |
-| `atl-thread` on a button (value: a key, or empty for the closest Region) | Opens a whole-Region Thread in that Region's host. |
-| `setRevealResolver(async ({region,id,kind}) => …)` | Awaited before every reveal, so your page can select the record or tab first. |
-| a listener for `atelier:state` (or `getState()`) | Gets `{state, items:[{kind,id,region,status,waiting}]}` after every change, for your counts and badges. |
-| a listener for `atelier:ready` | Fires after a Ready swap; re-apply your own view state there. |
-| `<html lang="de">` | German kernel and block labels; anything else gets English. |
-| a building block (`<atelier-claims>`, `<atelier-decision>`, `<atelier-flow>`, …) | Renders a short text body: claim tree, findings, decision, zoomable flow, timeline, tabs, Mermaid, chart, file/diff, video, compare, mockup. [Syntax](references/composition.md#building-blocks). |
+## Router
 
-The human starts a Thread by selecting text, Alt+clicking an element or a point on an image, or
-using Pick in Activity. Exports, endpoints, store, and events:
-[references/protocol.md](references/protocol.md).
+### Step 1 · How do the units relate?
 
-Three rules hold on every Surface:
+Pick the structure, then copy its skeleton from `recipes/` and replace every `[bracket]`.
 
-1. **Build the UI the job needs** — a workspace, a document, a table — not a prettier session log.
-2. **Every open item has a host and is reachable**: each open Proposal and each Thread waiting for
-   the human shows in a host that `reveal()` can bring on screen.
-3. **Publish with Ready**, never by reloading the human's page.
+| Structure | The units are … | For example | Skeleton |
+|---|---|---|---|
+| **Workflow** | ordered steps, possibly nested | pipeline, process, migration | [`recipes/workflow.html`](recipes/workflow.html) — `<atelier-flow>` |
+| **Set** | independent of each other | direction round, review queue, records | [`recipes/set.html`](recipes/set.html) — `<atelier-tabs>` |
+| **Argument** | building on each other | plan, design, proposal | [`recipes/argument.html`](recipes/argument.html) — `<atelier-claims>` |
+| **Comparison** | options judged on the same criteria | variants, tools | [`recipes/comparison.html`](recipes/comparison.html) — a table, one row per option |
 
-## Build the first Surface
+Each skeleton's header says what goes on which level. When two structures fit and would change
+how the human works, offer both and recommend one; otherwise choose.
 
-1. **Read the sources first.** From a transcript, extract current facts, recommendations, open
-   questions, disagreements, and source anchors; show the synthesized state, not the log.
-2. **Build the UI the job needs.** Pick the content shape that fits the problem from
-   [the catalog](references/composition.md#content-shapes) — claim tree for a plan or design,
-   evidence and decision board for a review queue or direction round, flow with drill-down for a
-   pipeline, comparison for options, timeline for a history, list/detail for many records. None is
-   the default; never ask the human to invent it. Recipes: `recipes/list-detail.html`,
-   `recipes/document.html`, `recipes/frontier.html`, `recipes/direction-board.html` (their header
-   comments have the commands).
-3. **Copy the kit.** The files travel together; the server serves `/atelier.mjs`, `/atelier.css`,
-   `/atelier-blocks.mjs` and `/atelier-blocks.css` from its own directory:
+### Step 2 · What goes in a unit or its detail?
+
+| The material is … | Write | Syntax |
+|---|---|---|
+| What was liked, disliked, measured, missing | `<atelier-findings>` | [blocks](references/blocks.md) |
+| A question with alternatives | `<atelier-decision>`, each option with its own reasons | [blocks](references/blocks.md) |
+| One item's way through a workflow | `<atelier-timeline>`: steps, screenshots, reviewers' comments | [blocks](references/blocks.md) |
+| A file, code, or a diff | `<atelier-file src=… / diff=…>` | [show files](references/blocks.md#show-files) |
+| A video | `<atelier-video>` with `m:ss` marks; siblings show one at a time | [blocks](references/blocks.md) |
+| Before and after | `<atelier-compare>` | [blocks](references/blocks.md) |
+| A UI that does not exist yet | `<atelier-mock>` | [blocks](references/blocks.md) |
+| Numbers | `<atelier-chart>` (Vega-Lite) | [blocks](references/blocks.md) |
+| A small fixed sequence or state machine | `<atelier-mermaid>` | [blocks](references/blocks.md) |
+| Anything no block covers | plain HTML, or [a renderer of your own](references/blocks.md#a-renderer-of-your-own) | — |
+
+### Step 3 · What should the human be able to do?
+
+| The human should … | Write | |
+|---|---|---|
+| comment on a unit | `atl-key="…"` on its element, `atl-label` for its name; nesting builds the key `s1/check-a` | one local key, no slash, unique path |
+| comment on a point in an image | nothing on `<img>`/`<svg>`; `data-atl-point` on any other element | |
+| see comments beside the content | `<atelier-host layout="anchored" collapsible>` beside `<main>` — also the one catch-all | folds away, reserves no width |
+| see comments under each unit | `<atelier-host for="key">` inside the unit, plus one catch-all `<atelier-host>` | longest whole-path `for` wins |
+| see everything open, and pick | `<atelier-activity>`, exactly one | |
+| start a whole-unit Thread with a button | `<button atl-thread="key">` | |
+| reach a unit the page hides | `setRevealResolver(async ({region}) => …)` selects it first | tabs and flow do this themselves |
+| decide | `POST /api/propose` anchored to the question, with `suggested` | [loop](references/loop.md#work-through-the-surface) |
+| just be informed | `POST /api/update` | [loop](references/loop.md#choose-the-message-shape) |
+| see what changed | rewrite the file, `POST /api/ready` with the edited keys | [loop](references/loop.md#work-through-the-surface) |
+
+Every open item must land in a host and be reachable; never reload the human's page — publish with
+Ready. Full attribute, export and endpoint contract: [references/protocol.md](references/protocol.md).
+
+## Build
+
+1. **Read the sources.** From a transcript, extract current facts, recommendations, open questions,
+   disagreements and source anchors; show the synthesized state, not the log. Trace every claim to
+   the sources as they are now.
+2. **Route.** Step 1 picks the skeleton, Step 2 the content of each unit, Step 3 the interaction.
+3. **Copy the kit and the skeleton:**
 
    ```bash
    mkdir -p tools .review
    cp <skill-dir>/assets/{server.mjs,atelier.mjs,atelier.css,atelier-blocks.mjs,atelier-blocks.css} tools/
-   cp <skill-dir>/assets/poll.sh tools/review-poll.sh
+   cp <skill-dir>/assets/poll.sh tools/review-poll.sh && chmod +x tools/review-poll.sh
    mv tools/server.mjs tools/review-server.mjs
-   chmod +x tools/review-poll.sh
+   cp <skill-dir>/recipes/<structure>.html tools/surface.html
    ```
 
-   Keep `.review/` out of version control; re-copy rather than patch.
-4. **Write the page.** Set `<html lang>` to the language you write in, and write it natively.
-   Load `<link rel="stylesheet" href="/atelier.css">` and
-   `<script type="module" src="/atelier.mjs">`. Put `atl-key` on each thing the human judges on
-   its own — a record, a check row, a setting value, a step. Place a host where its conversation
-   helps: inside each record, under each questioned passage, or beside a document with
-   `layout="anchored"`. Add one catch-all. A page that hides records registers a reveal
-   resolver (rule 2).
-5. **Write the finding.** Every sentence stays true with the layout removed: no text about the
-   page, its sections, its controls, or its status. Quote the source being judged verbatim and
-   anchor each Proposal to it. The rest is in
-   [Write the finding](references/composition.md#write-the-finding).
-6. **Build once from the evidence.** Trace every claim, recommendation, and Proposal to the
-   sources as they are now; a located target proves only its location, not that a check ran.
-   Offer only actions the human can exercise in their browser.
+   Keep `.review/` out of version control; re-copy the kit rather than patch it.
+4. **Write it** by [references/writing.md](references/writing.md): plain words up front, every
+   sentence about the subject, details folded not deleted, `<html lang>` set to the language you
+   write natively.
+5. **Lint:** `node <skill-dir>/scripts/preflight.mjs --lint-only tools/surface.html` until it passes;
+   rewrite each sentence `WARN PROSE` names.
+6. **Serve and hand over** by [references/loop.md](references/loop.md): server and poller under the
+   monitor, full preflight, open the URL. No screenshots or browser walk stand between a passing
+   preflight and the handoff.
 
-**Ready when:** current sources support every visible claim, the first screen orients in about 60
-words, and each term and option is written to be understood from its visible or expandable context,
-without the transcript. The first browser load needs no Ready.
+## Changing Atelier itself
 
-## Start the live loop
-
-1. Choose a free `PORT`; use the exact `http://127.0.0.1:<port>` everywhere. Call `monitor_status`,
-   then start the server with the Workbench `monitor`: `source.type="spawn"`, the command
-   `env PORT=<port> UI=tools/my-surface.html node tools/review-server.mjs`, the project directory
-   in `options.cwd`, `recoveryPolicy:"never"`, the port in the reuse key. Never hide `cd`, pipes,
-   or backgrounding inside the command.
-2. Health-check `GET /api/state`, then start exactly one more `spawn` watcher for
-   `BASE_URL=<exact-url> bash <absolute-poller-path> --stream` with a URL-specific reuse key and
-   `notifyOn` for `SENT`, `DECISION`, `EXPLAIN-REQUEST`, `COMMENT-REJECTED`, `COMMAND`,
-   `SERVER-DOWN`, `SERVER-UP`. Confirm with `monitor_inspect` that it holds the exact URL.
-   Without the monitor, run `--once` under the harness's tracked background tasks and re-arm it
-   after each wake; never an untracked `&`.
-3. Run the gate:
-
-   ```bash
-   node <skill-dir>/scripts/preflight.mjs --url http://127.0.0.1:<port> \
-     --poller-identity <absolute-poller-path> --evidence-dir .review/preflight
-   ```
-
-   It fails silent handoff defects without a browser — store, poller, kit drift, and a static lint
-   of the page source: `atl-key` Regions, Activity and hosts, building-block bodies,
-   page-describing prose, the verdict rules (`<html lang>` matching the text, one video at a
-   time), suggested options, open items no host would show, and
-   anchors whose quote is gone. Rewrite or delete each sentence `WARN PROSE` names; steps for an
-   interface under review go in an element marked `data-subject-ui`. `WARN DECISION_CONTEXT` flags
-   material right after a decision: move each option's reasons into the option. `UNMEASURED` means the lint could not
-   see (a drawn diagram, a diff) — not a pass. `--lint-only <file>` lints a page with no server.
-   `--skip-poller` and `--allow-kit-drift` are never a handoff.
-
-   Preflight no longer checks browser errors, kernel warnings, overflow, layout, real rendering, or
-   whether `reveal()` reaches each item (owner decision 2026-10-06,
-   [ADR 0007](docs/adr/0007-static-lint-blocks-and-content-shapes.md)). Keep quoted text in the
-   source, a block's `<script type="text/plain">`, or a file an `<atelier-file>` shows, so the lint
-   can read it. A block that fails to render shows its error and source in place.
-4. When preflight passes, open the URL for the human. Nothing else stands between a passing
-   preflight and the handoff: no screenshots, no browser walk, no second reader.
-
-**Ready when:** preflight passes, the exact-URL poller is armed, and the browser is open.
-
-## Work through the Surface
-
-While the review is live, chat carries only the URL, failures, and the final handback.
-
-- **Threads.** On every `sent` event, follow-ups included, reply in that Thread with what you picked
-  up and set `acknowledged` within seconds; read its `anchor` and any `attachments`. Move it
-  through `in_progress` to `implemented`; the human accepts or reopens it in place.
-- **Decisions.** Ask every question as a Proposal at the Region it would change, with `suggested`
-  naming the recommended option and each option's consequence stated. The host shows the options as buttons; one click
-  chooses and Undo stays beside the choice for 30 seconds. You receive `decision` only when that
-  window closes — never act on a choice before it. `custom` is the human's own wording and wins.
-  Before acting on a batch, run `poll.sh --decisions`: each Proposal reads kept as proposed,
-  changed, opened but undecided, or not opened — and a default that was never opened is not
-  agreement.
-- **Updates.** Anything that needs no answer is an Update; it waits in Activity.
-- **Ready.** Rewrite the HTML file, then post only the edited leaf Region Keys to `/api/ready`.
-  The kernel swaps exactly those Regions; drafts, focus, and scroll survive. Never reload the
-  page yourself. Publish at coherent points; for a grilling round, rewrite the decided Regions,
-  add the next frontier, and post one Ready.
-- When the human ends the review, stop the watchers and leave the store as the record.
-
-Run one active browser per Surface; a second can overwrite Thread changes. While a Region has an
-open or pending Proposal, a new one answers 409: post an Update instead and ask after it resolves.
-When a Ready removes the text an Anchor quoted, restore it or say in that Thread where it went.
-
-## Kernel changes and promotion
-
-After changing `assets/` or `scripts/`, run `node <skill-dir>/scripts/verify.mjs` (the kernel in a
-real browser; a kernel test, not a handoff step) and `bash <skill-dir>/scripts/test-atelier.sh`
-(server, poller, lint and preflight). When repeated use of a copied Atelier reveals a stable
-domain model, decide with [references/promotion.md](references/promotion.md) whether to build a Studio.
+Read [the principles](docs/principles.md) and [the ADRs](docs/adr/) first. After changing `assets/`
+or `scripts/`, run `node <skill-dir>/scripts/verify.mjs` and `bash <skill-dir>/scripts/test-atelier.sh`.
+Whether a copied Atelier should become a Studio: [references/promotion.md](references/promotion.md).

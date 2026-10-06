@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[Subject] · set</title>
+<!--
+  Skeleton: SET — the units are independent of each other (a direction round, a review queue, a
+  batch of records). Copy it, keep the structure, replace every [bracket].
+
+    Level 1 · overview  the plain "what it's about", then <atelier-tabs> (add `side` for a side nav)
+    Level 2 · unit      one atl-key Region per tab: findings, then the decision with its options
+    Level 3 · detail    <details> inside the unit: evidence, receipts, history — never deleted
+
+  Each decision is also a Proposal anchored to its question, with `suggested`. For proof that a
+  change works, a unit is one claim with its evidence open and an Accept / Rework Proposal. For
+  more units than tabs hold (about 7), use a list beside one shown unit and register
+  setRevealResolver so a Thread in a hidden unit selects it first.
+  Try it from the skill directory:
+    env PORT=4802 UI=recipes/set.html ROOT=. STORE=try-set node assets/server.mjs
+-->
+<link rel="stylesheet" href="/atelier.css">
+<link rel="stylesheet" href="/atelier-blocks.css">
+<script type="module" src="/atelier.mjs"></script>
+<script type="module" src="/atelier-blocks.mjs"></script>
+</head>
+<body>
+<header class="atl-top"><span>[Subject]</span><atelier-activity></atelier-activity></header>
+<div class="atl-page"><main>
+<section atl-key="set" atl-label="[Subject]">
+  <h1>[The decision the round settles]</h1>
+  <p>[Two everyday sentences: what is being decided, why now, and how many questions are open.]</p>
+
+  <atelier-tabs>
+    <section atl-key="q1" atl-label="1 · [Question]">
+      <atelier-findings><script type="text/plain">
+        liked: [What worked, with the source as a [link](/path).]
+        disliked: [What failed.]
+        fact: [A measured fact.]
+        gap: [What nobody has checked yet.]
+      </script></atelier-findings>
+      <details><summary>Evidence</summary><p>[Receipts, quotes and history behind the findings.]</p></details>
+      <atelier-decision><script type="text/plain">
+        ? [The question, as the human would ask it?]
+        * A · [Recommended option]
+          + [what it keeps]
+          - [what it costs]
+        - B · [Alternative]
+          + [what it keeps]
+          - [what it costs]
+      </script></atelier-decision>
+    </section>
+    <section atl-key="q2" atl-label="2 · [Question]">
+      <atelier-findings><script type="text/plain">
+        fact: [A measured fact.]
+        gap: [What nobody has checked yet.]
+      </script></atelier-findings>
+      <atelier-decision><script type="text/plain">
+        ? [The question?]
+        * A · [Recommended option]
+          + [what it keeps]
+        - B · [Alternative]
+          - [what it costs]
+      </script></atelier-decision>
+    </section>
+  </atelier-tabs>
+</section>
+</main><atelier-host layout="anchored" collapsible></atelier-host></div>
+</body>
+</html>

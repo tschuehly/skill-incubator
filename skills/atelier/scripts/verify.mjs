@@ -1212,13 +1212,14 @@ try {
       </script></atelier-decision>
     </section>
     <section atl-key="two" atl-label="Zwei">
-      <atelier-flow><script type="text/plain">
-        S0 Backlog: Konzepte kommen aus der Matrix.
-        S5 Prüfung: Die Endprüfung läuft auf dem Master.
-          Ton: läuft bis zum Ende.
-          Standbild: 87 bestanden.
-          || Gefühltes Standbild: 50 bestanden.
-      </script></atelier-flow>
+      <atelier-flow>
+        <section atl-key="s0" atl-label="S0 Backlog"><p>Konzepte kommen aus der Matrix.</p></section>
+        <section atl-key="s5" atl-label="S5 Prüfung"><p>Die Endprüfung läuft auf dem Master.</p>
+          <section atl-key="ton" atl-label="Ton"><p>Der Ton läuft bis zum Ende.</p></section>
+          <section atl-key="still" atl-label="Standbild"><p>Standbild: 87 bestanden.</p></section>
+          <section atl-key="felt" atl-label="Gefühltes Standbild" parallel><p>Gefühltes Standbild: 50 bestanden.</p></section>
+        </section>
+      </atelier-flow>
       <atelier-video src="/a.mp4" label="Erster Schnitt"><script type="text/plain">0:00 Haken</script></atelier-video>
       <atelier-video src="/b.mp4" label="Zweiter Schnitt"><script type="text/plain">0:00 Haken</script></atelier-video>
       <atelier-timeline><script type="text/plain">
@@ -1266,11 +1267,11 @@ try {
     browser(['eval', `import('/atelier.mjs').then(k => k.reveal('c-tab')).then(() => 'ok')`]);
     await sleep(600);
     eq(shown(), ['k/two'], 'visible tab after reveal');
-    eq(probe(`JSON.stringify({ sel: document.querySelector('.atl-b-node.is-sel')?.textContent, open: document.querySelector('.atl-b-fnode.is-sel')?.open })`),
-      { sel: 'Standbild', open: true }, 'the flow selected the revealed node');
+    eq(probe(`JSON.stringify({ sel: document.querySelector('.atl-b-node.is-sel')?.textContent, region: document.querySelector('atelier-flow .atl-b-sel')?.getAttribute('atl-key') })`),
+      { sel: 'Standbild', region: 'still' }, 'the flow selected the revealed step');
   });
 
-  await check('kit: the flow zooms by level and marks parallel steps; sibling videos show one at a time', async () => {
+  await check('kit: the flow zooms by level over its step Regions and marks parallel steps; sibling videos show one at a time', async () => {
     act(`document.querySelector('.atl-b-crumbs [data-zoom=""]').click()`);
     const lane = () => probe(`JSON.stringify([...document.querySelectorAll('.atl-b-step')].map(s => (s.classList.contains('is-parallel') ? '‖ ' : '') + [...s.querySelectorAll('.atl-b-node')].map(n => n.textContent).join(' + ')))`);
     eq(lane(), ['S0 Backlog', 'S5 Prüfung 3 ›'], 'overview');

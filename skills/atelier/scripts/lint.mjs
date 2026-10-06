@@ -82,13 +82,11 @@ function decisionOf(src) {
   }
   return d;
 }
-const flowLines = src => lines(src).map(l => ({ indent: l.match(/^\s*/)[0].length, t: l.trim() }));
 const timelineLines = src => lines(src).map(l => ({ top: !/^\s/.test(l), t: l.trim() }));
 // The words each new block puts on the page, in reading order, for the prose and anchor gates.
 const BODY_TEXT = {
   'atelier-findings': (src, de) => lines(src).map(l => { const m = FINDING.exec(l); return m ? `${FINDING_LABEL[m[1].toLowerCase()][de ? 1 : 0]} ${linkText(m[2])}` : l; }),
   'atelier-decision': (src, de) => { const d = decisionOf(src); return [d.question, ...d.options.flatMap(o => [o.label + (o.rec ? (de ? ' Empfohlen' : ' Recommended') : ''), ...o.context])].map(linkText); },
-  'atelier-flow': src => flowLines(src).map(({ t }) => t.replace(/^\|\|\s*/, '').replace(/^([^:]+?)\s*:\s*/, '$1. ')).map(linkText),
   'atelier-timeline': src => timelineLines(src).filter(({ t }) => !/^!\[/.test(t)).map(({ t }) => linkText(t.replace(/^>\s*([^:]+):\s*/, '$1 '))),
 };
 const BLOCKS = {
@@ -130,11 +128,12 @@ const BLOCKS = {
     if (d.options.length < 2) return 'needs at least two options; one option is a statement, not a decision';
     if (d.options.filter(o => o.rec).length > 1) return 'recommends more than one option ("*")';
   },
-  'atelier-flow': (el, src) => {
-    const ls = flowLines(src);
-    if (!ls.length) return 'has no nodes';
-    const orphan = ls.find((l, i) => l.t.startsWith('||') && !ls.slice(0, i).some(p => p.indent === l.indent));
-    if (orphan) return `"${orphan.t.slice(0, 40)}" runs in parallel with nothing: "||" needs a sibling before it`;
+  'atelier-flow': el => {
+    const steps = el.children.filter(isRegion);
+    if (!steps.length) return 'needs child atl-key Regions as its steps';
+    if ('parallel' in steps[0].attrs) return `step ${steps[0].attrs['atl-key']} runs in parallel with nothing: "parallel" needs a sibling step before it`;
+    const stray = el.children.filter(c => c.tag !== '#text' && !isRegion(c));
+    if (stray.length) return `holds <${stray[0].tag}> outside a step; every child is an atl-key Region`;
   },
   'atelier-timeline': (el, src) => {
     const ls = timelineLines(src);
@@ -169,7 +168,7 @@ function proseBlocks(body, de = false) {
   // A block's caption and text alternative are the agent's prose too.
   for (const el of elements(body)) if (el.tag.startsWith('atelier-') && !KERNEL.has(el.tag)) for (const a of ['caption', 'alt'])
     if (el.attrs[a]) blocks.push({ region: closest(el, isRegion) ? regionKey(closest(el, isRegion)) : '(outside Regions)', text: el.attrs[a] });
-  // So are the text bodies of findings, decisions, flows and timelines, line by line.
+  // So are the text bodies of findings, decisions and timelines, line by line.
   for (const el of elements(body)) if (BODY_TEXT[el.tag]) for (const text of BODY_TEXT[el.tag](sourceOf(el), de))
     blocks.push({ region: closest(el, isRegion) ? regionKey(closest(el, isRegion)) : '(outside Regions)', text: /[.!?:]$/.test(text) ? text : text + '.' });
   return blocks;
@@ -336,7 +335,7 @@ export async function lintSurface(html, { state = null, readFile = async () => n
     let own = '';
     if (BODY_TEXT[el.tag]) return BODY_TEXT[el.tag](sourceOf(el), de).join(' ') + ' ' + (el.attrs.caption || '') + ' '
       + (await Promise.all(el.children.filter(c => c.tag !== 'script').map(c => project(c, unknown)))).join('');
-    if (BLOCKS[el.tag] && el.tag !== 'atelier-claims' && el.tag !== 'atelier-tabs') {
+    if (BLOCKS[el.tag] && !['atelier-claims', 'atelier-tabs', 'atelier-flow'].includes(el.tag)) {
       const src = sourceOf(el), path = el.attrs.src || el.attrs.diff;
       own = [el.attrs.alt, el.attrs.caption].filter(Boolean).join(' ') + ' ';
       if (el.tag === 'atelier-file') {
