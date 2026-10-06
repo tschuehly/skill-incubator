@@ -63,6 +63,24 @@ Keep these facts distinct:
 When the contract and runtime disagree, correct the contract first. Implement the intended behavior
 only when Principle 4 admits it.
 
+## 6. Hold the direction
+
+*Proposed 2026-10-06, awaiting the owner's approval.*
+
+A direction the owner decided stays decided until the owner decides otherwise. Atelier went in circles when
+it did not: an 18-commit rewrite to the margin model on 09-25 was later reversed; the 10-01 kernel
+stayed unmerged for five days, so the next day's work landed on the old base; agent rankings stood
+in for the owner's judgment; sessions re-derived the direction from summaries.
+
+- An owner decision becomes an ADR in the same change, and every Atelier change starts by reading
+  these principles and the ADRs.
+- A decided direction lands on master promptly. Experiments branch from the current decided base
+  and are merged or deleted at the end of their round.
+- New work starts from master only after confirming master contains the latest accepted ADR.
+- Reversing an ADR takes the owner's explicit decision and a superseding ADR.
+- Agent or reviewer rankings inform the owner's verdict on real pages; they never replace it.
+- Prefer small steps the owner has validated over rewrites.
+
 ## Admission check
 
 Before changing Atelier, answer:
@@ -71,6 +89,8 @@ Before changing Atelier, answer:
 - Which session steps are added and removed?
 - Why are HTML, native behavior, or a local Surface fix insufficient?
 - What bounded check will prove the change without overstating its result?
+- Which ADR does this follow or supersede? *(Proposed 2026-10-06 with Principle 6, awaiting
+  the owner's approval.)*
 
 A missing answer means the change does not belong in Atelier.
 

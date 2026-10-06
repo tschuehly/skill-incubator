@@ -291,7 +291,7 @@ recommendation, and what the human must judge.
 
 ## Rules from the 2026-10-06 variant verdict
 
-Each rule names the defect Thomas marked on a live variant (private evidence:
+Each rule names the defect the owner marked on a live variant (private evidence:
 atelier/docs/variant-verdict-20261006.md).
 
 - **Tabs over one long page.** Put independent questions in `<atelier-tabs>`, one each. *Source:*
