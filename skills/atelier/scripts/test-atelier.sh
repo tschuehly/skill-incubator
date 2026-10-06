@@ -26,7 +26,7 @@ BASE="http://127.0.0.1:$PORT"
 post() { curl -fsS -X POST "$BASE/$1" -H 'Content-Type: application/json' -d "$2" >/dev/null; }
 
 cp "$ASSETS/server.mjs" "$TMP/review-server.mjs"
-cp "$ASSETS"/{atelier.mjs,atelier.css,atelier-blocks.mjs,atelier-blocks.css} "$TMP/"
+cp "$ASSETS"/{atelier.mjs,atelier.css} "$TMP/"
 cp "$ASSETS/poll.sh" "$TMP/review-poll.sh"
 cat >"$TMP/surface.html" <<'HTML'
 <!doctype html><html><head><meta charset="utf-8"><title>t</title>
@@ -66,11 +66,7 @@ curl -fsS "$BASE/api/state" | grep -F '"name":"atelier-test"' >/dev/null
 # The kernel's own files must be served next to the server, or a copied kit renders nothing.
 curl -fsS "$BASE/atelier.mjs" | grep -F "customElements.define('atelier-host'" >/dev/null
 curl -fsS "$BASE/atelier.css" | grep -F '.atl-card' >/dev/null
-curl -fsS "$BASE/atelier-blocks.mjs" | grep -F "customElements.define('atelier-claims'" >/dev/null
-curl -fsS "$BASE/atelier-blocks.css" | grep -F '.atl-claim' >/dev/null
 
-# --- the prose gate's rules against real eval sentences and clean subject sentences ---
-node "$HERE/prose.test.mjs" >/dev/null
 node "$HERE/lint.test.mjs" >/dev/null
 
 # The static lint replaced the browser check (2026-10-06, ADR 0007): no normal-handoff step may

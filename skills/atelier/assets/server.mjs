@@ -27,7 +27,7 @@ const STORE_FILE = path.join(DATA_DIR, `${NAME}.json`);
 const UNDO_MS = /^\d+$/.test(process.env.UNDO_MS || '') ? Number(process.env.UNDO_MS) : 30000;
 await fsp.mkdir(DATA_DIR, { recursive: true });
 
-const KIT_FILES = new Set(['/atelier.mjs', '/atelier.css', '/atelier-blocks.mjs', '/atelier-blocks.css']);
+const KIT_FILES = new Set(['/atelier.mjs', '/atelier.css']);
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.mjs':'text/javascript', '.css':'text/css',
   '.json':'application/json', '.webp':'image/webp', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png',
   '.svg':'image/svg+xml', '.gif':'image/gif', '.woff2':'font/woff2', '.woff':'font/woff', '.mp4':'video/mp4',

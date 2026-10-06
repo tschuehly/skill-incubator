@@ -174,7 +174,7 @@ function anchorFromElement(el, event) {
   const box = el.closest('svg g.node, svg [data-anchor]');
   if (box === region) return { region: key };            // the box is the Region itself
   if (box && region.contains(box)) return { region: key, selector: boxSelector(box, region) };
-  // a Region may be a <g> inside the SVG; a block marks a video or a mockup data-atl-point
+  // a Region may be a <g> inside the SVG; data-atl-point marks any other element that takes points
   const svg = el.closest('svg'), pt = el.closest('[data-atl-point]');
   const target = svg && region.contains(svg) ? svg : pt && region.contains(pt) ? pt : el;
   const a = { region: key, selector: selectorFor(target, region) };
@@ -650,7 +650,7 @@ const notify = (title, body) => { if (notifyOn() && document.hidden) new Notific
 // The page owns selection, tabs and filters; one resolver lets it show the target first.
 let resolver = null;
 export function setRevealResolver(fn) { resolver = typeof fn === 'function' ? fn : null; }
-// Content that hides its parts another way (a tab, a zoomed flow) listens for atelier:reveal, whose
+// Content that hides its parts another way (a tab, a zoomed map) listens for atelier:reveal, whose
 // detail.target is the element about to be shown, and shows it before the kernel scrolls there.
 const unfold = el => {
   if (!el) return;

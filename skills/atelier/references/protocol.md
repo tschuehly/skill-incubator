@@ -2,8 +2,7 @@
 
 Everything here is what `assets/atelier.mjs` and `assets/server.mjs` implement and `assets/poll.sh`
 speaks. Extend beside it, not through it: `poll.sh`, `preflight.mjs`, `lint.mjs` and future agents
-rely on these shapes. Building blocks (`assets/atelier-blocks.mjs`) are content, not protocol; their
-syntax is in [blocks.md](blocks.md).
+rely on these shapes. Content is the author's: the kit ships no content components (ADR 0008).
 
 The division of labor never moves. **You author the page:** layout, navigation, selection, counts,
 styling, phone layout. **The kernel supplies** addresses, durable state, the event loop, and the
@@ -16,12 +15,9 @@ cannot restyle your content.
 ```html
 <link rel="stylesheet" href="/atelier.css">
 <script type="module" src="/atelier.mjs"></script>
-<!-- only when the page uses a building block: -->
-<link rel="stylesheet" href="/atelier-blocks.css">
-<script type="module" src="/atelier-blocks.mjs"></script>
 ```
 
-All four are served by the Surface server from its own directory. `atelier.css` also ships a
+Both are served by the Surface server from its own directory. `atelier.css` also ships a
 default theme (tokens `--atl-*`, zero-specificity `:where()` content defaults) that any authored
 rule overrides, and two optional helpers, `.atl-top` (sticky header) and `.atl-page` (content plus a
 host column, `--atl-host-width`). The kernel requires neither.
@@ -131,7 +127,7 @@ Custom Highlight API (`::highlight(atl-anchor)`, `atl-active`, `atl-hover`).
 | `atelier:state` on `document` | Same `detail` after every reconciliation. Use it for counts and badges. |
 | `setRevealResolver(fn)` | One `async ({ region, id, kind }) => void` that makes the target reachable — select the record, switch the tab. Awaited for up to 2 s. |
 | `reveal(id | { region, id?, kind? })` | Runs the resolver, opens `<details>` around the anchor and the card, unfolds a folded host, scrolls the card into view, focuses its first control. Resolves `true`, or `false` after a visible warning, with the item moved to the catch-all. |
-| `atelier:reveal` on `document` | Fired before the kernel opens `<details>` around an element it is about to show; `detail.target` is that element. Building blocks that hide parts another way (`<atelier-tabs>`, `<atelier-flow>`) show it here. |
+| `atelier:reveal` on `document` | Fired before the kernel opens `<details>` around an element it is about to show; `detail.target` is that element. Page code that hides parts another way (tabs, a zoomed map) shows it here. |
 | `atelier:ready` on `document` | After a Ready swap: `detail = { changed, unknown }`. Re-apply your own view state here; it must be idempotent. |
 | `atelier:rendered` (you dispatch) | A renderer that adds text after load — a diagram, a file viewer — dispatches it so anchors inside resolve. Setting `data-diagram-ready="true"` does the same. |
 | `refresh()`, `unresolvedAnchors()` | Re-read the store; list stored anchors that no longer resolve in the live page. |
@@ -149,8 +145,8 @@ Only `region` means the whole Region. Inside a diagram, a click anchors the box 
 or Graphviz `g.node`, or any SVG element with `data-anchor="<name>"` — found again by name; a box
 that is itself the Region anchors the whole Region. Text
 anchors resolve again by `quote` + `prefix` after every Ready; removing the quoted words detaches
-the anchor, its card says so, and the lint fails until it is restored or explained. Blocks mark a
-video and a mockup `data-atl-point`, so a Thread on them anchors a point.
+the anchor, its card says so, and the lint fails until it is restored or explained. Mark any other
+element `data-atl-point` (a video, a canvas) so a Thread on it anchors a point.
 
 ## Configuration (env)
 

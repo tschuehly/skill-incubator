@@ -23,21 +23,13 @@ How the agent runs a Surface once its page lints clean. Endpoints, store and pol
      --poller-identity <absolute-poller-path> --evidence-dir .review/preflight
    ```
 
-   It fails silent handoff defects without a browser — store, poller, kit drift, and a static lint
-   of the page source: `atl-key` Regions, Activity and hosts, building-block bodies,
-   page-describing prose, the verdict rules (`<html lang>` matching the text, one video at a
-   time), suggested options, open items no host would show, and
-   anchors whose quote is gone. Rewrite or delete each sentence `WARN PROSE` names; steps for an
-   interface under review go in an element marked `data-subject-ui`. `WARN DECISION_CONTEXT` flags
-   material right after a decision: move each option's reasons into the option. `UNMEASURED` means the lint could not
-   see (a drawn diagram, a diff) — not a pass. `--lint-only <file>` lints a page with no server.
-   `--skip-poller` and `--allow-kit-drift` are never a handoff.
-
-   Preflight no longer checks browser errors, kernel warnings, overflow, layout, real rendering, or
-   whether `reveal()` reaches each item (owner decision 2026-10-06,
-   [ADR 0007](docs/adr/0007-static-lint-blocks-and-content-shapes.md)). Keep quoted text in the
-   source, a block's `<script type="text/plain">`, or a file an `<atelier-file>` shows, so the lint
-   can read it. A block that fails to render shows its error and source in place.
+   It fails silent handoff defects without a browser — store, poller, kit drift, and a structural
+   lint of the page source: the kernel loads, `atl-key` Regions, Activity and hosts, suggested
+   options, open items no host would show, and anchors whose quote is gone. It judges no content.
+   `UNMEASURED` means the lint could not see (text a script draws) — not a pass. `--lint-only
+   <file>` lints a page with no server. `--skip-poller` and `--allow-kit-drift` are never a handoff.
+   It does not check browser errors, overflow, layout, or whether `reveal()` reaches each item
+   ([ADR 0007](../docs/adr/0007-static-lint-blocks-and-content-shapes.md)).
 4. When preflight passes, open the URL for the human. Nothing else stands between a passing
    preflight and the handoff: no screenshots, no browser walk, no second reader.
 

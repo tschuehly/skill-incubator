@@ -65,11 +65,6 @@ A durable, informational message from the agent that needs no answer, about a Re
 Activity and dismissed by the human. Anything needing an answer is a Proposal instead.
 _Avoid_: notification, status, message
 
-**Building block**:
-An optional kit element that renders a short text body — a claim tree, diagram, chart, file, video,
-before/after pair, mockup, findings list, decision, zoomable flow, timeline, or tabs — inside a
-Region. It is content, not protocol: it holds no server state, only view state such as an open tab.
-_Avoid_: widget, component, snippet
 
 **Content shape**:
 The arrangement of a Surface chosen for the problem: a claim tree for a plan, an evidence and

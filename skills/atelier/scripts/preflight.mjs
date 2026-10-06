@@ -3,13 +3,13 @@
 //
 //   node <skill-dir>/scripts/preflight.mjs --url http://127.0.0.1:<port> \
 //     --poller-identity /abs/path/to/tools/review-poll.sh [--evidence-dir .review/preflight]
-//   node <skill-dir>/scripts/preflight.mjs --lint-only surface.html [--state store.json | --url <surface-url>] [--root <dir>]
+//   node <skill-dir>/scripts/preflight.mjs --lint-only surface.html [--state store.json | --url <surface-url>]
 //
 // It checks silent handoff defects without a browser: store and poller reachability, kit drift, and
-// a static lint of the Surface source (scripts/lint.mjs) — atl-key Regions, hosts and Activity,
-// building-block sources, page-describing prose, the verdict rules, suggested options, which host
-// each open item lands in, and stored anchor quotes. It does not run the page: browser errors,
-// overflow, layout, real rendering and reveal() are not checked (owner decision 2026-10-06, ADR 0007).
+// a structural lint of the Surface source (scripts/lint.mjs) — the kernel loads, atl-key Regions,
+// hosts and Activity, suggested options, which host each open item lands in, and stored anchor
+// quotes. It judges no content (ADR 0008) and does not run the page: browser errors, overflow,
+// layout and reveal() are not checked (owner decision 2026-10-06, ADR 0007).
 // A pass sends the human to the page; no screenshot or browser walk is required before handoff.
 //
 // --skip-poller exists for kernel tests. It is not a human handoff.
@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { lintSurface, NOT_CHECKED } from './lint.mjs';
 
 const args = process.argv.slice(2);
-let url = '', pollerIdentity = '', evidenceDir = '', skipPoller = false, allowKitDrift = false, lintOnly = '', stateFile = '', root = '';
+let url = '', pollerIdentity = '', evidenceDir = '', skipPoller = false, allowKitDrift = false, lintOnly = '', stateFile = '';
 while (args.length){
   const arg = args.shift();
   if (arg === '--url') url = args.shift() || '';
@@ -31,12 +31,11 @@ while (args.length){
   else if (arg === '--allow-kit-drift') allowKitDrift = true;
   else if (arg === '--lint-only') lintOnly = args.shift() || '';
   else if (arg === '--state') stateFile = args.shift() || '';
-  else if (arg === '--root') root = args.shift() || '';
   else { console.error(`unknown argument: ${arg}`); process.exit(2); }
 }
 if (!lintOnly && (!url || (!skipPoller && !pollerIdentity))){
   console.error('usage: preflight.mjs --url <surface-url> --poller-identity <absolute-poller-path> [--evidence-dir <dir>] [--skip-poller] [--allow-kit-drift]\n'
-    + '       preflight.mjs --lint-only <surface.html> [--state <store.json> | --url <surface-url>] [--root <dir>]');
+    + '       preflight.mjs --lint-only <surface.html> [--state <store.json> | --url <surface-url>]');
   process.exit(2);
 }
 
@@ -72,9 +71,7 @@ if (lintOnly){
   let state = null;
   if (stateFile) state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   else if (url) state = await fetch(new URL('/api/state', url)).then(r => r.json());
-  const base = path.resolve(root || path.dirname(lintOnly));
-  const readFile = async p => { try { return fs.readFileSync(path.join(base, p.split('?')[0]), 'utf8'); } catch { return null; } };
-  await runLint(html, { state, readFile });
+  await runLint(html, { state });
   finish(`${lintOnly} lints clean${state ? ' against its store' : ''}.`);
 }
 
@@ -120,8 +117,7 @@ if (!skipPoller && pollerIdentity){
   const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
   const kit = path.dirname(pollerIdentity);
   const digest = file => { try { return createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 12); } catch { return null; } };
-  const drift = [['atelier.mjs','atelier.mjs'], ['atelier.css','atelier.css'], ['atelier-blocks.mjs','atelier-blocks.mjs'],
-    ['atelier-blocks.css','atelier-blocks.css'], ['server.mjs','review-server.mjs'], ['poll.sh','review-poll.sh']]
+  const drift = [['atelier.mjs','atelier.mjs'], ['atelier.css','atelier.css'], ['server.mjs','review-server.mjs'], ['poll.sh','review-poll.sh']]
     .map(([source, copy]) => ({ copy, canonical: digest(path.join(assets, source)), local: digest(path.join(kit, copy)) }))
     .filter(file => file.canonical && file.canonical !== file.local);
   if (!drift.length) pass('KIT', `${kit} matches ${assets}`);
@@ -138,8 +134,7 @@ if (state){
   try {
     const page = await fetch(new URL('/', url), { signal: AbortSignal.timeout(5000) });
     if (!page.ok) throw new Error(`GET / returned HTTP ${page.status}`);
-    const readFile = async p => { try { const r = await fetch(new URL(p, url), { signal: AbortSignal.timeout(5000) }); return r.ok ? await r.text() : null; } catch { return null; } };
-    await runLint(await page.text(), { state, readFile });
+    await runLint(await page.text(), { state });
   } catch (error){ fail('LINT', `could not read the Surface source (${error.message})`); }
 }
 
