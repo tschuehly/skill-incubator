@@ -42,7 +42,10 @@ worktree inventory in the session before creating another worktree. Run commands
 those commands printed; ask the human when identities conflict or multiple worktrees are plausible.
 Fetch before judging freshness and follow the repository's update policy. Reuse the open pull
 request for the current branch; never create a duplicate. If the branch belongs to a
-stack, load `gh-stack` and preserve the stack's branch and PR boundaries.
+stack, load `gh-stack` and preserve the stack's branch and PR boundaries. Treat the stack as one
+delivery unit: one review contract over the combined diff from the bottom layer's merge-base to the
+top layer, and one full gate on the top layer. Fix each finding in the layer that owns it and run
+that layer's affected checks.
 
 Record the current head SHA. Every check and review below applies to a named SHA; a push invalidates
 remote evidence for the previous SHA.
@@ -59,11 +62,20 @@ configuration it reads. A failed required gate remains blocking until that gate 
 resulting state or the human explicitly accepts its documented unavailability; a narrower passing
 command is supplementary evidence, not a replacement.
 
-At `low`, run affected prescribed checks. At `medium`, run affected checks during iteration, then
-run the repository's final prescribed gate after review findings are resolved and before section 4;
-if the candidate SHA changes later, section 6 invalidates and reruns that gate. At `high` and
-`critical`, run the full prescribed gate before review or publication and again after every material
-code change. Repository policy is the floor at every level. Inspect the complete merge-base diff
+At `low`, run affected prescribed checks. At `medium` and `high`, run affected checks during
+iteration, then run the full prescribed gate once on the final candidate, after review findings are
+resolved and before section 4. At `critical`, also run the full gate before review and after every
+material code change. After publication, CI on the pushed SHA is the full gate; rerun the local
+full gate only when a later change adds a code path, schema, permission, or behavior beyond the
+finding it fixes. Repository policy is the floor at every level.
+
+A failing test is a **known flake** when the same test also fails on the target branch or appears in
+the repository's documented flaky-test list. Record it under Verification with that evidence; it
+does not block the gate. Every other failure blocks. When the repository serializes full gates
+behind a shared lock, use the queue time for reviews and affected checks, and queue a full gate
+only for a candidate SHA that no open finding will change.
+
+Inspect the complete merge-base diff
 and verify that it contains no secrets, accidental files, unrelated changes, or missing user-visible
 documentation.
 
@@ -90,7 +102,16 @@ merge-base and head SHA:
 
 Every independent readiness review receives the diff, specification, repository rules, and
 local-check evidence, and looks for concrete correctness, security, data-loss, concurrency,
-compatibility, operability, and missing-test failure modes. State whether the reviewed head is
+compatibility, operability, and missing-test failure modes.
+
+The first round runs the complete contract on the complete diff. Every later round is a **delta
+re-review**: rerun only the lenses that reported material findings, give each its earlier findings
+and the diff since the SHA it reviewed, and ask it to confirm each fix and check the touched code
+for regressions. A passing delta re-review completes that lens for the resulting SHA. A rebase or
+restack keeps earlier review results when `git range-diff` shows unchanged patches; hand-resolved
+conflicts get a delta re-review of the resolution.
+
+State whether the reviewed head is
 intentionally unpublished; before section 4, reviewers must not treat that expected publication
 state as a code defect. A finding is actionable only when it cites code, a repository rule, the
 specification, or a concrete failure mode. Treat unsupported "best practice" claims as noise. A
@@ -100,17 +121,20 @@ independent review required by the selected level.
 
 Reconcile every finding from every required report in the session as fixed, refuted with evidence,
 non-material with a reason, or explicitly accepted by the human. Never describe a report as passing
-when it says `FAIL`, `BLOCKING`, or `not a PASS`; after resolving such a verdict, rerun that required
-review against the resulting SHA until it passes. Fix material findings, refute incorrect findings
+when it says `FAIL`, `BLOCKING`, or `not a PASS`; after resolving such a verdict, run its delta
+re-review against the resulting SHA. Fix material findings, refute incorrect findings
 with evidence, and rerun affected checks. Once required reports pass, do not change the candidate
 solely for optional cleanup or a non-material simplification that cites no repository rule,
 specification requirement, or concrete failure mode; record it as non-material unless the human
 asks, because any edit reopens the selected contract. Ask the human when a finding changes approved intent or
-requires a product decision. Stop and ask after a round that produces no progress rather than
-cycling.
+requires a product decision. A fix that needs new design, a new API, another repository, or more
+than about an hour of new work is an intent change: offer the human fix-here, follow-up PR, or
+accepted limitation. Cap the loop at two rounds: after round 2, fix only **blocking** findings
+(security, data loss, or a broken specification requirement) and bring every remaining finding to
+the human as one list, each marked fix-now, follow-up, or accept.
 
-**Complete when:** every report required by the approved level completed successfully for the
-resulting head SHA, every finding has an explicit disposition, no material finding remains open
+**Complete when:** every lens required by the approved level passed its latest round, full or
+delta, for the resulting head SHA, every finding has an explicit disposition, no material finding remains open
 without human acceptance, and that SHA passes its required local checks. An unavailable required binding blocks this level until the human chooses
 a different permitted level or the binding becomes available.
 
@@ -165,7 +189,8 @@ Start one narrow observer for that PR and head SHA. Notify on:
 
 Use `safetyClass: observer`, a bounded expiry, and a reuse key containing repository, PR number, and
 head SHA. When a `/goal` is active, call `goal_wait` after the observer exists. Otherwise trust the
-monitor ping; do not block or add a second polling loop. Expiry means review is still pending, not
+monitor ping and end the turn; the observer survives session restarts, while a `sleep` loop dies
+with the session. Expiry means review is still pending, not
 that it passed.
 
 The snapshot reads GraphQL review threads, top-level PR comments, and every Copilot review body for
@@ -197,10 +222,11 @@ Resolve a Copilot thread only after its finding is fixed or refuted in a reply. 
 agent-authored comment, edit the original after resolution to begin `🤖 ✅ Resolved —` and include
 the evidence; never edit a human-authored comment on their behalf. Do not resolve a human
 reviewer's thread on their behalf. After a push, reapply section 2's gate requirement to the
-resulting SHA. At `low`, rerun the affected lead lenses. At `medium`, run one fresh independent
-review of the complete final diff, using section 3's complete-coverage rule when slices are
-necessary. At `high` or `critical`, rerun the complete selected review contract from section 3
-against the resulting SHA; required reports from an earlier SHA do not satisfy it. Request another
+resulting SHA. At `low`, rerun the affected lead lenses. At `medium` and `high`, run focused tests for
+each fix and one fresh cross-family delta re-review of the feedback fixes; rerun the complete
+contract only when a fix adds a code path, schema, permission, or behavior beyond its comment. At
+`critical`, rerun the complete selected review contract from section 3 against the resulting SHA.
+Push every fix from one Copilot review together, so each Copilot round costs one re-review. Request another
 Copilot review unless the repository's ruleset reviews new pushes automatically, then return to
 observation.
 
