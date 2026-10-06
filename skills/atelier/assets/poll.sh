@@ -5,7 +5,7 @@
 # Events address a Region by its key (`onboarding/provider`), which is what the agent passes
 # back to /api/reply, /api/propose and /api/update.
 #
-# Three modes:
+# Three modes, plus one snapshot:
 #   --stream (PRIMARY agent path — run under the harness Monitor tool, persistent):
 #           an infinite loop long-polling /api/poll. Each round persists the returned
 #           cursor ALWAYS (even when every event was filtered), then prints ONE compact
@@ -23,6 +23,9 @@
 #           Launch in the background; on the completion notification, act, then re-arm.
 #   --tail  (human "live tail"): the classic infinite loop for a human watching a terminal.
 #           Prints ALL event kinds. Never exits. Not an agent-wake path.
+#   --decisions (snapshot): prints one line per Proposal from GET /api/state `decisions` and exits:
+#           decided and kept as proposed, decided and changed, opened but undecided, or not opened.
+#           "not opened; default stands" is never agreement: the human did not see the options.
 #
 #   tools/poll.sh --stream           # primary: launch once via the Monitor tool
 #   tools/poll.sh --once             # no-Monitor fallback (exit-to-wake)
@@ -72,7 +75,8 @@ for arg in "$@"; do
     --stream) MODE="stream" ;;
     --once) MODE="once" ;;
     --tail|--loop) MODE="tail" ;;
-    *) echo "unknown arg: $arg (use --stream | --once | --tail)" >&2; exit 2 ;;
+    --decisions) MODE="decisions" ;;
+    *) echo "unknown arg: $arg (use --stream | --once | --tail | --decisions)" >&2; exit 2 ;;
   esac
 done
 
@@ -93,6 +97,31 @@ persist_cursor() {
   mkdir -p "$(dirname "$CURSOR_FILE")" 2>/dev/null || true
   printf '%s' "$1" > "${CURSOR_FILE}.tmp" 2>/dev/null && mv -f "${CURSOR_FILE}.tmp" "$CURSOR_FILE" 2>/dev/null || true
 }
+
+# --- snapshot: what each Proposal's state lets the agent conclude, then exit ---
+if [ "$MODE" = "decisions" ]; then
+  state="$(curl -fsS --max-time 10 "${BASE_URL}/api/state")" || { echo "SERVER-DOWN · ${BASE_URL} unreachable"; exit 1; }
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$state" | jq -r '.decisions // [] | .[] |
+      "DECISION-STATE · \(.region) (id \(.id)) — " + (
+        if .reading == "kept-as-proposed" then "decided, kept as proposed: \(.answer)"
+        elif .reading == "changed" then "decided, changed: \(.answer) (suggested: \(.suggested))"
+        elif .reading == "opened-undecided" then "opened, undecided (suggested: \(.suggested))"
+        else "not opened; default stands, NOT agreement (suggested: \(.suggested))" end) + " · " + .question'
+  else
+    python3 -c '
+import json, sys
+for d in json.loads(sys.argv[1]).get("decisions") or []:
+    r = d.get("reading")
+    what = {"kept-as-proposed": "decided, kept as proposed: %s" % d.get("answer"),
+            "changed": "decided, changed: %s (suggested: %s)" % (d.get("answer"), d.get("suggested")),
+            "opened-undecided": "opened, undecided (suggested: %s)" % d.get("suggested")}.get(r,
+            "not opened; default stands, NOT agreement (suggested: %s)" % d.get("suggested"))
+    print("DECISION-STATE · %s (id %s) — %s · %s" % (d.get("region"), d.get("id"), what, d.get("question")))
+' "$state"
+  fi
+  exit 0
+fi
 
 echo "▶ atelier poll started (${MODE}) — ${BASE_URL}/api/poll (cursor=${CURSOR})"
 echo "  script: ${SELF}"
@@ -186,6 +215,7 @@ parse_wake_jq() {
        elif (.choiceIndex != null) then ("Option " + (.choiceIndex | tostring))
        else (.status // "") end)
       + (((.comment.attachments // .attachments // []) | join(" ")) as $img | if $img != "" then " [images: " + $img + "]" else "" end)
+      + (if (.verdict // "") != "" then " · " + .verdict else "" end)
     ] | map(tostring | gsub("[\n\t]"; " ") | gsub(""; " ")) | join("")
   '
 }
@@ -211,6 +241,8 @@ for ev in data.get("events") or []:
         detail = ev.get("status", "") or ""
     if images:
         detail = detail + " [images: " + images + "]"
+    if ev.get("verdict"):
+        detail = detail + " · " + ev["verdict"]
     row = [
         str(ev.get("seq", "")),
         kind,

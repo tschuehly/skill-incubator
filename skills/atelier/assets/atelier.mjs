@@ -8,10 +8,13 @@
 //   <atelier-host for="a">             Threads and Proposals for "a" and below; the longest `for` wins
 //   <atelier-host>                     catch-all: unclaimed items, Regions gone, failed reveals
 //   <atelier-host layout="anchored">   cards level with their anchors while the host sits beside them
+//   <atelier-host collapsible>         folds away (Activity's ⇥ icon) and reserves no width
 //   <atelier-activity>                 Pick-to-comment, the "N waiting" drawer, notifications
 // On author elements the kernel sets attributes only: atl-changed, atl-anchor, atl-active, atl-hover,
 // atl-pick. Exports: getState, reveal, setRevealResolver, refresh, unresolvedAnchors.
-// Events: atelier:state and atelier:ready (out), atelier:rendered (in).
+// Events: atelier:state, atelier:ready and atelier:reveal (out), atelier:rendered (in).
+// Chrome labels follow <html lang> (German or English); actions are icons whose label is the
+// tooltip and the accessible name. A Proposal whose options reach the screen is reported opened.
 // ponytail: iframe picking is not built; a Surface that embeds a cooperating app posts its own
 // anchors (see references/protocol.md#extending).
 
@@ -40,6 +43,55 @@ const saveKept = () => { try { sessionStorage.setItem(KEPT, JSON.stringify([...k
   sessionStorage.setItem(ATTS, JSON.stringify([...atts].filter(([, v]) => v.length))); } catch {} };
 try { for (const [k, v] of JSON.parse(sessionStorage.getItem(KEPT) || '[]')) kept.set(k, v);
   for (const [k, v] of JSON.parse(sessionStorage.getItem(ATTS) || '[]')) atts.set(k, v); } catch {}
+
+// ===== chrome labels follow <html lang>: German, or English for anything else ==========
+// Written for each language, not translated word by word. Warnings about authoring defects (a
+// missing or doubled host) stay English: they are for the author, and the lint reports them too.
+const EN = {
+  thread: 'Thread', close: 'Close (Esc)', pasted: 'Pasted image', unattach: 'Remove image',
+  state: { open: 'Sent', acknowledged: 'Seen by agent', in_progress: 'Agent working', implemented: 'Done — check it', accepted: 'Accepted', rejected: 'Reopened' },
+  gone: 'Its section is no longer on this page.', changed: 'The part this pointed at has changed.',
+  notSentErr: e => `Not sent: ${e}. Your text is kept.`, decided: 'Decided', chosen: 'Chosen:', undo: 'Undo',
+  recommended: 'Recommended', requested: 'Explanation requested', why: 'Why this option? Ask for an explanation', unclear: 'What is unclear?',
+  ask: 'Ask', other: 'Something else — answer in your own words', yourAnswer: 'Your answer…', sendAnswer: 'Send answer', sends: '(⌘+Enter sends)',
+  unsent: 'Unsent Thread', notSent: 'Not sent', failed: 'failed', draft: '✎ draft', compose: 'Start a Thread…  (⌘+Enter sends; paste images)',
+  send: 'Send', discard: 'Discard', replies: n => `${n} ${n > 1 ? 'replies' : 'reply'}`, you: 'You', agent: 'Agent', reply: 'Reply',
+  replyHint: 'Reply…  (⌘+Enter sends)', replyDone: 'Reply, or say what is still wrong…  (⌘+Enter sends)',
+  accept: 'Accept — it is done', reopen: 'Reopen — say above what is still wrong', sayWrong: 'Say what is still wrong, then Reopen',
+  notAttached: e => `Image not attached: ${e}`, couldNot: (what, where, why) => `Could not show ${what}${where ? ' in ' + where : ''}: ${why}.`,
+  question: 'the question', theThread: 'the Thread', section: 'the section',
+  pick: 'Comment on… (or hold Alt and click)', picking: 'Click anything… (Esc)', waiting: n => `${n} waiting for you`, activity: 'Activity',
+  fresh: n => `${n} new`, waitingHead: 'Waiting for you', decideLine: 'Decide:', check: 'Check:', chosenHead: 'Just chosen',
+  changedHead: 'Changed since you looked', seen: '✓ Seen', updates: 'Updates', goTo: l => `Go to ${l}`, dismiss: 'Dismiss', nothing: 'Nothing new.',
+  notifyOn: '🔔 Desktop notifications on', notifyOff: '🔕 Desktop notifications off',
+  unknownRegions: (n, keys) => `Ready named ${n} Region(s) this page does not contain: ${keys}`,
+  pageUpdated: 'Page updated', agentReplied: 'Agent replied', needed: 'Decision needed', update: 'Update',
+  hide: 'Hide Threads', show: n => `Show Threads${n ? ` (${n})` : ''}`,
+};
+const DE = {
+  thread: 'Thread', close: 'Schließen (Esc)', pasted: 'Eingefügtes Bild', unattach: 'Bild entfernen',
+  state: { open: 'Gesendet', acknowledged: 'Agent hat es gelesen', in_progress: 'Agent ist dran', implemented: 'Erledigt – bitte prüfen', accepted: 'Angenommen', rejected: 'Wieder offen' },
+  gone: 'Diesen Abschnitt gibt es auf der Seite nicht mehr.', changed: 'Die markierte Stelle hat sich geändert.',
+  notSentErr: e => `Nicht gesendet: ${e}. Dein Text bleibt erhalten.`, decided: 'Entschieden', chosen: 'Gewählt:', undo: 'Rückgängig',
+  recommended: 'Empfohlen', requested: 'Erklärung angefordert', why: 'Warum diese Option? Erklärung anfordern', unclear: 'Was ist dir unklar?',
+  ask: 'Fragen', other: 'Etwas anderes – in eigenen Worten antworten', yourAnswer: 'Deine Antwort …', sendAnswer: 'Antwort senden', sends: '(⌘+Enter sendet)',
+  unsent: 'Noch nicht gesendet', notSent: 'Entwurf', failed: 'fehlgeschlagen', draft: '✎ Entwurf', compose: 'Was fällt dir auf? (⌘+Enter sendet, Bilder einfach einfügen)',
+  send: 'Senden', discard: 'Verwerfen', replies: n => `${n} ${n > 1 ? 'Antworten' : 'Antwort'}`, you: 'Du', agent: 'Agent', reply: 'Antworten',
+  replyHint: 'Antworten …  (⌘+Enter sendet)', replyDone: 'Antworten oder sagen, was noch nicht passt …  (⌘+Enter sendet)',
+  accept: 'Annehmen – passt so', reopen: 'Wieder öffnen – schreib oben, was fehlt', sayWrong: 'Schreib, was noch nicht passt, dann wieder öffnen',
+  notAttached: e => `Bild nicht angehängt: ${e}`, couldNot: (what, where, why) => `${what}${where ? ' in ' + where : ''} lässt sich nicht zeigen: ${why}.`,
+  question: 'Die Frage', theThread: 'Der Thread', section: 'Der Abschnitt',
+  pick: 'Etwas kommentieren (oder Alt gedrückt halten und klicken)', picking: 'Klick auf die Stelle … (Esc)', waiting: n => `${n} warten auf dich`, activity: 'Aktivität',
+  fresh: n => `${n} neu`, waitingHead: 'Wartet auf dich', decideLine: 'Offen:', check: 'Prüfen:', chosenHead: 'Gerade gewählt',
+  changedHead: 'Seit deinem letzten Blick geändert', seen: '✓ Gesehen', updates: 'Neuigkeiten', goTo: l => `Zu ${l}`, dismiss: 'Ausblenden', nothing: 'Nichts Neues.',
+  notifyOn: '🔔 Desktop-Hinweise an', notifyOff: '🔕 Desktop-Hinweise aus',
+  unknownRegions: (n, keys) => `Ready nennt ${n} Region(en), die es auf dieser Seite nicht gibt: ${keys}`,
+  pageUpdated: 'Seite aktualisiert', agentReplied: 'Neue Antwort vom Agent', needed: 'Deine Entscheidung', update: 'Neuigkeit',
+  hide: 'Threads ausblenden', show: n => `Threads einblenden${n ? ` (${n})` : ''}`,
+};
+const T = /^de\b/i.test(document.documentElement.lang) ? DE : EN;
+// An action is a compact icon; its label is the tooltip and the accessible name.
+const icon = (glyph, label, attrs = '', cls = '') => `<button type="button" class="atl-icon ${cls}" ${attrs} title="${esc(label)}" aria-label="${esc(label)}">${glyph}</button>`;
 
 // ===== Regions: atl-key on any element =============================================
 const regionKey = el => { const ks = []; for (let e = el; e; e = e.parentElement?.closest('[atl-key]')) ks.unshift(e.getAttribute('atl-key')); return ks.join('/'); };
@@ -122,9 +174,11 @@ function anchorFromElement(el, event) {
   const box = el.closest('svg g.node, svg [data-anchor]');
   if (box === region) return { region: key };            // the box is the Region itself
   if (box && region.contains(box)) return { region: key, selector: boxSelector(box, region) };
-  const svg = el.closest('svg'), target = svg && region.contains(svg) ? svg : el;   // a Region may be a <g> inside the SVG
+  // a Region may be a <g> inside the SVG; a block marks a video or a mockup data-atl-point
+  const svg = el.closest('svg'), pt = el.closest('[data-atl-point]');
+  const target = svg && region.contains(svg) ? svg : pt && region.contains(pt) ? pt : el;
   const a = { region: key, selector: selectorFor(target, region) };
-  if (target.tagName === 'IMG' || target.tagName.toLowerCase() === 'svg') {
+  if (target.tagName === 'IMG' || target.tagName.toLowerCase() === 'svg' || target.hasAttribute('data-atl-point')) {
     const r = target.getBoundingClientRect();
     a.point = { x: +((event.clientX - r.left) / r.width).toFixed(3), y: +((event.clientY - r.top) / r.height).toFixed(3) };
   }
@@ -162,7 +216,7 @@ try { for (const [id, p] of Object.entries(JSON.parse(localStorage.getItem(DRAFT
 } } catch {}
 
 const float = document.createElement('button');
-float.className = 'atl-float'; float.type = 'button'; float.textContent = '💬 Thread'; float.hidden = true;
+float.className = 'atl-float'; float.type = 'button'; float.textContent = `💬 ${T.thread}`; float.hidden = true;
 float.addEventListener('mousedown', e => e.preventDefault());
 float.addEventListener('click', () => float._anchor && openNew(float._anchor));
 document.addEventListener('mouseup', e => {
@@ -254,39 +308,42 @@ function items() {
   return out.map(it => ({ ...it, res: resolve(it.anchor, it.region, map) })).sort((a, b) => first(a) - first(b));
 }
 
-const STATE = { open: 'Sent', acknowledged: 'Seen by agent', in_progress: 'Agent working', implemented: 'Done — check it', accepted: 'Accepted', rejected: 'Reopened' };
+const STATE = T.state;
 function where(it) {
-  if (!it.res) return '<div class="atl-detached">Its section is no longer on this page.</div>';
-  return it.res.detached ? '<div class="atl-detached">The part this pointed at has changed.</div>' : '';
+  if (!it.res) return `<div class="atl-detached">${T.gone}</div>`;
+  return it.res.detached ? `<div class="atl-detached">${T.changed}</div>` : '';
 }
-const CLOSE = '<button type="button" class="atl-close" data-close aria-label="Close" title="Close (Esc)">×</button>';
-const errHTML = id => errs.has(id) ? `<div class="atl-error" role="alert">Not sent: ${esc(errs.get(id))}. Your text is kept.</div>` : '';
-const imgs = urls => urls?.length ? `<div class="atl-atts">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Pasted image"></a>`).join('')}</div>` : '';
+const CLOSE = `<button type="button" class="atl-close" data-close aria-label="${T.close}" title="${T.close}">×</button>`;
+const errHTML = id => errs.has(id) ? `<div class="atl-error" role="alert">${esc(T.notSentErr(errs.get(id)))}</div>` : '';
+const imgs = urls => urls?.length ? `<div class="atl-atts">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="${T.pasted}"></a>`).join('')}</div>` : '';
 const pendingImgs = key => { const u = atts.get(key) || [];
-  return u.length ? `<div class="atl-atts">${u.map((x, i) => `<span class="atl-att"><img src="${esc(x)}" alt="Pasted image"><button type="button" class="atl-att-x" data-unattach="${esc(key)}" data-i="${i}" aria-label="Remove image">×</button></span>`).join('')}</div>` : ''; };
+  return u.length ? `<div class="atl-atts">${u.map((x, i) => `<span class="atl-att"><img src="${esc(x)}" alt="${T.pasted}"><button type="button" class="atl-att-x" data-unattach="${esc(key)}" data-i="${i}" aria-label="${T.unattach}" title="${T.unattach}">×</button></span>`).join('')}</div>` : ''; };
 const clean = o => String(o).replace(/\s*\((recommended|empfohlen)\)\s*$/i, '');
 const secs = until => `${Math.max(0, Math.ceil((until - Date.now()) / 1000))} s`;
-const ask = (key, summary, field, button) => `<details class="atl-ask" data-keep="${esc(key)}"><summary>${summary}</summary>
-  <textarea ${field} placeholder="${button === 'Ask' ? 'What is unclear?' : 'Your answer…'}  (⌘+Enter sends)"></textarea>`;
+// A folded request form: its summary is an icon, its body a text box and a send icon.
+const ask = (key, glyph, label, field, placeholder, send) => `<details class="atl-ask" data-keep="${esc(key)}"><summary class="atl-icon" title="${esc(label)}" aria-label="${esc(label)}">${glyph}</summary>
+  <textarea ${field} placeholder="${esc(placeholder)}  ${T.sends}"></textarea>${send}</details>`;
 // An open question shows its options as buttons: one click chooses, and Undo stays beside the
-// choice until the server's window closes. Only then does the agent hear of it.
+// choice until the server's window closes. Only then does the agent hear of it. Each option holds
+// its own context: the explanation request, its form, and the answer sit inside the option.
 function proposalHTML(it) {
   const pr = it.pr, id = it.id, chosen = pr.custom || clean(pr.options?.[pr.choiceIndex] ?? '');
   if (pr.status === 'decided' && id !== active)
-    return `<button type="button" class="atl-card atl-card--line atl-card--decided" data-open="${id}">✓ <b>Decided</b> · ${esc(chosen.split(/[.:;(]/)[0])}</button>`;
+    return `<button type="button" class="atl-card atl-card--line atl-card--decided" data-open="${id}">✓ <b>${T.decided}</b> · ${esc(chosen.split(/[.:;(]/)[0])}</button>`;
   const head = `<div class="atl-card atl-card--decision${pr.status === 'pending' ? ' is-pending' : ''}" data-card="${id}">${pr.status === 'decided' ? CLOSE : ''}${where(it)}
     <p class="atl-q">${esc(pr.question)}</p>`;
-  if (pr.status === 'decided') return `${head}<div class="atl-state">Decided: ${esc(chosen)}</div></div>`;
-  if (pr.status === 'pending') return `${head}<div class="atl-pending" role="status">Chosen: <b>${esc(chosen)}</b> ·
-    <button type="button" class="atl-btn" data-undo="${id}">Undo (<span data-until="${pr.undoUntil}">${secs(pr.undoUntil)}</span>)</button></div>${errHTML(id)}</div>`;
+  if (pr.status === 'decided') return `${head}<div class="atl-state">${T.decided}: ${esc(chosen)}</div></div>`;
+  const undo = `<button type="button" class="atl-btn" data-undo="${id}">${T.undo} (<span data-until="${pr.undoUntil}">${secs(pr.undoUntil)}</span>)</button>`;
+  if (pr.status === 'pending') return `${head}<div class="atl-pending" role="status">${T.chosen} <b>${esc(chosen)}</b> · ${undo}</div>${errHTML(id)}</div>`;
+  const suggested = Number.isInteger(pr.suggested) ? pr.suggested : 0;
   const opt = (o, i) => {
     const req = pr.explanationRequests?.[i], ex = pr.explanations?.[i];
-    return `<div class="atl-option"><button type="button" class="atl-btn atl-choice" data-choose="${id}" data-i="${i}">${esc(clean(o))}${i === 0 ? ' <span class="atl-rec">Recommended</span>' : ''}</button>
-      ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? '<div class="atl-explain atl-meta">Explanation requested</div>'
-        : `${ask(`${id}|explain:${i}`, 'Explain', `data-explain-text="${id}:${i}"`, 'Ask')}<button type="button" class="atl-btn" data-explain="${id}" data-i="${i}">Ask</button></details>`}</div>`;
+    return `<div class="atl-option"><button type="button" class="atl-btn atl-choice" data-choose="${id}" data-i="${i}">${esc(clean(o))}${i === suggested ? ` <span class="atl-rec">${T.recommended}</span>` : ''}</button>
+      ${ex ? `<div class="atl-explain">${esc(ex.text)}</div>` : req ? `<div class="atl-explain atl-meta">${T.requested}</div>`
+        : ask(`${id}|explain:${i}`, '?', T.why, `data-explain-text="${id}:${i}"`, T.unclear, icon('➤', T.ask, `data-explain="${id}" data-i="${i}"`, 'atl-icon--primary'))}</div>`;
   };
   return `${head}<div class="atl-options">${(pr.options || []).map(opt).join('')}</div>
-    ${ask(`${id}|custom`, 'Something else…', `data-custom="${id}"`, 'Send answer')}<button type="button" class="atl-btn atl-btn--primary" data-answer="${id}">Send answer</button></details>${errHTML(id)}</div>`;
+    ${ask(`${id}|custom`, '✎', T.other, `data-custom="${id}"`, T.yourAnswer, icon('➤', T.sendAnswer, `data-answer="${id}"`, 'atl-icon--primary'))}${errHTML(id)}</div>`;
 }
 function cardHTML(it) {
   const open = it.id === active;
@@ -294,33 +351,72 @@ function cardHTML(it) {
   const c = it.c, st = S.commentState[c.id]?.value, replies = S.replies[c.id] || [];
   const quote = it.anchor?.quote ? `<blockquote>${esc(it.anchor.quote.slice(0, 140))}</blockquote>` : '';
   if (it.kind === 'new' && !open) return `<button type="button" class="atl-card atl-card--line" data-open="${it.id}">
-      <span class="atl-first">✎ ${esc(kept.get(it.id + '|new') || c.text || 'Unsent Thread')}</span><span class="atl-meta">Not sent${errs.has(it.id) ? ' · failed' : ''}</span></button>`;
+      <span class="atl-first">✎ ${esc(kept.get(it.id + '|new') || c.text || T.unsent)}</span><span class="atl-meta">${T.notSent}${errs.has(it.id) ? ` · ${T.failed}` : ''}</span></button>`;
   if (it.kind === 'new') return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}${it.anchor?.quote ? '' : `<div class="atl-meta">${esc(labelOf(it.region))}</div>`}
-      <textarea data-new placeholder="Start a Thread…  (⌘+Enter sends; paste images)">${esc(c.text || '')}</textarea>${pendingImgs(it.id + '|new')}
-      <div class="atl-row"><button type="button" class="atl-btn atl-btn--primary" data-send="${it.id}">Send</button><button type="button" class="atl-link" data-discard="${it.id}">Discard</button></div>${errHTML(it.id)}</div>`;
+      <textarea data-new placeholder="${T.compose}">${esc(c.text || '')}</textarea>${pendingImgs(it.id + '|new')}
+      <div class="atl-row">${icon('➤', T.send, `data-send="${it.id}"`, 'atl-icon--primary')}${icon('🗑', T.discard, `data-discard="${it.id}"`)}</div>${errHTML(it.id)}</div>`;
   if (!open) return `<button type="button" class="atl-card atl-card--line ${st === 'implemented' ? 'is-yours' : ''}" data-open="${it.id}">
-      <span class="atl-first">${esc(c.text)}</span><span class="atl-meta">${replies.length ? replies.length + (replies.length > 1 ? ' replies' : ' reply') + ' · ' : ''}${STATE[st] || ''}${kept.get(it.id + '|reply') ? ' · ✎ draft' : ''}</span></button>`;
+      <span class="atl-first">${esc(c.text)}</span><span class="atl-meta">${replies.length ? T.replies(replies.length) + ' · ' : ''}${STATE[st] || ''}${kept.get(it.id + '|reply') ? ` · ${T.draft}` : ''}</span></button>`;
   return `<div class="atl-card is-open" data-card="${it.id}">${CLOSE}${quote}${where(it)}
       <div class="atl-msg atl-msg--you">${esc(c.text)}${imgs(c.attachments)}</div>
-      ${replies.map(r => `<div class="atl-msg ${r.author === 'human' ? 'atl-msg--you' : ''}"><span class="atl-who">${r.author === 'human' ? 'You' : 'Agent'}</span>${esc(r.msg)}${imgs(r.attachments)}</div>`).join('')}
-      <div class="atl-state">${STATE[st] || ''}</div>
-      <textarea data-reply-text="${it.id}" placeholder="${st === 'implemented' ? 'Reply, or say what is still wrong…' : 'Reply…'}  (⌘+Enter sends)"></textarea>${pendingImgs(it.id + '|reply')}
-      <div class="atl-row"><button type="button" class="atl-btn ${st === 'implemented' ? '' : 'atl-btn--primary'}" data-reply="${it.id}">Reply</button>
-      ${st === 'implemented' ? `<button type="button" class="atl-btn atl-btn--primary" data-accept="${it.id}">Accept</button><button type="button" class="atl-btn" data-reject="${it.id}" title="Needs the text above">Reopen</button>` : ''}</div>${errHTML(it.id)}</div>`;
+      ${replies.map(r => `<div class="atl-msg ${r.author === 'human' ? 'atl-msg--you' : ''}"><span class="atl-who">${r.author === 'human' ? T.you : T.agent}</span>${esc(r.msg)}${imgs(r.attachments)}</div>`).join('')}
+      <textarea data-reply-text="${it.id}" placeholder="${st === 'implemented' ? T.replyDone : T.replyHint}"></textarea>${pendingImgs(it.id + '|reply')}
+      <div class="atl-row">${icon('➤', T.reply, `data-reply="${it.id}"`, st === 'implemented' ? '' : 'atl-icon--primary')}
+      ${st === 'implemented' ? icon('✓', T.accept, `data-accept="${it.id}"`, 'atl-icon--primary') + icon('↺', T.reopen, `data-reject="${it.id}"`) : ''}<span class="atl-state">${STATE[st] || ''}</span></div>${errHTML(it.id)}</div>`;
 }
-
 const textareaKind = t => t.dataset.replyText ? 'reply' : t.dataset.custom ? 'custom' : t.dataset.explainText ? 'explain:' + t.dataset.explainText.split(':').pop() : 'new';
 const fieldKey = t => t.closest('[data-card]')?.dataset.card + '|' + textareaKind(t);
 const syncKept = () => { for (const t of document.querySelectorAll('atelier-host textarea')) kept.set(fieldKey(t), t.value); };
+// A focused control in a card — a text box, or a button a reveal focused — keeps focus when the
+// card is redrawn (a store change, an opened report coming back).
+const CONTROLS = 'button, summary';
 function captureFocus() {
   const t = document.activeElement;
-  return t?.matches?.('atelier-host textarea') ? { key: fieldKey(t), start: t.selectionStart, end: t.selectionEnd } : null;
+  if (t?.matches?.('atelier-host textarea')) return { key: fieldKey(t), start: t.selectionStart, end: t.selectionEnd };
+  const card = t?.matches?.(CONTROLS) && t.closest('atelier-host [data-card]');
+  return card ? { card: card.dataset.card, i: [...card.querySelectorAll(CONTROLS)].indexOf(t) } : null;
 }
 function restoreFocus(f) {
+  if (f?.card) return $(`atelier-host [data-card="${CSS.escape(f.card)}"]`)?.querySelectorAll(CONTROLS)[f.i]?.focus({ preventScroll: true });
   const t = f && [...document.querySelectorAll('atelier-host textarea')].find(x => fieldKey(x) === f.key);
   // preventScroll: an anchored card is placed after this, and focusing it unplaced scrolls the page
   if (t) { t.focus({ preventScroll: true }); t.setSelectionRange(f.start, f.end); }
 }
+
+// Collapsible hosts (<atelier-host collapsible>) fold away together from Activity's ⇥ icon and
+// reserve no width; their cards, drafts and focus stay in the DOM. Showing any of their cards
+// unfolds them, so nothing waiting is ever out of reach behind a fold.
+const FOLD = 'atelier:hosts';
+let folded = false;
+try { folded = localStorage.getItem(FOLD) === 'folded'; } catch {}
+document.documentElement.toggleAttribute('atl-hosts-folded', folded);
+function setFolded(on) {
+  folded = on; document.documentElement.toggleAttribute('atl-hosts-folded', on);
+  try { localStorage.setItem(FOLD, on ? 'folded' : ''); } catch {}
+}
+
+// A Proposal counts as opened when its options are on the human's screen — at least half its card
+// visible (or half the viewport, for a tall card) in a shown host, with the tab in front — because
+// only the card shows its options and recommendation. A report stays pending until the server
+// answers 2xx, and every render retries what is pending, so an opening survives a failed request
+// and is sent once the server is back.
+const unreported = new Set(), sending = new Set(), reported = new Set();
+const onScreen = e => e.isIntersecting && e.intersectionRect.height >= Math.min(e.boundingClientRect.height, innerHeight) / 2;
+const watcher = typeof IntersectionObserver !== 'undefined' && new IntersectionObserver(es => {
+  for (const e of es) if (onScreen(e) && !document.hidden && !reported.has(e.target.dataset.card)) unreported.add(e.target.dataset.card);
+  reportOpened();
+}, { threshold: [0, .25, .5, .75, 1] });
+function reportOpened() {
+  for (const id of unreported) {
+    if (!S.proposals?.[id] || S.proposals[id].openedAt) { unreported.delete(id); continue; }
+    if (sending.has(id)) continue;
+    sending.add(id);
+    fetch('/api/proposal-opened', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+      .then(r => { if (r.ok) { unreported.delete(id); reported.add(id); } }, () => {})
+      .finally(() => sending.delete(id));
+  }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
 
 const highlights = typeof Highlight !== 'undefined' && CSS.highlights;
 function render(focus = captureFocus()) {
@@ -328,6 +424,7 @@ function render(focus = captureFocus()) {
   cache = items();
   const idx = hostIndex();
   for (const it of cache) it.host = route(it, idx);
+  if (folded && active && cache.find(i => i.id === active)?.host?.hasAttribute('collapsible')) setFolded(false);
   warn(idx.dup.length ? `Each address needs exactly one host, but this page has ${idx.dup.join(' and ')}.` : '', 'hosts');
   document.querySelectorAll('[atl-anchor],[atl-active]').forEach(e => { e.removeAttribute('atl-anchor'); e.removeAttribute('atl-active'); });
   if (highlights) {
@@ -343,6 +440,9 @@ function render(focus = captureFocus()) {
   restoreFocus(focus);
   layout();
   renderActivity();
+  if (watcher) { watcher.disconnect();
+    for (const c of document.querySelectorAll('atelier-host .atl-card--decision[data-card]')) if (!S.proposals?.[c.dataset.card]?.openedAt) watcher.observe(c); }
+  reportOpened();
   if (booted) {
     const list = cache.filter(i => i.kind === 'thread' || i.kind === 'proposal').map(i => i.kind === 'thread'
       ? { kind: 'thread', id: i.id, region: i.region, status: S.commentState[i.id]?.value || 'open', waiting: S.commentState[i.id]?.value === 'implemented' }
@@ -468,7 +568,7 @@ document.addEventListener('click', async e => {
     return act(d.reply, async () => { await post('/api/thread-message', { region: itemOf(d.reply).region, id: d.reply, msg, attachments: images }); forget(d.reply + '|reply', { text: msg, images }); }); }
   if (d.accept) return act(d.accept, () => post('/api/comment-state', { region: itemOf(d.accept).region, id: d.accept, state: 'accepted' }));
   if (d.reject) { const ta = $(`[data-reply-text="${d.reject}"]`), msg = ta.value.trim();
-    if (!msg) { ta.placeholder = 'Say what is still wrong, then Reopen'; return ta.focus({ preventScroll: true }); }
+    if (!msg) { ta.placeholder = T.sayWrong; return ta.focus({ preventScroll: true }); }
     return act(d.reject, async () => { await post('/api/comment-reject', { region: itemOf(d.reject).region, id: d.reject, msg }); forget(d.reject + '|reply', { text: msg }); }); }
   // A choice and its Undo countdown never sit under the open drawer.
   if ((d.choose || d.answer) && drawer?.matches(':popover-open')) drawer.hidePopover();
@@ -482,6 +582,7 @@ document.addEventListener('click', async e => {
     return act(d.explain, async () => { await post('/api/explain-request', { id: d.explain, optionIndex: +d.i, answer }); forget(key, { text: answer }); }); }
   if (d.undo) return undo(d.undo);
   if ('pick' in d) return setPicking(!picking);
+  if ('fold' in d) { if (!folded && itemOf(active)?.host?.hasAttribute('collapsible')) active = null; setFolded(!folded); return render(); }
   if ('notify' in d) { localStorage.setItem(NOTIFY, notifyOn() ? 'off' : 'on');
     if (hasNotify && Notification.permission === 'default') await Notification.requestPermission(); return renderActivity(); }
   if (d.dismiss) return act(d.dismiss, () => post('/api/update-dismiss', { id: d.dismiss }));
@@ -522,7 +623,7 @@ async function attachFiles(ta, files) {
     const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(f); });
     let url;
     try { url = (await post('/api/attach', { name: f.name || 'pasted', type: f.type, data })).url; }
-    catch (e) { warn(`Image not attached: ${e.message}`, 'attach'); continue; }
+    catch (e) { warn(T.notAttached(e.message), 'attach'); continue; }
     const to = key.endsWith('|new') && !pending.has(card) ? card + '|reply' : key;
     atts.set(to, [...atts.get(to) || [], url]); saveKept();
     if (to.endsWith('|new')) saveDrafts();
@@ -549,7 +650,13 @@ const notify = (title, body) => { if (notifyOn() && document.hidden) new Notific
 // The page owns selection, tabs and filters; one resolver lets it show the target first.
 let resolver = null;
 export function setRevealResolver(fn) { resolver = typeof fn === 'function' ? fn : null; }
-const unfold = el => { for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true; };
+// Content that hides its parts another way (a tab, a zoomed flow) listens for atelier:reveal, whose
+// detail.target is the element about to be shown, and shows it before the kernel scrolls there.
+const unfold = el => {
+  if (!el) return;
+  document.dispatchEvent(new CustomEvent('atelier:reveal', { detail: { target: el } }));
+  for (let d = el.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+};
 const visible = el => !!el?.getClientRects().length;
 function showCard(id) {
   const card = $(`[data-card="${id}"]`) || $(`[data-slot="${id}"]`);
@@ -566,8 +673,8 @@ export async function reveal(target) {
   const id = typeof target === 'string' ? target : target?.id, it = id && itemOf(id);
   const t = { ...(typeof target === 'object' ? target : {}), id, region: target?.region || it?.region, kind: target?.kind || it?.kind };
   const fail = why => {
-    const what = it ? (it.kind === 'proposal' ? 'the question' : 'the Thread') : 'the section';
-    warn(`Could not show ${what}${t.region ? ' in ' + labelOf(t.region) : ''}: ${why}.`, 'reveal');
+    const what = it ? (it.kind === 'proposal' ? T.question : T.theThread) : T.section;
+    warn(T.couldNot(what, t.region && labelOf(t.region), why), 'reveal');
     if (it) { strays.add(id); active = id; render(); showCard(id); }
     return false;
   };
@@ -604,17 +711,19 @@ function renderActivity() {
   const waiting = cache.filter(i => i.kind === 'proposal' && i.pr.status === 'open' || i.kind === 'thread' && S.commentState[i.id]?.value === 'implemented');
   const chosen = cache.filter(i => i.kind === 'proposal' && i.pr.status === 'pending');
   const news = ups.length + changed.length;
+  const foldable = cache.filter(i => i.host?.hasAttribute('collapsible')).length;
   el.querySelector('.atl-tools').innerHTML = `
-    <button type="button" class="atl-btn ${picking ? 'atl-btn--primary' : ''}" data-pick title="Or hold Alt and click">${picking ? 'Click anything… (Esc)' : '💬 Comment on…'}</button>
-    <button type="button" class="atl-btn ${waiting.length ? 'atl-btn--warn' : ''}" popovertarget="atl-drawer">${waiting.length ? `${waiting.length} waiting for you` : 'Activity'}${news ? ` · ${news} new` : ''}</button>`;
+    ${picking ? `<button type="button" class="atl-btn atl-btn--primary" data-pick>${T.picking}</button>` : icon('💬', T.pick, 'data-pick')}
+    <button type="button" class="atl-btn ${waiting.length ? 'atl-btn--warn' : ''}" popovertarget="atl-drawer">${waiting.length ? T.waiting(waiting.length) : T.activity}${news ? ` · ${T.fresh(news)}` : ''}</button>
+    ${$('atelier-host[collapsible]') ? icon(folded ? `⇤<small>${foldable || ''}</small>` : '⇥', folded ? T.show(foldable) : T.hide, `data-fold aria-pressed="${!folded}"`) : ''}`;
   el.querySelector('.atl-drawer').innerHTML = `
-    <div class="atl-drawer-head"><b>Activity</b><button type="button" class="atl-link" popovertarget="atl-drawer" popovertargetaction="hide">Close</button></div>
-    ${waiting.length ? `<h4>Waiting for you</h4>${waiting.map(i => `<button type="button" class="atl-feed-item atl-feed-btn" data-reveal="${i.id}">${i.kind === 'proposal' ? '<b>Decide:</b> ' + esc(i.pr.question) : '<b>Check:</b> ' + esc(i.c.text)}<span>${esc(labelOf(i.region))}</span></button>`).join('')}` : ''}
-    ${chosen.length ? `<h4>Just chosen</h4>${chosen.map(i => `<div class="atl-feed-item"><button type="button" class="atl-link" data-reveal="${i.id}">${esc(i.pr.question)}</button><p>Chosen: ${esc(i.pr.custom || clean(i.pr.options[i.pr.choiceIndex]))}</p><button type="button" class="atl-btn" data-undo="${i.id}">Undo (<span data-until="${i.pr.undoUntil}">${secs(i.pr.undoUntil)}</span>)</button></div>`).join('')}` : ''}
-    ${changed.length ? `<h4>Changed since you looked</h4>${changed.map(k => `<div class="atl-feed-item"><button type="button" class="atl-link" data-go="${esc(k)}">${esc(labelOf(k))}</button> <button type="button" class="atl-link" data-ack="${esc(k)}">✓ Seen</button></div>`).join('')}` : ''}
-    ${ups.length ? `<h4>Updates</h4>${ups.map(u => `<div class="atl-feed-item"><b>${esc(u.title)}</b>${u.body ? `<p>${esc(u.body)}</p>` : ''}<button type="button" class="atl-link" data-go="${esc(u.region)}">Go to ${esc(labelOf(u.region))}</button> <button type="button" class="atl-link" data-dismiss="${u.id}">Dismiss</button></div>`).join('')}` : ''}
-    ${waiting.length || chosen.length || news ? '' : '<p class="atl-hint">Nothing new.</p>'}
-    <button type="button" class="atl-link" data-notify>${notifyOn() ? '🔔 Desktop notifications on' : '🔕 Desktop notifications off'}</button>`;
+    <div class="atl-drawer-head"><b>${T.activity}</b>${icon('×', T.close, 'popovertarget="atl-drawer" popovertargetaction="hide"')}</div>
+    ${waiting.length ? `<h4>${T.waitingHead}</h4>${waiting.map(i => `<button type="button" class="atl-feed-item atl-feed-btn" data-reveal="${i.id}">${i.kind === 'proposal' ? `<b>${T.decideLine}</b> ` + esc(i.pr.question) : `<b>${T.check}</b> ` + esc(i.c.text)}<span>${esc(labelOf(i.region))}</span></button>`).join('')}` : ''}
+    ${chosen.length ? `<h4>${T.chosenHead}</h4>${chosen.map(i => `<div class="atl-feed-item"><button type="button" class="atl-link" data-reveal="${i.id}">${esc(i.pr.question)}</button><p>${T.chosen} ${esc(i.pr.custom || clean(i.pr.options[i.pr.choiceIndex]))}</p><button type="button" class="atl-btn" data-undo="${i.id}">${T.undo} (<span data-until="${i.pr.undoUntil}">${secs(i.pr.undoUntil)}</span>)</button></div>`).join('')}` : ''}
+    ${changed.length ? `<h4>${T.changedHead}</h4>${changed.map(k => `<div class="atl-feed-item"><button type="button" class="atl-link" data-go="${esc(k)}">${esc(labelOf(k))}</button> <button type="button" class="atl-link" data-ack="${esc(k)}">${T.seen}</button></div>`).join('')}` : ''}
+    ${ups.length ? `<h4>${T.updates}</h4>${ups.map(u => `<div class="atl-feed-item"><b>${esc(u.title)}</b>${u.body ? `<p>${esc(u.body)}</p>` : ''}<button type="button" class="atl-link" data-go="${esc(u.region)}">${esc(T.goTo(labelOf(u.region)))}</button> <button type="button" class="atl-link" data-dismiss="${u.id}">${T.dismiss}</button></div>`).join('')}` : ''}
+    ${waiting.length || chosen.length || news ? '' : `<p class="atl-hint">${T.nothing}</p>`}
+    <button type="button" class="atl-link" data-notify>${notifyOn() ? T.notifyOn : T.notifyOff}</button>`;
   document.querySelectorAll('[atl-changed]').forEach(r => r.removeAttribute('atl-changed'));
   changed.forEach(k => regionEl(k)?.setAttribute('atl-changed', ''));
 }
@@ -647,7 +756,7 @@ async function onReady(named) {
   const focus = captureFocus();
   for (const key of named) { const cur = regionEl(key), next = incoming.get(key); if (cur && next) cur.replaceWith(document.importNode(next, true)); }
   const unknown = named.filter(k => !incoming.has(k));
-  warn(unknown.length ? `Ready named ${unknown.length} Region(s) this page does not contain: ${unknown.join(', ')}` : '', 'ready');
+  warn(unknown.length ? T.unknownRegions(unknown.length, unknown.join(', ')) : '', 'ready');
   render(null);
   // The page re-applies its own view state (selected record, open tab) before focus returns.
   document.dispatchEvent(new CustomEvent('atelier:ready', { detail: { changed: named, unknown } }));
@@ -667,10 +776,10 @@ async function loop() {
       document.documentElement.removeAttribute('data-atl-offline');
       if (!r.events?.length) continue;
       for (const ev of r.events) {
-        if (ev.kind === 'ready') { await onReady(ev.changed); notify('Page updated', (ev.changed || []).map(labelOf).join(', ')); }
-        if (ev.kind === 'reply') notify('Agent replied', labelOf(ev.region));
-        if (ev.kind === 'proposal') notify('Decision needed', labelOf(ev.region));
-        if (ev.kind === 'update') notify(ev.title || 'Update', labelOf(ev.region));
+        if (ev.kind === 'ready') { await onReady(ev.changed); notify(T.pageUpdated, (ev.changed || []).map(labelOf).join(', ')); }
+        if (ev.kind === 'reply') notify(T.agentReplied, labelOf(ev.region));
+        if (ev.kind === 'proposal') notify(T.needed, labelOf(ev.region));
+        if (ev.kind === 'update') notify(ev.title || T.update, labelOf(ev.region));
         cursor = ev.seq;                                 // handled; a later failure retries from here
       }
       cursor = r.cursor;

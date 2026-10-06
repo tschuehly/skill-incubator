@@ -27,6 +27,7 @@ const STORE_FILE = path.join(DATA_DIR, `${NAME}.json`);
 const UNDO_MS = /^\d+$/.test(process.env.UNDO_MS || '') ? Number(process.env.UNDO_MS) : 30000;
 await fsp.mkdir(DATA_DIR, { recursive: true });
 
+const KIT_FILES = new Set(['/atelier.mjs', '/atelier.css', '/atelier-blocks.mjs', '/atelier-blocks.css']);
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.mjs':'text/javascript', '.css':'text/css',
   '.json':'application/json', '.webp':'image/webp', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png',
   '.svg':'image/svg+xml', '.gif':'image/gif', '.woff2':'font/woff2', '.woff':'font/woff', '.mp4':'video/mp4',
@@ -38,12 +39,13 @@ const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.mj
 //   attachments = ['/.review/attachments/<file>'] (pasted images, uploaded through /api/attach)
 //   anchor = {region, quote?, prefix?, selector?, point?:{x,y}}; only region = the whole Region
 //   sent:{[commentId]:iso}, replies:{[commentId]:[{ts,msg,author:'agent'|'human',attachments?}]}, commentState:{[commentId]:{value,ts}},
-//   proposals:{[id]:{id,region,threadId,anchor,question,options,explanationRequests,explanations,status,choiceIndex,custom,
-//     attempt,undoUntil,cancelledAttempts,ts,decidedAt}},     status: open → pending → decided; Undo: pending → open
+//   proposals:{[id]:{id,region,threadId,anchor,question,options,suggested,explanationRequests,explanations,status,choiceIndex,custom,
+//     attempt,undoUntil,cancelledAttempts,ts,openedAt,decidedAt}},     status: open → pending → decided; Undo: pending → open
 //   updates:{[id]:{id,region,title,body,ts,dismissedAt}},
 //   changed:{[region]:{ts}},                                        ← named by Ready, cleared by ack
 //   log:[{seq,kind,region,id,ts,...}], seq }
 // Attention is NOT stored: the Surface derives it from changed/proposals/commentState/updates.
+// Neither is `decisions`: GET /api/state derives it from proposals for the agent (see decisionsOf).
 // Normal protocol actions preserve Threads. A Thread whose Region left the document stays in
 // `threads`; the Surface shows it as archived.
 function emptyStore(){ return { name:NAME, threads:{}, sent:{}, replies:{}, commentState:{},
@@ -95,7 +97,9 @@ function commitDecision(id){
   if (!pr || pr.status !== 'pending') return;
   if (Date.now() < pr.undoUntil) return armDecision(pr);          // a timer may fire a millisecond early
   pr.status = 'decided'; pr.decidedAt = new Date().toISOString();
-  logEvent('decision', pr.region, pr.threadId, { proposalId:id, choiceIndex:pr.choiceIndex, custom:pr.custom });
+  const kept = pr.custom == null && pr.choiceIndex === suggestedOf(pr);
+  logEvent('decision', pr.region, pr.threadId, { proposalId:id, choiceIndex:pr.choiceIndex, custom:pr.custom,
+    suggested:suggestedOf(pr), verdict: kept ? 'kept as proposed' : 'changed from the suggestion' });
   // A decision proves the human reviewed the Proposal's Region.
   if (store.changed[pr.region]){ delete store.changed[pr.region]; logEvent('ack', pr.region, null, {}); }
   try { persist(); } catch { undoTimers.set(id, setTimeout(() => commitDecision(id), 1000)); }
@@ -126,6 +130,21 @@ function cleanAnchor(a, region){
   return out;
 }
 const str = (v, max) => { const s = typeof v==='string' ? v.trim() : ''; return s.length && s.length<=max ? s : null; };
+// Every Proposal carries a suggested option; stores written before `suggested` existed meant the first.
+const suggestedOf = pr => Number.isInteger(pr.suggested) ? pr.suggested : 0;
+// What the agent may conclude about each Proposal. "Opened" means its card's options were on the human's
+// screen (the kernel reports it, or a click chose one). An unopened Proposal's default is NOT agreement,
+// and a choice still inside its undo window is not a decision yet: it reads opened-undecided.
+function decisionsOf(s){
+  return Object.values(s.proposals || {}).map(pr => {
+    const suggested = suggestedOf(pr), decided = pr.status === 'decided';
+    const kept = decided && pr.custom == null && pr.choiceIndex === suggested;
+    return { id:pr.id, region:pr.region, question:pr.question, suggested:pr.options?.[suggested] ?? null,
+      reading: decided ? (kept ? 'kept-as-proposed' : 'changed') : pr.openedAt ? 'opened-undecided' : 'not-opened-default-stands',
+      answer: decided ? (pr.custom ?? pr.options?.[pr.choiceIndex] ?? null) : null,
+      openedAt: pr.openedAt || null, decidedAt: pr.decidedAt || null };
+  });
+}
 
 function resolveStatic(urlPath){
   const clean = decodeURIComponent(urlPath.split('?')[0]);
@@ -170,7 +189,7 @@ async function handle(req, res){
   const p = url.pathname;
 
   if (p === '/api/state'){
-    if (req.method === 'GET') return sendJSON(res, 200, store);
+    if (req.method === 'GET') return sendJSON(res, 200, { ...store, decisions: decisionsOf(store) });
     if (req.method === 'POST'){                          // autosave drafts: client owns `threads`
       const body = await readBody(req);
       if (body && body.threads && typeof body.threads === 'object'){ store.threads = body.threads; persist(); }
@@ -302,18 +321,20 @@ async function handle(req, res){
   }
 
   // ---- Proposals: every question the agent has takes this shape -------------------------
-  if (p === '/api/propose' && req.method === 'POST'){    // { region, question, options[], threadId?, anchor? }
-    const { region, question, options, threadId, anchor } = await readBody(req);
+  if (p === '/api/propose' && req.method === 'POST'){    // { region, question, options[], suggested?, threadId?, anchor? }
+    const { region, question, options, suggested = 0, threadId, anchor } = await readBody(req);
     const key = str(region, 300), q = str(question, 2000);
     if (!key || !q || !Array.isArray(options) || !options.length)
       return sendJSON(res, 400, { ok:false, error:'need region, question, options[]' });
+    if (!Number.isInteger(suggested) || suggested < 0 || suggested >= options.length)
+      return sendJSON(res, 400, { ok:false, error:'suggested must be the index of one of the options' });
     const open = Object.values(store.proposals).find(pr => (pr.status==='open' || pr.status==='pending')
       && (pr.region===key || (threadId && pr.threadId===threadId)));
     if (open) return sendJSON(res, 409, { ok:false, error:'resolve the existing open Proposal before asking another', proposalId:open.id });
     const id = `prop-${++store.seq}`;
-    store.proposals[id] = { id, region:key, threadId:threadId||null, anchor:cleanAnchor(anchor, key), question:q, options,
+    store.proposals[id] = { id, region:key, threadId:threadId||null, anchor:cleanAnchor(anchor, key), question:q, options, suggested,
       explanationRequests:{}, explanations:{}, status:'open', choiceIndex:null, custom:null,
-      ts:new Date().toISOString(), decidedAt:null };
+      ts:new Date().toISOString(), openedAt:null, decidedAt:null };
     logEvent('proposal', key, threadId||null, { proposalId:id }); persist();
     return sendJSON(res, 200, { ok:true, id });
   }
@@ -333,6 +354,7 @@ async function handle(req, res){
       return sendJSON(res, 200, { ok:true, repeated:true, status:pr.status, undoUntil:pr.undoUntil, cursor: store.seq });
     if (pr.status !== 'open') return sendJSON(res, 409, { ok:false, error:`this Proposal is ${pr.status}, not open`, status:pr.status });
     if ((pr.cancelledAttempts||[]).includes(token)) return sendJSON(res, 409, { ok:false, error:'this choice was undone' });
+    pr.openedAt ||= new Date().toISOString();           // choosing an option proves its card was seen
     Object.assign(pr, { status:'pending', choiceIndex: byIndex ? choiceIndex : null, custom: byIndex ? null : text,
       attempt:token, undoUntil: Date.now() + UNDO_MS });
     logEvent('decision-pending', pr.region, pr.threadId, { proposalId:pr.id, choiceIndex:pr.choiceIndex, custom:pr.custom, undoUntil:pr.undoUntil });
@@ -357,6 +379,15 @@ async function handle(req, res){
     persist();                                          // throws on failure: the choice stays pending
     clearTimeout(undoTimers.get(pr.id)); undoTimers.delete(pr.id);
     return sendJSON(res, 200, { ok:true, status:'open', cursor: store.seq });
+  }
+
+  // A Proposal's options were on the human's screen: the first time is recorded, later ones are not.
+  if (p === '/api/proposal-opened' && req.method === 'POST'){ // { id }
+    const { id } = await readBody(req);
+    const pr = store.proposals[String(id||'')];
+    if (!pr) return sendJSON(res, 404, { ok:false, error:'unknown proposal' });
+    if (!pr.openedAt){ pr.openedAt = new Date().toISOString(); logEvent('proposal-opened', pr.region, pr.threadId, { proposalId:pr.id }); persist(); }
+    return sendJSON(res, 200, { ok:true, openedAt:pr.openedAt, cursor: store.seq });
   }
 
   if (p === '/api/explain-request' && req.method === 'POST'){ // { id, optionIndex, answer }
@@ -407,7 +438,7 @@ async function handle(req, res){
 
   // ---- static ----
   if (p === '/') return serveStatic(req, res, UI);
-  if (p === '/atelier.mjs' || p === '/atelier.css') return serveStatic(req, res, path.join(HERE, p.slice(1)));
+  if (KIT_FILES.has(p)) return serveStatic(req, res, path.join(HERE, p.slice(1)));
   const fp = resolveStatic(p);
   if (!fp){ res.writeHead(403); res.end('forbidden'); return; }
   serveStatic(req, res, fp);
