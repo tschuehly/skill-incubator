@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Symlink an incubator skill into Claude, Codex, and Pi (global or project-local).
-# Supported compositions install their required skills in the same operation.
+# Symlink an incubator skill into Pi (global or project-local).
 # The incubator stays the single source of truth — never copy, always link.
 #
 # Skills live in two trees: skills/ holds incubator-native skills, and
@@ -39,44 +38,14 @@ resolve_skill() {
 
 resolve_skill "$REQUESTED" >/dev/null
 if [ $# -ge 2 ]; then
-  BASE="$(cd "$2" && pwd)"
-  CLAUDE_SKILL_TARGET="$BASE/.claude/skills"
-  CODEX_SKILL_TARGET="$BASE/.codex/skills"
-  PI_SKILL_TARGET="$BASE/.agents/skills"
+  PI_SKILL_TARGET="$(cd "$2" && pwd)/.agents/skills"
 else
-  CLAUDE_SKILL_TARGET="$HOME/.claude/skills"
-  CODEX_SKILL_TARGET="$HOME/.codex/skills"
   PI_SKILL_TARGET="$HOME/.agents/skills"
 fi
-mkdir -p "$CLAUDE_SKILL_TARGET" "$CODEX_SKILL_TARGET" "$PI_SKILL_TARGET"
+mkdir -p "$PI_SKILL_TARGET"
 
-SKILLS=("$REQUESTED")
-
-CLAUDE_AGENT_TARGET="$(dirname "$CLAUDE_SKILL_TARGET")/agents"
-CODEX_AGENT_TARGET="$(dirname "$CODEX_SKILL_TARGET")/agents"
-for SKILL in "${SKILLS[@]}"; do
-  SRC="$(resolve_skill "$SKILL")" || exit 1
-  # Runtimes address a skill by its bare name; an owner/ prefix is repo-only.
-  NAME="$(basename "$SRC")"
-  ln -sfn "$SRC" "$CLAUDE_SKILL_TARGET/$NAME"
-  echo "linked $CLAUDE_SKILL_TARGET/$NAME -> $SRC"
-  ln -sfn "$SRC" "$CODEX_SKILL_TARGET/$NAME"
-  echo "linked $CODEX_SKILL_TARGET/$NAME -> $SRC"
-  ln -sfn "$SRC" "$PI_SKILL_TARGET/$NAME"
-  echo "linked $PI_SKILL_TARGET/$NAME -> $SRC"
-
-  # Per-file agent links keep unrelated agents in each runtime untouched.
-  if [ -d "$SRC/agents" ]; then
-    mkdir -p "$CLAUDE_AGENT_TARGET" "$CODEX_AGENT_TARGET"
-    for a in "$SRC"/agents/*.md; do
-      [ -e "$a" ] || continue
-      ln -sfn "$a" "$CLAUDE_AGENT_TARGET/$(basename "$a")"
-      echo "linked $CLAUDE_AGENT_TARGET/$(basename "$a") -> $a"
-    done
-    for a in "$SRC"/agents/*.toml; do
-      [ -e "$a" ] || continue
-      ln -sfn "$a" "$CODEX_AGENT_TARGET/$(basename "$a")"
-      echo "linked $CODEX_AGENT_TARGET/$(basename "$a") -> $a"
-    done
-  fi
-done
+SRC="$(resolve_skill "$REQUESTED")"
+# Pi addresses a skill by its bare name; an owner/ prefix is repo-only.
+NAME="$(basename "$SRC")"
+ln -sfn "$SRC" "$PI_SKILL_TARGET/$NAME"
+echo "linked $PI_SKILL_TARGET/$NAME -> $SRC"

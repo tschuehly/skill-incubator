@@ -1,6 +1,6 @@
 # skill-incubator
 
-Source repository for Pi skills, prompt templates, and personal experimental extensions, with compatibility links for Claude Code and Codex. Incubate here, refine across projects, and publish skills to [jvm-skills](https://github.com/tschuehly/jvm-skills) once battle-tested.
+Source repository for Pi skills, prompt templates, and personal experimental extensions. Incubate here, refine across projects, and publish skills to [jvm-skills](https://github.com/tschuehly/jvm-skills) once battle-tested.
 
 ## Why
 
@@ -11,8 +11,6 @@ resolve to the skill directories here.
 
 ```
 skills/<name>/SKILL.md               # the skill (+ scripts, references/)
-skills/<name>/agents/*.md            # optional Claude Code per-role agents
-skills/<name>/agents/*.toml          # optional Codex per-role agents
 prompts/*.md                         # Pi prompt templates linked into ~/.pi/agent/prompts
 extensions/<name>/index.ts           # experimental personal Pi extensions
 vendored/<owner>/<name>/SKILL.md     # skills forked from an upstream installer
@@ -28,7 +26,7 @@ which tree a skill lives in. Pass `<owner>/<name>` to disambiguate.
 
 ## Vendored skills
 
-Externally maintained skills are copied into `vendored/` at an exact upstream revision. Global Pi, Codex, and Claude Code installations symlink to these directories, so the repository—not an installer-owned copy under `~/.agents/skills`—is the active source of truth.
+Externally maintained skills are copied into `vendored/` at an exact upstream revision. Pi's global installation symlinks to these directories, so the repository—not an installer-owned copy under `~/.agents/skills`—is the active source of truth.
 
 This is a curated subset, not a mirror. `vendored/MANIFEST.json` is the roster and provenance record. To adopt another external skill, copy it under the upstream owner, add its pinned revision and tree hash to the manifest, then run `./link.sh <name>`.
 
@@ -47,7 +45,7 @@ Local edits to re-apply after every upstream refresh:
 This is a fork, and it has a price:
 
 - **Upstream updates are deliberate.** Refresh the vendored tree from the pinned source, review the diff, update `sourceRevision` and `vendoredFromHash`, then relink.
-- **Installers must not reclaim a name.** If behavior unexpectedly changes, verify `~/.agents/skills/<name>` first; Pi's global entry must resolve into this repository. Claude and Codex compatibility links should resolve to the same directory.
+- **Installers must not reclaim a name.** If behavior unexpectedly changes, verify `~/.agents/skills/<name>` first; Pi's global entry must resolve into this repository.
 
 `vendored/MANIFEST.json` records each skill's upstream repository, exact source revision, path, and Git tree object. These fields make drift inspectable without relying on the retired global `.skill-lock.json`.
 
@@ -68,8 +66,7 @@ Workbench.
    hardcoded project paths; scripts referenced as `<skill-dir>/…`; project conventions
    referenced via "the project's CLAUDE.md", not inlined.
 2. **Link** — `./link.sh <name>` (global) or `./link.sh <name> ~/IdeaProjects/<project>`
-   (project-local). The command links the skill into Claude, Codex, and Pi and installs
-   each supported runtime's agent format. Global linking is usually enough; project-local is for
+   (project-local). The command links the skill into Pi. Global linking is usually enough; project-local is for
    skills that should ship with the repo or shadow the global installation.
 3. **Refine** — edit here; every linked location picks the change up instantly. Commit
    the refinements with a note on what real-world usage taught.
