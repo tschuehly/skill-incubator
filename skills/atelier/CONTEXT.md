@@ -37,7 +37,8 @@ _Avoid_: pin, highlight, selection
 An author-placed `<atelier-host>` where the kernel shows the Threads and Proposals of one Region Key
 and the Regions below it, unless a Host for a longer key claims them. The one Host without a key is
 the catch-all: it takes what no other Host claims, Threads whose Region left the Surface, and items
-a reveal could not show. An anchored Host keeps each card level with its Anchor.
+a reveal could not show. An anchored Host keeps each card level with its Anchor; a collapsible Host
+folds away and reserves no width until one of its cards opens.
 _Avoid_: margin, sidebar, comment panel
 
 **Attention**:
@@ -63,6 +64,23 @@ _Avoid_: decision request, poll, prompt
 A durable, informational message from the agent that needs no answer, about a Region, shown in
 Activity and dismissed by the human. Anything needing an answer is a Proposal instead.
 _Avoid_: notification, status, message
+
+**Building block**:
+An optional kit element that renders a short text body — a claim tree, diagram, chart, file, video,
+before/after pair, mockup, findings list, decision, zoomable flow, timeline, or tabs — inside a
+Region. It is content, not protocol: it holds no server state, only view state such as an open tab.
+_Avoid_: widget, component, snippet
+
+**Content shape**:
+The arrangement of a Surface chosen for the problem: a claim tree for a plan, an evidence and
+decision board for a review queue, a flow with drill-down for a pipeline, a comparison, a timeline,
+a list/detail workspace. None is the default.
+_Avoid_: template, layout, frame
+
+**Opened**:
+A Proposal whose options have been on the human's screen, recorded once. A Proposal decided, opened
+but undecided, and never opened are different readings; a default that was never opened is not
+agreement.
 
 **Activity**:
 The one widget the Surface places wherever it fits: Pick-to-comment, a drawer listing Attention and

@@ -26,7 +26,7 @@ BASE="http://127.0.0.1:$PORT"
 post() { curl -fsS -X POST "$BASE/$1" -H 'Content-Type: application/json' -d "$2" >/dev/null; }
 
 cp "$ASSETS/server.mjs" "$TMP/review-server.mjs"
-cp "$ASSETS/atelier.mjs" "$ASSETS/atelier.css" "$TMP/"
+cp "$ASSETS"/{atelier.mjs,atelier.css,atelier-blocks.mjs,atelier-blocks.css} "$TMP/"
 cp "$ASSETS/poll.sh" "$TMP/review-poll.sh"
 cat >"$TMP/surface.html" <<'HTML'
 <!doctype html><html><head><meta charset="utf-8"><title>t</title>
@@ -66,26 +66,42 @@ curl -fsS "$BASE/api/state" | grep -F '"name":"atelier-test"' >/dev/null
 # The kernel's own files must be served next to the server, or a copied kit renders nothing.
 curl -fsS "$BASE/atelier.mjs" | grep -F "customElements.define('atelier-host'" >/dev/null
 curl -fsS "$BASE/atelier.css" | grep -F '.atl-card' >/dev/null
+curl -fsS "$BASE/atelier-blocks.mjs" | grep -F "customElements.define('atelier-claims'" >/dev/null
+curl -fsS "$BASE/atelier-blocks.css" | grep -F '.atl-claim' >/dev/null
 
 # --- the prose gate's rules against real eval sentences and clean subject sentences ---
 node "$HERE/prose.test.mjs" >/dev/null
+node "$HERE/lint.test.mjs" >/dev/null
+
+# The static lint replaced the browser check (2026-10-06, ADR 0007): no normal-handoff step may
+# require a screenshot verdict, a browser walk, or a cold-reader pass.
+if grep -rniE 'cold[- ]reader|read the surface twice|record-visual|screenshot (pass|verdict)|visual judgment' \
+    "$HERE/../SKILL.md" "$HERE/../references" "$HERE/preflight.mjs"; then
+  echo "FAIL: the handoff still requires a screenshot, browser walk or cold-reader pass" >&2; exit 1
+fi
 
 # --- preflight's non-browser gates -----------------------------------------------------
 PORT="$PORT" CURSOR_FILE="$TMP/poller.cursor" bash "$TMP/review-poll.sh" --once >"$TMP/poller.log" 2>&1 &
 POLLER_PID=$!
 sleep 0.4
-node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" --skip-render \
-  | grep -Fx 'PREFLIGHT=PASS (render checks)' >/dev/null
+node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" >"$TMP/preflight.log" 2>&1 \
+  || { echo "FAIL: preflight on a clean Surface:" >&2; cat "$TMP/preflight.log" >&2; exit 1; }
+grep -Fx 'PREFLIGHT=PASS' "$TMP/preflight.log" >/dev/null
+grep -Fx "NEXT=Open $BASE for the human and keep the poller armed." "$TMP/preflight.log" >/dev/null \
+  || { echo "FAIL: a passing preflight did not send the human to the page:" >&2; cat "$TMP/preflight.log" >&2; exit 1; }
+if node "$HERE/preflight.mjs" --url "$BASE" --record-visual pass >/dev/null 2>&1; then
+  echo "FAIL: preflight still accepts a screenshot verdict" >&2; exit 1
+fi
 
 # A copied kit never updates itself, so a Surface must not hand off on a kit it has drifted from.
 cp "$TMP/atelier.mjs" "$TMP/atelier.mjs.pristine"
 printf '\n// local patch\n' >>"$TMP/atelier.mjs"
-if node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" --skip-render >"$TMP/kit.log" 2>&1; then
+if node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" >"$TMP/kit.log" 2>&1; then
   echo "FAIL: preflight passed on a drifted kit:" >&2; cat "$TMP/kit.log" >&2; exit 1
 fi
 grep -F 'FAIL KIT' "$TMP/kit.log" >/dev/null
-node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" --skip-render --allow-kit-drift \
-  | grep -Fx 'PREFLIGHT=PASS (render checks)' >/dev/null
+node "$HERE/preflight.mjs" --url "$BASE" --poller-identity "$TMP/review-poll.sh" --allow-kit-drift \
+  | grep -Fx 'PREFLIGHT=PASS' >/dev/null
 mv "$TMP/atelier.mjs.pristine" "$TMP/atelier.mjs"
 
 # --- agent-origin events must NOT wake the agent ---------------------------------------
@@ -288,33 +304,43 @@ sleep 1.5                                                            # the next 
 [ "$(status_of "$F")/$(disk_of "$F")/$(decisions_of "$F")" = decided/decided/1 ] \
   || { echo "FAIL: after the store recovered: $(status_of "$F")/$(disk_of "$F")/$(decisions_of "$F")" >&2; exit 1; }
 
-# --- handoff waits for a screenshot verdict on exactly this content -----------------------
-# Surfaces were handed over on PREFLIGHT=PASS without anyone looking at them.
-EV="$TMP/evidence"
-next_line() { node "$HERE/preflight.mjs" --url "$BASE" --skip-poller --skip-render --evidence-dir "$EV" | grep '^NEXT='; }
-record() { node "$HERE/preflight.mjs" --url "$BASE" --evidence-dir "$EV" --record-visual "$@" >/dev/null; }
-expect_next() { local got; got="$(next_line)"; [[ "$got" == $1 ]] || { echo "FAIL: $2: $got" >&2; exit 1; }; }
-never_open() { local got; got="$(next_line)"; ! grep -q 'for the human' <<<"$got" || { echo "FAIL: $1: $got" >&2; exit 1; }; }
+# --- every Proposal carries a suggested option ------------------------------------------
+expect api/propose '{"region":"other","question":"Q?","options":["A"],"suggested":3}' 400
+curl -fsS "$BASE/api/state" | grep -F '"suggested":0' >/dev/null || { echo "FAIL: the default suggestion is not stored" >&2; exit 1; }
 
-never_open 'no verdict, yet the human was sent to the page'
-expect_next 'NEXT=visual judgment pending*--record-visual*' 'no verdict did not ask for a screenshot pass'
-record pass --note 'desktop and phone read cleanly'
-expect_next "NEXT=Open $BASE for the human*" 'a matching pass verdict did not hand over'
-kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null || true
-start_server
-expect_next "NEXT=Open $BASE for the human*" 'a restart of unchanged content lost its verdict'
-cp "$TMP/surface.html" "$TMP/surface.html.judged"
-printf '<p>new finding</p>\n' >>"$TMP/surface.html"
-never_open 'content changed after the verdict, yet the human was sent to the page'
-expect_next 'NEXT=visual judgment pending*' 'changed content did not make the verdict pending'
-mv "$TMP/surface.html.judged" "$TMP/surface.html"
-record fail --note 'the phone list hides the detail pane'
-expect_next 'NEXT=fix: the phone list hides the detail pane*' 'a fail verdict did not name its finding'
-record unverified --note 'needs a record with an open Proposal selected'
-expect_next 'NEXT=Hand over labelled UNVERIFIED: needs a record with an open Proposal selected;*' 'an unverified verdict was not labelled'
-never_open 'an unverified Surface was handed over as ready'
-if node "$HERE/preflight.mjs" --url "$BASE" --evidence-dir "$EV" --record-visual fail >/dev/null 2>&1; then
-  echo "FAIL: a fail verdict was recorded without a finding" >&2; exit 1
-fi
+# --- what each Proposal lets the agent conclude: never read "not opened" as agreement -------
+id_of() { curl -fsS -X POST "$BASE/api/propose" -H 'Content-Type: application/json' -d "$1" | js 'st.id'; }
+P1="$(id_of '{"region":"d1","question":"Kept?","options":["A","B"],"suggested":1}')"
+P2="$(id_of '{"region":"d2","question":"Changed?","options":["A","B"]}')"
+P3="$(id_of '{"region":"d3","question":"Looked at?","options":["A","B"]}')"
+P4="$(id_of '{"region":"d4","question":"Unseen?","options":["A","B"]}')"
+expect api/proposal-opened '{"id":"nope"}' 404
+expect api/proposal-opened "{\"id\":\"$P3\"}" 200
+first_open="$(curl -fsS "$BASE/api/state" | js "st.proposals['$P3'].openedAt")"
+expect api/proposal-opened "{\"id\":\"$P3\"}" 200
+[ "$first_open" = "$(curl -fsS "$BASE/api/state" | js "st.proposals['$P3'].openedAt")" ] || { echo "FAIL: a second opening moved openedAt" >&2; exit 1; }
+CURSOR="$(curl -fsS "$BASE/api/state" | js 'st.seq')" PORT="$PORT" CURSOR_FILE="$TMP/verdict.cursor" \
+  bash "$TMP/review-poll.sh" --once >"$TMP/verdict.log" 2>&1 &
+POLLER_PID=$!
+sleep 0.4
+expect api/decide "{\"id\":\"$P1\",\"choiceIndex\":1,\"attempt\":\"k1\"}" 200
+expect api/decide "{\"id\":\"$P2\",\"choiceIndex\":1,\"attempt\":\"k2\"}" 200
+reading() { curl -fsS "$BASE/api/state" | js "['d1','d2','d3','d4'].map(r=>st.decisions.find(x=>x.region===r).reading).join(' ')"; }
+# A choice inside its undo window is not a decision yet; choosing proves the options were seen.
+[ "$(reading)" = 'opened-undecided opened-undecided opened-undecided not-opened-default-stands' ] \
+  || { echo "FAIL: readings inside the undo window: $(reading)" >&2; exit 1; }
+wait "$POLLER_PID"; POLLER_PID=''
+grep -F 'DECISION · d1' "$TMP/verdict.log" | grep -F 'kept as proposed' >/dev/null \
+  || { echo "FAIL: the decision wake line does not say it kept the suggestion:" >&2; cat "$TMP/verdict.log" >&2; exit 1; }
+grep -Fq 'PROPOSAL-OPENED' "$TMP/verdict.log" && { echo "FAIL: an opened card woke the agent" >&2; exit 1; }
+sleep 0.5
+[ "$(reading)" = 'kept-as-proposed changed opened-undecided not-opened-default-stands' ] \
+  || { echo "FAIL: /api/state decisions read: $(reading)" >&2; exit 1; }
+BASE_URL="$BASE" bash "$TMP/review-poll.sh" --decisions >"$TMP/decisions.log"
+grep -F "DECISION-STATE · d1 (id $P1) — decided, kept as proposed: B" "$TMP/decisions.log" >/dev/null \
+  && grep -F "DECISION-STATE · d2 (id $P2) — decided, changed: B (suggested: A)" "$TMP/decisions.log" >/dev/null \
+  && grep -F "DECISION-STATE · d3 (id $P3) — opened, undecided (suggested: A)" "$TMP/decisions.log" >/dev/null \
+  && grep -F "DECISION-STATE · d4 (id $P4) — not opened; default stands, NOT agreement (suggested: A)" "$TMP/decisions.log" >/dev/null \
+  || { echo "FAIL: poller --decisions output:" >&2; cat "$TMP/decisions.log" >&2; exit 1; }
 
 printf 'atelier server and poll loop: PASS\n'

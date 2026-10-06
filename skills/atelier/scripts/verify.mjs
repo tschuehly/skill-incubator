@@ -21,6 +21,8 @@ const FILTER = process.argv[2] || '';
 const UNDO_MS = 8000;           // shorter than the 30 s default, longer than a few agent-browser round trips
 
 // ---- fixture -------------------------------------------------------------------------
+// The late viewer renders from source it holds in <script type="text/plain">, as the building blocks
+// do, so the static lint can see the text a Thread quotes before any script runs.
 // Deliberately library-free and frame-free: a document with an anchored host beside it, a table
 // with keyed rows, a list/detail pair of records with a host each and a reveal resolver, a Region
 // no host claims, and a catch-all. `tail` replaces the catch-all to build broken variants.
@@ -45,7 +47,7 @@ const surface = ({ alpha = 'the quick brown fox jumps over the lazy dog', beta =
     <svg width="200" height="60" viewBox="0 0 200 60"><g atl-key="dot" atl-label="Dot"><circle id="dot" cx="30" cy="30" r="20" fill="#c33"/></g>
       <g atl-key="box" atl-label="Box" data-anchor="box"><rect id="box-rect" x="80" y="10" width="60" height="40" fill="#9c9"/></g></svg><div style="height:600px"></div></section>
   <section atl-key="beta" atl-label="Beta"><h2>Beta</h2><p>${beta}</p><div style="height:600px"></div></section>
-  <section atl-key="late" atl-label="Late"><details id="late-box"><summary>file</summary><div id="late-view"></div></details></section>
+  <section atl-key="late" atl-label="Late"><details id="late-box"><summary>file</summary><div id="late-view"><script type="text/plain">rendered late by a viewer</script></div></details></section>
   <section atl-key="tbl" atl-label="Table"><table><tbody><tr atl-key="r1"><td>row one</td><td>12 ms</td></tr><tr atl-key="r2"><td>row two</td><td>40 ms</td></tr></tbody></table></section>
 ${extra}</main>
 <atelier-host for="v" layout="anchored"></atelier-host></div>
@@ -64,7 +66,7 @@ ${tail}
   document.addEventListener('atelier:state', e => {
     document.querySelector('#count').textContent = e.detail.items.filter(i => i.region === 'c65' && i.waiting).length; });
 </script>
-<script>setTimeout(() => { document.querySelector('#late-view').textContent = 'rendered late by a viewer';
+<script>setTimeout(() => { const v = document.querySelector('#late-view'); v.textContent = v.textContent.trim();
   document.dispatchEvent(new CustomEvent('atelier:rendered')); }, 600);</script>
 </body></html>`;
 
@@ -684,6 +686,50 @@ try {
     assert((await cardText(body.id)).includes('dates match the audit'), 'explanation not shown');
   });
 
+  // A Proposal is opened when its options reach the screen: here, when the resolver shows the
+  // hidden record whose host holds it. Never seen, its default is not agreement.
+  await check('proposal: options that never reached the screen read not opened; showing them records it once', async () => {
+    act(`document.querySelector('[data-show="c64"]').click()`);
+    const { body } = await api('/api/propose', { region:'c65', question:'Seen?', options:['Yes', 'No'], suggested:1 });
+    await sleep(1200);
+    const reading = async () => (await state()).decisions.find(d => d.id === body.id);
+    eq([(await reading()).reading, (await reading()).suggested, (await state()).proposals[body.id].openedAt], ['not-opened-default-stands', 'No', null], 'in a hidden record');
+    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('${body.id}')).then(() => 'ok')`]);
+    await sleep(900);
+    const first = (await state()).proposals[body.id].openedAt;
+    assert(first, 'showing the card did not record it');
+    eq((await reading()).reading, 'opened-undecided', 'after showing');
+    eq(probe(`JSON.stringify([...document.querySelectorAll('[data-card="${body.id}"] .atl-choice')].findIndex(b => b.querySelector('.atl-rec')))`), 1, 'Recommended on the suggested option');
+    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('${body.id}')).then(() => 'ok')`]);
+    await sleep(600);
+    eq((await state()).proposals[body.id].openedAt, first, 'a second showing moved openedAt');
+    act(`document.querySelector('[data-choose="${body.id}"][data-i="1"]').click()`);
+    await sleep(UNDO_MS + 1500);
+    eq([(await reading()).reading, (await state()).log.filter(e => e.kind === 'decision' && e.proposalId === body.id).at(-1)?.verdict], ['kept-as-proposed', 'kept as proposed'], 'after the window');
+  });
+
+  await check('proposal: an opening report that fails is kept and retried after recovery, whatever is on screen then', async () => {
+    // The first report gets HTTP 500, the next ones a network error; neither may count as recorded.
+    act(`(()=>{window.__fetch=window.fetch; window.__opened=0; window.fetch=(u,o)=>String(u).includes('/api/proposal-opened')
+      ? (window.__opened++ ? Promise.reject(new TypeError('offline')) : Promise.resolve(new Response('{"ok":false}',{status:500}))) : window.__fetch(u,o)})()`);
+    act(`document.querySelector('[data-show="c64"]').click()`);
+    const { body } = await api('/api/propose', { region:'c65', question:'Retry?', options:['Yes', 'No'] });
+    await sleep(1200);
+    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('${body.id}')).then(() => 'ok')`]);
+    await sleep(500);
+    browser(['eval', `import('/atelier.mjs').then(k => k.refresh()).then(() => 'ok')`]);
+    await sleep(500);
+    assert(probe(`JSON.stringify(window.__opened)`) >= 2, 'no retry while the report kept failing');
+    eq((await state()).proposals[body.id].openedAt, null, 'openedAt while every report failed');
+    act(`document.querySelector('[data-show="c64"]').click()`);      // the card is off screen when the server is back
+    act(`window.fetch = window.__fetch`);
+    browser(['eval', `import('/atelier.mjs').then(k => k.refresh()).then(() => 'ok')`]);
+    await sleep(800);
+    assert((await state()).proposals[body.id].openedAt, 'the failed opening was never recorded after recovery');
+    eq((await api('/api/decide', { id: body.id, choiceIndex: 0, attempt: 'retry-1' })).status, 200, 'decide');
+    await sleep(UNDO_MS + 1500);
+  });
+
   await check('proposal: a second question cannot displace an open Proposal', async () => {
     eq((await api('/api/propose', { region:'v/list', question:'Replace?', options:['x'] })).status, 409, 'status');
   });
@@ -915,51 +961,34 @@ try {
     await reload();
   });
 
-  // ---- preflight ----
-  await check('preflight: the fixture passes the render gates at all three sizes', async () => {
+  // ---- preflight: Node only, no browser (ADR 0007) ----
+  await check('preflight: the fixture lints clean and the human is sent to the page, with no screenshot step', async () => {
     const result = preflight();
-    assert(result.status === 0, `preflight exited ${result.status}: ${result.out.slice(0, 600)}`);
-    for (const line of ['PASS RENDER_DESKTOP', 'PASS RENDER_PHONE:', 'PASS RENDER_PHONE_LARGE', 'INFO LAYOUT_DESKTOP: 1440x900, page height',
-      'PREFLIGHT=PASS (render checks)', 'NEXT=visual judgment pending'])
+    assert(result.status === 0, `preflight exited ${result.status}: ${result.out.slice(0, 900)}`);
+    for (const line of ['PASS KIT_TAGS', 'PASS REGIONS', 'PASS HOSTS', 'PASS REACH', 'PASS ANCHORS', 'NOT CHECKED (no browser)', 'PREFLIGHT=PASS', `NEXT=Open ${base} for the human`])
       assert(result.out.includes(line), `missing "${line}"`);
-    // Render checks are not a look: without a screenshot verdict nobody sends the human there.
-    assert(!/for the human/.test(result.out), 'a render-clean page without a visual verdict was handed over');
+    assert(!/visual|screenshot/i.test(result.out.replace(/NOT CHECKED[^\n]*/, '')), 'preflight still asks for a visual step');
   });
 
-  // The kernel warning on this page is also what proves preflight reads .atl-warnings: the probe
-  // used to look for .atl-warn, which the kernel never renders, and passed every warning.
-  await check('preflight: duplicate hosts, two catch-alls and two Activities fail, and so does the page\'s warning', async () => {
+  // The kernel still warns on the page; the lint catches the same defects from the source.
+  await check('preflight: duplicate hosts, two catch-alls and two Activities fail the lint; the page warns too', async () => {
     try {
       writeSurface({ tail:'<atelier-host for="c64"></atelier-host><atelier-host></atelier-host><atelier-host></atelier-host><atelier-activity></atelier-activity>' });
       await reload();
       assert(probe(`JSON.stringify(document.querySelector('.atl-warnings')?.textContent || '')`).includes('<atelier-host for="c64">'), 'no duplicate-host warning');
       const { status, out } = preflight();
       assert(status === 1, `preflight exited ${status}`);
-      for (const want of ['found 2 <atelier-activity>', 'found 2 catch-all', 'two hosts share for="c64"', 'kernel warning'])
+      for (const want of ['found 2 <atelier-activity>', 'found 2 catch-all', 'for="c64" has several'])
         assert(out.includes(want), `missing "${want}": ${out.slice(0, 500)}`);
     } finally { writeSurface(); await reload(); }
   });
 
-  await check('preflight: an open item with no host fails, and so does one whose host cannot be shown', async () => {
+  await check('preflight: an open item no host would show fails', async () => {
     try {
       writeSurface({ tail:'' });
       const unhosted = preflight();
-      assert(unhosted.status === 1 && /have no host on the page: prop-\d+ in loose/.test(unhosted.out), `no host: ${unhosted.out.slice(0, 500)}`);
-      writeSurface({ tail:'<div hidden><atelier-host for="loose"></atelier-host></div>' });
-      const hidden = preflight();
-      assert(hidden.status === 1 && /cannot be brought on screen with reveal\(\): prop-\d+ in loose \(reveal failed\)/.test(hidden.out), `hidden host: ${hidden.out.slice(0, 500)}`);
+      assert(unhosted.status === 1 && /no host shows prop-\d+ in loose/.test(unhosted.out), `no host: ${unhosted.out.slice(0, 500)}`);
     } finally { writeSurface(); await reload(); }
-  });
-
-  await check('preflight: browser errors fail the handoff gate', async () => {
-    try {
-      writeSurface({ extra:`<script>setTimeout(()=>{throw new Error('preflight sentinel')},0)</script>` });
-      const result = preflight();
-      assert(result.status === 1, `preflight exited ${result.status}`);
-      assert(result.out.includes('preflight sentinel'), 'preflight did not report the browser error');
-    } finally {
-      writeSurface();
-    }
   });
 
   await check('preflight: a sentence about the page is a warning naming its Region; subject-UI steps are not', async () => {
@@ -1010,6 +1039,252 @@ try {
     await waitForServer(base);
     await sleep(4200);
     eq(probe(`JSON.stringify(document.documentElement.hasAttribute('data-atl-offline'))`), false, 'offline state stuck after the server returned');
+  });
+
+  // ---- building blocks (assets/atelier-blocks.mjs) ----
+  // On their own page in the same fixture directory, after every preflight check: Threads made here
+  // would otherwise be stored anchors that surface.html cannot resolve. A collapsible catch-all host
+  // beside the content stands in for a side panel of Threads.
+  const blocksPage = (claim = 'Kernel placement failed twice.', open = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>blocks</title>
+<link rel="stylesheet" href="/atelier.css"><link rel="stylesheet" href="/atelier-blocks.css">
+<script type="module" src="/atelier.mjs"></script><script type="module" src="/atelier-blocks.mjs"></script>
+<style>body{font-family:system-ui;margin:0}.page{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;padding:16px}</style></head><body>
+<header><b>Blocks</b><atelier-activity></atelier-activity></header>
+<div class="page"><main><section atl-key="b">
+  <atelier-claims${open ? ` open="${open}"` : ''}>
+    <section atl-key="kernel"><p>The kernel owns state and protocol.</p>
+      <section atl-key="why"><p>${claim}</p><p>P4 stacked cards above the content.</p></section>
+      <section atl-key="cost"><p>Every Surface lays itself out.</p></section>
+    </section>
+    <section atl-key="eval"><p>Real-task trials decide the next version.</p></section>
+  </atelier-claims>
+  <section atl-key="media">
+    <atelier-video src="/missing.mp4"><script type="text/plain">
+      0:00 Hook: twenty-five cards fan out
+      0:03.5 The guest scans the QR code
+    </script></atelier-video>
+    <atelier-compare caption="The draft gains a headline."><div id="before-side">Draft without headline</div><div>Draft with headline</div></atelier-compare>
+    <atelier-mock frame="browser" w="600" url="app.test" alt="The composer with a Send later button."><template><style>button{padding:8px}</style><button id="later">Send later</button></template></atelier-mock>
+  </section>
+  <section atl-key="cdn">
+    <atelier-mermaid alt="Draft build, then HIGH build."><script type="text/plain">
+      flowchart LR
+        draft[Draft build] --> high[HIGH build]
+    </script></atelier-mermaid>
+    <atelier-chart alt="Two points."><script type="text/plain">{"data":{"values":[{"x":1,"y":2},{"x":2,"y":3}]},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}</script></atelier-chart>
+    <atelier-file lang="js" name="limit.js"><script type="text/plain">
+      export function limit(n) {
+        if (n >= 50) throw new LimitError(50);
+      }
+    </script></atelier-file>
+    <atelier-chart alt="Broken."><script type="text/plain">{"mark": "line", "encoding": {"x": {"field": "x"}}, "data": {"url": "/nope.json"}, "transform": [{"calculate": "(", "as": "z"}]}</script></atelier-chart>
+  </section>
+</section></main><atelier-host layout="anchored" collapsible></atelier-host></div></body></html>`;
+  const writeBlocks = (...a) => fs.writeFileSync(path.join(dir, 'surface.html'), blocksPage(...a));
+  const until = async (js, what, ms = 6000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(200)) if (probe(`JSON.stringify(${js})`)) return;
+    throw new Error(`timed out waiting for ${what}`);
+  };
+
+  await check('blocks: claims are numbered and folded, and the closed tree is the list of top claims', async () => {
+    writeBlocks();
+    browser(['reload']); await sleep(1500);
+    const t = probe(`JSON.stringify({ rendered: document.querySelector('atelier-claims').dataset.rendered,
+      numbers: [...document.querySelectorAll('atelier-claims [atl-key]')].map(r => { const ks = []; for (let e = r; e; e = e.parentElement?.closest('[atl-key]')) ks.unshift(e.getAttribute('atl-key')); return r.dataset.claim + ' ' + ks.join('/'); }),
+      open: [...document.querySelectorAll('details.atl-claim')].filter(d => d.open).length,
+      visible: [...document.querySelectorAll('.atl-claim-head')].filter(h => h.checkVisibility()).map(h => h.innerText.replace(/\\s+/g, ' ').trim()) })`);
+    eq(t.rendered, 'true', 'tree marked rendered');
+    eq(t.numbers, ['1 b/kernel', '1.1 b/kernel/why', '1.2 b/kernel/cost', '2 b/eval'], 'claim numbers and Region Keys');
+    eq(t.open, 0, 'claims open at start');
+    eq(t.visible, ['1 The kernel owns state and protocol.', '2 Real-task trials decide the next version.'], 'closed tree');
+  });
+
+  await check('blocks: a Thread inside a folded claim is revealed, and a Ready keeps the claim open and numbered', async () => {
+    await api('/api/state', { threads: { ...(await state()).threads, 'b/kernel/why': [{ id: 'c-claim', text: 'claim thread', anchor: { region: 'b/kernel/why', quote: 'stacked cards' } }] } });
+    await api('/api/send', { region: 'b/kernel/why', id: 'c-claim' });
+    await until(`!!document.querySelector('[data-slot="c-claim"]')`, 'the Thread card');
+    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('c-claim')).then(() => 'ok')`]);
+    await sleep(600);
+    eq(probe(`JSON.stringify([...document.querySelectorAll('[atl-key=kernel] > details, [atl-key=why] > details')].map(d => d.open))`), [true, true], 'path to the anchor opened');
+    act(`window.__noReload = true`);
+    writeBlocks('Kernel placement failed twice, in P4 and P7.');
+    await api('/api/ready', { changed: ['b/kernel/why'] });
+    await until(`document.querySelector('[atl-key=why] .atl-claim-head')?.innerText.includes('P4 and P7')`, 'the swapped claim');
+    await sleep(300);
+    const t = probe(`JSON.stringify({ reload: !window.__noReload, no: document.querySelector('[atl-key=why]').dataset.claim,
+      open: document.querySelector('[atl-key=why] > details').open, head: document.querySelector('[atl-key=why] .atl-claim-head').innerText,
+      anchored: [...CSS.highlights.get('atl-anchor'), ...CSS.highlights.get('atl-active')].some(r => r.toString() === 'stacked cards') })`);
+    eq([t.reload, t.no, t.open, t.anchored], [false, '1.1', true, true], 'after Ready');
+    assert(t.head.includes('P4 and P7'), `new claim text: ${t.head}`);
+  });
+
+  await check('blocks: video marks seek, compare and mock render, and a Thread anchors a point on a mockup', async () => {
+    const t = probe(`JSON.stringify({ states: [...document.querySelectorAll('atelier-video, atelier-compare, atelier-mock')].map(e => e.localName + ':' + e.dataset.rendered),
+      marks: [...document.querySelectorAll('.atl-b-marks li')].map(l => l.dataset.t + ' ' + l.innerText.trim()),
+      sides: [...document.querySelectorAll('.atl-b-side')].map(f => f.innerText.replace(/\\s+/g, ' ').trim()),
+      shadow: !!document.querySelector('atelier-mock .atl-b-stage').shadowRoot.querySelector('#later'),
+      stage: Math.round(document.querySelector('atelier-mock .atl-b-stage').getBoundingClientRect().height) })`);
+    eq(t.states, ['atelier-video:true', 'atelier-compare:true', 'atelier-mock:true'], 'rendered');
+    eq(t.marks, ['0 0:00 Hook: twenty-five cards fan out', '3.5 0:03.5 The guest scans the QR code'], 'marks');
+    eq(t.sides, ['BEFORE Draft without headline', 'AFTER Draft with headline'], 'compare sides');
+    assert(t.shadow && t.stage > 20, `mock: ${JSON.stringify(t)}`);
+    act(`document.querySelectorAll('.atl-b-seek')[1].click()`);
+    eq(probe(`JSON.stringify(document.querySelector('atelier-video video').currentTime)`), 3.5, 'seek');
+    altClick(`document.querySelector('atelier-mock .atl-b-stage')`, 0.25, 0.5);
+    await sleep(200);
+    await typeNewAndSend('mock thread');
+    const c = await threadOf('b/media', 'mock thread');
+    assert(c?.anchor?.point && Math.abs(c.anchor.point.x - 0.25) < 0.02, `mock anchor ${JSON.stringify(c?.anchor)}`);
+  });
+
+  await check('blocks-cdn: Mermaid, Vega-Lite and the file viewer draw from pinned versions; a broken spec shows its error', async () => {
+    let t;
+    for (let i = 0; i < 40; i++) {
+      t = probe(`JSON.stringify({ states: [...document.querySelectorAll('atelier-mermaid, atelier-chart, atelier-file')].map(e => e.localName + ':' + (e.dataset.rendered || '')),
+        node: !!document.querySelector('atelier-mermaid svg g.node'), chart: !!document.querySelector('atelier-chart svg'),
+        lines: document.querySelectorAll('atelier-file .line').length, error: document.querySelector('.atl-b-error')?.textContent.slice(0, 40) || '' })`);
+      if (t.states.every(s => !s.endsWith(':'))) break;
+      await sleep(500);
+    }
+    eq(t.states, ['atelier-mermaid:true', 'atelier-chart:true', 'atelier-file:true', 'atelier-chart:error'], 'block states');
+    assert(t.node && t.chart && t.lines === 3 && t.error.startsWith('atelier-chart'), JSON.stringify(t));
+    altClick(`document.querySelectorAll('atelier-mermaid svg g.node')[1]`);
+    await sleep(200);
+    await typeNewAndSend('mermaid box thread');
+    eq((await threadOf('b/cdn', 'mermaid box thread'))?.anchor?.selector, ':scope g.node[id*="-flowchart-high-"]', 'Mermaid box anchored by name');
+  });
+
+  await check('blocks-cdn: a Thread on two lines of a file view stays resolved across a Ready', async () => {
+    act(`(()=>{const pre=document.querySelector('atelier-file pre'), w=document.createTreeWalker(pre, NodeFilter.SHOW_TEXT), r=document.createRange(); let n, a, b;
+      while ((n = w.nextNode())) { if (!a && n.data.includes('limit')) a = n; if (n.data.includes('throw')) { b = n; break; } }
+      r.setStart(a, a.data.indexOf('limit')); r.setEnd(b, b.data.indexOf('throw') + 5);
+      getSelection().removeAllRanges(); getSelection().addRange(r); pre.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}))})()`);
+    await sleep(150);
+    act(`document.querySelector('.atl-float').click()`);
+    await sleep(200);
+    await typeNewAndSend('two-line thread');
+    const c = await threadOf('b/cdn', 'two-line thread');
+    assert(c?.anchor?.quote?.includes('\n') && c.anchor.quote.includes('throw'), `quote ${JSON.stringify(c?.anchor?.quote)}`);
+    const resolved = () => probe(`JSON.stringify([...CSS.highlights.get('atl-anchor'), ...CSS.highlights.get('atl-active')].some(r => r.toString() === ${JSON.stringify(c.anchor.quote)}))`);
+    eq(resolved(), true, 'resolved before the Ready');
+    writeBlocks();
+    await api('/api/ready', { changed: ['b/cdn'] });
+    await until(`document.querySelector('atelier-file')?.dataset.rendered === 'true'`, 'the file view after the Ready');
+    await sleep(500);
+    eq(resolved(), true, 'resolved after the Ready');
+    eq(probe(`JSON.stringify([...document.querySelectorAll('atelier-file .line')].map(l => Math.round(l.getBoundingClientRect().height / parseFloat(getComputedStyle(l).lineHeight))))`), [1, 1, 1], 'rows per line (a kept newline must not add a blank row)');
+  });
+
+  await check('blocks: a claim the human closed stays closed across a Ready, even within the open depth', async () => {
+    writeBlocks(undefined, '2');
+    browser(['reload']); await sleep(1500);
+    const isOpen = () => probe(`JSON.stringify(document.querySelector('[atl-key=why] > details').open)`);
+    eq(isOpen(), true, 'claim within open="2" at start');
+    act(`document.querySelector('[atl-key=why] > details > summary').click()`);
+    await sleep(200);
+    eq(isOpen(), false, 'claim after the human closed it');
+    writeBlocks('Kernel placement failed three times.', '2');
+    await api('/api/ready', { changed: ['b/kernel/why'] });
+    await until(`document.querySelector('[atl-key=why] .atl-claim-head')?.innerText.includes('three times')`, 'the swapped claim');
+    await sleep(300);
+    eq(isOpen(), false, 'closed claim after a Ready');
+    eq(probe(`JSON.stringify(document.querySelector('[atl-key=cost] > details').open)`), true, 'an unseen claim still opens to the initial depth');
+  });
+
+  // ---- the 2026-10-06 verdict: German chrome, folding margin, tabs, and the new blocks ----
+  const kitPage = () => `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>kit</title>
+<link rel="stylesheet" href="/atelier.css"><link rel="stylesheet" href="/atelier-blocks.css">
+<script type="module" src="/atelier.mjs"></script><script type="module" src="/atelier-blocks.mjs"></script></head><body>
+<header class="atl-top"><span>Kit</span><atelier-activity></atelier-activity></header>
+<div class="atl-page"><main><section atl-key="k">
+  <atelier-tabs>
+    <section atl-key="one" atl-label="Eins">
+      <atelier-findings><script type="text/plain">
+        disliked: Das Video ist viel zu klein.
+        gap: Die Reihenfolge der Prüfungen fehlt.
+      </script></atelier-findings>
+      <atelier-decision><script type="text/plain">
+        ? Wie groß soll das Video sein?
+        * A · Groß, mit Umschalter
+          + man sieht die Details
+        - B · Klein
+          - man erkennt nichts
+      </script></atelier-decision>
+    </section>
+    <section atl-key="two" atl-label="Zwei">
+      <atelier-flow><script type="text/plain">
+        S0 Backlog: Konzepte kommen aus der Matrix.
+        S5 Prüfung: Die Endprüfung läuft auf dem Master.
+          Ton: läuft bis zum Ende.
+          Standbild: 87 bestanden.
+          || Gefühltes Standbild: 50 bestanden.
+      </script></atelier-flow>
+      <atelier-video src="/a.mp4" label="Erster Schnitt"><script type="text/plain">0:00 Haken</script></atelier-video>
+      <atelier-video src="/b.mp4" label="Zweiter Schnitt"><script type="text/plain">0:00 Haken</script></atelier-video>
+      <atelier-timeline><script type="text/plain">
+        Runde 0 · erster Master
+          > Judge: Der Haken ist zu dunkel.
+        Runde 1 · abgenommen
+      </script></atelier-timeline>
+    </section>
+  </atelier-tabs>
+</section></main><atelier-host layout="anchored" collapsible></atelier-host></div></body></html>`;
+
+  await check('kit: German chrome, findings and decision under lang="de"; every option shows its own context', async () => {
+    fs.writeFileSync(path.join(dir, 'surface.html'), kitPage());
+    browser(['eval', `localStorage.removeItem('atelier:hosts'); 'ok'`]);
+    browser(['reload']); await sleep(1500);
+    const t = probe(`JSON.stringify({ pick: document.querySelector('atelier-activity [data-pick]').getAttribute('aria-label'),
+      fold: document.querySelector('atelier-activity [data-fold]').getAttribute('aria-label'),
+      tags: [...document.querySelectorAll('.atl-b-tag')].map(e => e.textContent + ':' + getComputedStyle(e).display),
+      options: [...document.querySelectorAll('.atl-b-opt')].map(o => o.innerText.replace(/\\s+/g, ' ').trim()) })`);
+    eq([t.pick, t.fold], ['Etwas kommentieren (oder Alt gedrückt halten und klicken)', 'Threads ausblenden'], 'German chrome');
+    eq(t.tags, ['Stört:inline-block', 'Lücke:inline-block'], 'inline German finding labels');
+    eq(t.options, ['A · Groß, mit Umschalter Empfohlen man sieht die Details', 'B · Klein man erkennt nichts'], 'options with their context inside');
+  });
+
+  await check('kit: a collapsible host folds and reserves no width, and opening a card unfolds it', async () => {
+    const width = () => probe(`JSON.stringify(Math.round(document.querySelector('.atl-page > main').getBoundingClientRect().width))`);
+    const before = width();
+    act(`document.querySelector('atelier-activity [data-fold]').click()`);
+    await sleep(200);
+    const folded = probe(`JSON.stringify({ shown: getComputedStyle(document.querySelector('atelier-host[collapsible]')).display, page: Math.round(document.querySelector('.atl-page').getBoundingClientRect().width) })`);
+    eq(folded.shown, 'none', 'host display when folded');
+    assert(width() >= folded.page - 60, `main is ${width()} of ${folded.page} px when folded (was ${before})`);
+    altClick(`document.querySelector('.atl-b-q')`);
+    await sleep(300);
+    eq(probe(`JSON.stringify(getComputedStyle(document.querySelector('atelier-host[collapsible]')).display)`), 'block', 'host after opening a new Thread');
+    act(`document.querySelector('atelier-host [data-discard]').click()`);
+  });
+
+  await check('kit: tabs show one Region, and revealing a Thread in a hidden tab switches to it', async () => {
+    const shown = () => probe(`JSON.stringify([...document.querySelectorAll('atelier-tabs > [atl-key]')].filter(r => r.checkVisibility()).map(r => 'k/' + r.getAttribute('atl-key')))`);
+    eq(shown(), ['k/one'], 'visible tab at start');
+    await api('/api/state', { threads: { ...(await state()).threads, 'k/two': [{ id: 'c-tab', text: 'tab thread', anchor: { region: 'k/two', quote: '87 bestanden' } }] } });
+    await api('/api/send', { region: 'k/two', id: 'c-tab' });
+    await until(`!!document.querySelector('[data-slot="c-tab"]')`, 'the Thread card');
+    browser(['eval', `import('/atelier.mjs').then(k => k.reveal('c-tab')).then(() => 'ok')`]);
+    await sleep(600);
+    eq(shown(), ['k/two'], 'visible tab after reveal');
+    eq(probe(`JSON.stringify({ sel: document.querySelector('.atl-b-node.is-sel')?.textContent, open: document.querySelector('.atl-b-fnode.is-sel')?.open })`),
+      { sel: 'Standbild', open: true }, 'the flow selected the revealed node');
+  });
+
+  await check('kit: the flow zooms by level and marks parallel steps; sibling videos show one at a time', async () => {
+    act(`document.querySelector('.atl-b-crumbs [data-zoom=""]').click()`);
+    const lane = () => probe(`JSON.stringify([...document.querySelectorAll('.atl-b-step')].map(s => (s.classList.contains('is-parallel') ? '‖ ' : '') + [...s.querySelectorAll('.atl-b-node')].map(n => n.textContent).join(' + ')))`);
+    eq(lane(), ['S0 Backlog', 'S5 Prüfung 3 ›'], 'overview');
+    act(`[...document.querySelectorAll('.atl-b-node')].find(n => n.textContent.startsWith('S5')).click()`);
+    eq(lane(), ['Ton', '‖ Standbild + Gefühltes Standbild'], 'stage level');
+    const v = probe(`JSON.stringify({ open: [...document.querySelectorAll('.atl-b-vgroup')].map(d => d.open), big: Math.round(document.querySelector('.atl-b-video').getBoundingClientRect().width) })`);
+    eq(v.open, [true, false], 'video group');
+    act(`document.querySelectorAll('.atl-b-vgroup > summary')[1].click()`);
+    await sleep(200);
+    eq(probe(`JSON.stringify([...document.querySelectorAll('.atl-b-vgroup')].map(d => d.open))`), [false, true], 'video group after opening the second');
+    act(`document.querySelectorAll('.atl-b-size')[1].click()`);
+    const small = probe(`JSON.stringify(Math.round(document.querySelectorAll('.atl-b-video')[1].getBoundingClientRect().width))`);
+    assert(small <= 360 && v.big > 400, `video widths: large ${v.big}, small ${small}`);
+    eq(probe(`JSON.stringify(document.querySelector('.atl-b-said').innerText.replace(/\\s+/g, ' '))`), 'JUDGE Der Haken ist zu dunkel.', 'timeline comment');
   });
 
 } finally {
