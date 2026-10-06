@@ -113,6 +113,14 @@
       "vendoredFromHash": "2ab11f2f51f3c29771edb5d4258d807a49462491",
       "upstreamUpdatedAt": "2026-08-19T10:03:37Z"
     },
+    "mattpocock/to-questionnaire": {
+      "source": "mattpocock/skills",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "skillPath": "skills/productivity/to-questionnaire/SKILL.md",
+      "vendoredFromHash": "46dfbeeba12a9e52eef446676f42e7551023d9a9",
+      "upstreamUpdatedAt": "2026-08-19T10:03:37Z"
+    },
     "mattpocock/to-spec": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
@@ -135,6 +143,14 @@
       "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
       "skillPath": "skills/engineering/triage/SKILL.md",
       "vendoredFromHash": "4cb951d62ecccaed601cdc5f9a1b7b3d8a799635",
+      "upstreamUpdatedAt": "2026-09-17T08:29:58Z"
+    },
+    "mattpocock/wait-what": {
+      "source": "mattpocock/skills",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "skillPath": "skills/productivity/wait-what/SKILL.md",
+      "vendoredFromHash": "c8b050e6b8c711be1a9008ceacb2126914f0763e",
       "upstreamUpdatedAt": "2026-09-17T08:29:58Z"
     },
     "mattpocock/wayfinder": {
