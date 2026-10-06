@@ -45,7 +45,8 @@ request for the current branch; never create a duplicate. If the branch belongs 
 stack, load `gh-stack` and preserve the stack's branch and PR boundaries. Treat the stack as one
 delivery unit: one review contract over the combined diff from the bottom layer's merge-base to the
 top layer, and one full gate on the top layer. Fix each finding in the layer that owns it and run
-that layer's affected checks.
+that layer's affected checks. Record each layer's branch, PR, base, and head SHA, and apply
+sections 4–7 to every layer's PR; the stack is decision-ready only when every layer is.
 
 Record the current head SHA. Every check and review below applies to a named SHA; a push invalidates
 remote evidence for the previous SHA.
@@ -58,22 +59,23 @@ explicit.
 Read the repository's agent instructions, contribution guidance, and build configuration. Run the
 smallest repository-prescribed compile, test, lint, type-check, and generated-file checks that cover
 the diff. A check is affected when a change touches any source, test, fixture, prompt, or
-configuration it reads. A failed required gate remains blocking until that gate passes for the
+configuration it reads. A failed required gate remains blocking until that gate is satisfied for the
 resulting state or the human explicitly accepts its documented unavailability; a narrower passing
 command is supplementary evidence, not a replacement.
 
 At `low`, run affected prescribed checks. At `medium` and `high`, run affected checks during
-iteration, then run the full prescribed gate once on the final candidate, after review findings are
-resolved and before section 4. At `critical`, also run the full gate before review and after every
-material code change. After publication, CI on the pushed SHA is the full gate; rerun the local
-full gate only when a later change adds a code path, schema, permission, or behavior beyond the
-finding it fixes. Repository policy is the floor at every level.
+iteration and the full prescribed gate once on the final candidate, after section 3 resolves its
+findings and before section 4. After publication, CI on the pushed SHA supplies the full gate at
+`medium` and `high`; rerun the local full gate only after a scope-expanding change (section 3). At
+`critical`, run the full local gate before review and after every material code change, including
+after publication. Repository policy is the floor at every level.
 
-A failing test is a **known flake** when the same test also fails on the target branch or appears in
-the repository's documented flaky-test list. Record it under Verification with that evidence; it
-does not block the gate. Every other failure blocks. When the repository serializes full gates
-behind a shared lock, use the queue time for reviews and affected checks, and queue a full gate
-only for a candidate SHA that no open finding will change.
+A failure is a **known flake** only when it matches a documented flaky failure mode for that test,
+or the same nondeterministic failure reproduces on an unchanged target-branch SHA. Record the test,
+failure message, and baseline evidence under Verification. That check is **waived**, never passed.
+A check is **satisfied** when it passes or is waived; every other failure blocks. At `medium` and
+`high`, when the repository serializes full gates behind a shared lock, use the queue time for
+reviews and affected checks, and queue the full gate for the final candidate only.
 
 Inspect the complete merge-base diff
 and verify that it contains no secrets, accidental files, unrelated changes, or missing user-visible
@@ -82,7 +84,8 @@ documentation.
 Commit the intended change. Keep generated output and unrelated local files out of the commit.
 
 **Complete when:** the intended diff is committed, the working tree is clean apart from known
-unrelated files, and every applicable local check passes with command evidence.
+unrelated files, and affected checks are satisfied with command evidence; at `critical`, the full
+gate is satisfied too.
 
 ## 3. Challenge the change
 
@@ -104,12 +107,16 @@ Every independent readiness review receives the diff, specification, repository 
 local-check evidence, and looks for concrete correctness, security, data-loss, concurrency,
 compatibility, operability, and missing-test failure modes.
 
-The first round runs the complete contract on the complete diff. Every later round is a **delta
-re-review**: rerun only the lenses that reported material findings, give each its earlier findings
+The first round runs the complete contract on the complete diff. Later rounds are **delta
+re-reviews**: rerun only the lenses that reported material findings, give each its earlier findings
 and the diff since the SHA it reviewed, and ask it to confirm each fix and check the touched code
-for regressions. A passing delta re-review completes that lens for the resulting SHA. A rebase or
-restack keeps earlier review results when `git range-diff` shows unchanged patches; hand-resolved
-conflicts get a delta re-review of the resolution.
+for regressions. The **review contract** for a SHA is the latest full round plus every later
+passing delta; lenses that passed earlier carry forward, with their reviewed SHA recorded as
+evidence. A **scope-expanding** change, one that adds a code path, schema, permission, or behavior
+beyond the finding it fixes, starts a new full round. A rebase or restack keeps the review contract
+when `git range-diff` shows unchanged patches. A hand-resolved conflict always gets a delta
+re-review of the resolution, even when every lens passed: by the lead at `low`, otherwise by one
+fresh cross-family readiness reviewer.
 
 State whether the reviewed head is
 intentionally unpublished; before section 4, reviewers must not treat that expected publication
@@ -129,13 +136,16 @@ specification requirement, or concrete failure mode; record it as non-material u
 asks, because any edit reopens the selected contract. Ask the human when a finding changes approved intent or
 requires a product decision. A fix that needs new design, a new API, another repository, or more
 than about an hour of new work is an intent change: offer the human fix-here, follow-up PR, or
-accepted limitation. Cap the loop at two rounds: after round 2, fix only **blocking** findings
-(security, data loss, or a broken specification requirement) and bring every remaining finding to
-the human as one list, each marked fix-now, follow-up, or accept.
+accepted limitation.
 
-**Complete when:** every lens required by the approved level passed its latest round, full or
-delta, for the resulting head SHA, every finding has an explicit disposition, no material finding remains open
-without human acceptance, and that SHA passes its required local checks. An unavailable required binding blocks this level until the human chooses
+Cap the loop at two rounds. After round 2, run only fixes for **blocking** findings (security,
+data loss, or a broken specification requirement) and their delta re-reviews; bring every other
+finding to the human as one list, each marked fix-now, follow-up, or accept. A new finding or a
+failed fix verification after round 2 pauses the run for the human.
+
+**Complete when:** the review contract holds for the resulting head SHA, every finding has an
+explicit disposition, no material finding remains open without human acceptance, and that SHA
+satisfies its required local checks. An unavailable required binding blocks this level until the human chooses
 a different permitted level or the binding becomes available.
 
 ## 4. Publish the PR
@@ -200,7 +210,8 @@ suppressed`, or `Previously missed` as feedback. Reviews of earlier SHAs still r
 historical reconciliation in section 6.
 `BLOCKED_TRUNCATED` means GitHub returned more review data than the bounded snapshot; inspect the
 remaining pages before proceeding. `NO_CI` fails closed: after repository rules confirm that no
-remote check is expected, rerun with `ALLOW_NO_CI=1`. Use `ALLOW_MISSING_COPILOT=1` only after the
+remote check is expected, rerun with `ALLOW_NO_CI=1`. On `CI_FAILED`, reconcile every failure;
+when each one is a known flake (section 2), record the waivers and continue to section 7. Use `ALLOW_MISSING_COPILOT=1` only after the
 human accepts documented Copilot unavailability.
 
 **Complete when:** CI or review needs action, or the latest published SHA is a ready candidate.
@@ -223,8 +234,8 @@ agent-authored comment, edit the original after resolution to begin `🤖 ✅ Re
 the evidence; never edit a human-authored comment on their behalf. Do not resolve a human
 reviewer's thread on their behalf. After a push, reapply section 2's gate requirement to the
 resulting SHA. At `low`, rerun the affected lead lenses. At `medium` and `high`, run focused tests for
-each fix and one fresh cross-family delta re-review of the feedback fixes; rerun the complete
-contract only when a fix adds a code path, schema, permission, or behavior beyond its comment. At
+each fix and one fresh cross-family delta re-review of the feedback fixes; a scope-expanding change
+starts a new full round (section 3). At
 `critical`, rerun the complete selected review contract from section 3 against the resulting SHA.
 Push every fix from one Copilot review together, so each Copilot round costs one re-review. Request another
 Copilot review unless the repository's ruleset reviews new pushes automatically, then return to
@@ -238,16 +249,18 @@ with no blocking item deferred without human acceptance.
 Run `pr-state.sh` again and compare its `headSha` with local `HEAD`. Declare the PR decision-ready
 only when:
 
-- prescribed local and remote checks pass for that SHA;
-- the approved intensity contract completed successfully for that exact SHA;
+- prescribed local and remote checks are satisfied for that SHA, with waived checks reported as
+  waived;
+- the section 3 review contract holds for that exact SHA;
 - GitHub reports the branch mergeable;
 - no required review requests changes;
 - no unresolved review thread or top-level acceptance blocker remains;
 - Copilot reviewed that SHA, or the human explicitly accepted documented unavailability;
 - every finding in all Copilot review bodies, including suppressed and earlier findings, is
   explicitly resolved, refuted, or accepted;
-- all adversarial findings are resolved or accepted; and
-- the PR body still describes the delivered behavior and evidence.
+- all adversarial findings are resolved or accepted;
+- the PR body still describes the delivered behavior and evidence; and
+- for a stack, every layer's PR meets these conditions.
 
 Inspect `git worktree list --porcelain` and remove every clean worktree that was absent from the
 initial inventory and explicitly created by this run. Preserve pre-existing, dirty, or
