@@ -48,7 +48,7 @@ top layer, and one full gate on the top layer. Fix each finding in the layer tha
 that layer's affected checks. Record each layer's branch, PR, base, and head SHA, and bind the
 shared review contract and top-layer full gate to that recorded stack revision: while it is
 unchanged, they satisfy every layer's review and full-gate requirements. Each layer still needs its
-own affected checks and remote evidence. Apply sections 4–7 to every layer's PR; the stack is
+own affected checks and remote evidence; run them as soon as that layer's head is final. Apply sections 4–7 to every layer's PR; the stack is
 decision-ready only when every layer is.
 
 Record the current head SHA. Every check and review below applies to a named SHA; a push invalidates
@@ -59,7 +59,8 @@ explicit.
 
 ## 2. Establish local readiness
 
-Read the repository's agent instructions, contribution guidance, and build configuration. Run the
+Read the repository's agent instructions, contribution guidance, and build configuration. Before
+the first gate, compare the active toolchain versions with the repository's pins. Run the
 smallest repository-prescribed compile, test, lint, type-check, and generated-file checks that cover
 the diff. A check is affected when a change touches any source, test, fixture, prompt, or
 configuration it reads. A failed required gate remains blocking until that gate is satisfied for the
@@ -68,13 +69,17 @@ command is supplementary evidence, not a replacement.
 
 At `low`, run affected prescribed checks. At `medium` and `high`, run affected checks during
 iteration and the full prescribed gate once on the final candidate, after section 3 resolves its
-findings and before section 4. After publication, CI on the pushed SHA supplies the full gate at
+findings and before section 4. Start static, architecture, and lint checks in parallel with review
+round 1, and the full gate too when its lock is free; their failures join round 1's findings.
+Immediately before the final-candidate gate, fetch and rebase onto the latest target branch, so the
+gate, the review contract, and CI share one base; publish right after it passes. After publication, CI on the pushed SHA supplies the full gate at
 `medium` and `high`; rerun the local full gate only after a scope-expanding change (section 3). At
 `critical`, run the full local gate before review and after every material code change, including
 after publication. Repository policy is the floor at every level.
 
 A failure is a **known flake** only when it matches a documented flaky failure mode for that test,
-or the same nondeterministic failure reproduces on an unchanged target-branch SHA. Record the test,
+or the same nondeterministic failure reproduces on an unchanged target-branch SHA; for a failure
+outside the diff, rerun that single test on the target-branch SHA to get this evidence. Record the test,
 failure message, and baseline evidence under Verification. That check is **waived**, never passed.
 A check is **satisfied** when it passes or is waived; every other failure blocks. At `medium` and
 `high`, when the repository serializes full gates behind a shared lock, use the queue time for
@@ -101,7 +106,20 @@ merge-base and head SHA:
   Simplicity, and production-readiness falsification.
 - `high`: run four isolated lenses—Standards, Spec, Simplicity, and one fresh cross-family
   production-readiness review—keeping their findings hidden from one another until all finish. Load
-  `code-review` and `ponytail-review` for their review contracts.
+  `code-review` and `ponytail-review` for their review contracts. For a stack, each lens reviews
+  every layer's own diff as a separate slice, with the combined diff as context, and reports
+  findings per layer; this is still one round.
+
+At `medium` and above, push the candidate before round 1 as draft PRs (section 4 creates them;
+mark them draft until section 4's ready condition holds) and request Copilot, so its findings
+join round 1's fix batch instead of arriving after publication. A draft push is preliminary:
+"publication" in this skill means marking the PR ready in section 4. Before reconciling round 1,
+wait for the lenses, the parallel checks, and the draft Copilot review, then inventory Copilot's
+findings as section 6 describes; proceed without it only after the human accepts documented
+unavailability.
+
+Each lens writes its report to a path the repository and global rules allow, such as `$PI_TMP`,
+and the lead cites that path.
 - `critical`: run the `high` contract plus the consequence-sized checking panel required by
   `model-orchestration`, including its final evidence-boundary review. If the required independent
   families are unavailable, report `ROUTING=BLOCKED` rather than degrading the panel.
@@ -124,7 +142,7 @@ re-review of the resolution, even when every lens passed: by the lead at `low`, 
 fresh cross-family readiness reviewer.
 
 State whether the reviewed head is
-intentionally unpublished; before section 4, reviewers must not treat that expected publication
+intentionally unpublished or a draft; before section 4, reviewers must not treat that expected publication
 state as a code defect. A finding is actionable only when it cites code, a repository rule, the
 specification, or a concrete failure mode. Treat unsupported "best practice" claims as noise. A
 failed launch or unavailable required binding blocks its level and must be disclosed. Truncated output is incomplete; rerun narrower slices against the same base
@@ -135,7 +153,11 @@ Reconcile every finding from every required report in the session as fixed, refu
 non-material with a reason, or explicitly accepted by the human. Never describe a report as passing
 when it says `FAIL`, `BLOCKING`, or `not a PASS`; after resolving such a verdict, run its delta
 re-review against the resulting SHA. Fix material findings, refute incorrect findings
-with evidence, and rerun affected checks. Once required reports pass, do not change the candidate
+with evidence, and rerun affected checks. Each fix brief names the reviewer's reproducer as its
+acceptance test and the neighbouring cases that must keep working. When a fix to a parser, matcher,
+or validator fails its verification once, choose the fail-safe behavior instead (refuse, omit, or
+narrow the claim) and record a follow-up issue. After round 2, or when the fail-safe changes approved
+behavior, get the human's direction before implementing it. Once required reports pass, do not change the candidate
 solely for optional cleanup or a non-material simplification that cites no repository rule,
 specification requirement, or concrete failure mode; record it as non-material unless the human
 asks, because any edit reopens the selected contract. Ask the human when a finding changes approved intent or
@@ -178,8 +200,9 @@ system outcome without requiring codebase context. Use these sections in order:
 
 For a stacked PR, explain this layer's distinct outcome and its dependency on adjacent layers.
 
-Make the PR ready for review after the local readiness gate passes. Request Copilot review with
-`--reviewer @copilot`. If the repository requests Copilot through a ruleset, confirm the request in
+Make the PR ready for review after the local readiness gate passes. Request Copilot review of the
+published head with `--reviewer @copilot`; findings from its draft review belong to the same
+reconciliation as round 1. If the repository requests Copilot through a ruleset, confirm the request in
 GitHub state instead of issuing a duplicate. A failed or unavailable Copilot request is explicit;
 it never silently counts as review.
 
@@ -242,7 +265,11 @@ resulting SHA. At `low`, rerun the affected lead lenses. At `medium` and `high`,
 each fix and one fresh cross-family delta re-review of the feedback fixes; a scope-expanding change
 starts a new full round (section 3). At
 `critical`, rerun the complete selected review contract from section 3 against the resulting SHA.
-Push every fix from one Copilot review together, so each Copilot round costs one re-review. Request another
+Push every fix from one Copilot review together, so each Copilot round costs one re-review.
+Copilot shares the two-round cap: after its second round, fix only blocking findings and bring the
+rest to the human as one list. After publication, rebase onto a moved target branch at most once,
+and only when GitHub reports a conflict or repository policy requires it; a conflict that needs a
+behavior choice goes to the human. Request another
 Copilot review unless the repository's ruleset reviews new pushes automatically, then return to
 observation.
 
