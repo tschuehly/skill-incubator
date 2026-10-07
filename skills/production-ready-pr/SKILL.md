@@ -178,7 +178,7 @@ a different permitted level or the binding becomes available.
 ## 4. Publish the PR
 
 Load `write-for-humans` before writing shared GitHub text. Start every agent-authored PR body and
-comment with `🤖`.
+comment with `🤖`. An independent check of PR text or comment replies uses the `light-review` role.
 
 Push the branch. Create the pull request when none exists; otherwise update the existing one. Write
 for a reviewer who has not followed the implementation. The opening sentence states the user or
@@ -249,7 +249,8 @@ human accepts documented Copilot unavailability.
 Stop the observer before changing the branch. Fetch every top-level PR comment and every non-empty
 Copilot review body, not only inline threads or the latest review. Expand `Suppressed comments` and
 `Previously missed` sections and inventory each finding. Classify every thread, top-level comment,
-and summary finding:
+and summary finding; a delegated classification uses the `light-review` role, while every code fix
+keeps `review`:
 
 - **fix:** implement, test, commit, and push;
 - **refute:** reply with concise evidence;
