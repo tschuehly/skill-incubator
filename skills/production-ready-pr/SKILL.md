@@ -110,13 +110,20 @@ merge-base and head SHA:
   every layer's own diff as a separate slice, with the combined diff as context, and reports
   findings per layer; this is still one round.
 
+  Trial, savings not yet measured: at `high` and `critical`, round 1 splits the production-readiness
+  review into two fresh judges, one on each model family. One attacks invariants, data flow, and
+  abuse cases; the other runs differential, state-transition, and compatibility probes. Merge
+  their duplicate defect classes and record each judge's unique ones. Each judge counts as its own
+  lens for delta re-reviews.
+
 At `medium` and above, push the candidate before round 1 as draft PRs (section 4 creates them;
 mark them draft until section 4's ready condition holds) and request Copilot, so its findings
 join round 1's fix batch instead of arriving after publication. A draft push is preliminary:
 "publication" in this skill means marking the PR ready in section 4. Before reconciling round 1,
-wait for the lenses, the parallel checks, and the draft Copilot review, then inventory Copilot's
-findings as section 6 describes; proceed without it only after the human accepts documented
-unavailability.
+wait for the lenses, section 2's parallel static, architecture, and lint checks and any full gate
+already started, and the draft Copilot review, then inventory Copilot's findings as section 6 describes. When Copilot is unavailable,
+record the gap with its reason and the head SHA; another reviewer is no substitute, and round 1
+proceeds without Copilot only after the human accepts that gap.
 
 Each lens writes its report to a path the repository and global rules allow, such as `$PI_TMP`,
 and the lead cites that path.
@@ -126,10 +133,15 @@ and the lead cites that path.
 
 Every independent readiness review receives the diff, specification, repository rules, and
 local-check evidence, and looks for concrete correctness, security, data-loss, concurrency,
-compatibility, operability, and missing-test failure modes.
+compatibility, operability, and missing-test failure modes. Every reviewer reports each finding as
+a **defect class**: the violated rule, a minimal failing probe, every entry point that reaches it,
+and neighbouring positive and negative cases. When the code reads a grammar or walks a state
+machine, generate probes from that grammar or state machine—each construct, nesting, and
+transition—not only from collected examples.
 
-The first round runs the complete contract on the complete diff. Later rounds are **delta
-re-reviews**: rerun only the lenses that reported material findings, give each its earlier findings
+A **round** is every review of one head SHA, Copilot's included; number rounds 1, 2, 3 with no
+suffixes. A retry on the same SHA stays in its round, and a resumed session continues the count. The first round runs the
+complete contract on the complete diff. Later rounds are **delta re-reviews**: rerun only the lenses that reported material findings, give each its earlier findings
 and the diff since the SHA it reviewed, and ask it to confirm each fix and check the touched code
 for regressions. The **review contract** for a SHA is the latest full round plus every later
 passing delta; lenses that passed earlier carry forward, with their reviewed SHA recorded as
@@ -150,14 +162,23 @@ and head whose union covers the complete diff. The lead's own review is not a su
 independent review required by the selected level.
 
 Reconcile every finding from every required report in the session as fixed, refuted with evidence,
-non-material with a reason, or explicitly accepted by the human. Never describe a report as passing
+non-material with a reason, or explicitly accepted by the human. Tag each finding raised after
+round 1 as **missed** (already present in the round-1 head, including inherited code) or
+**fix-introduced**, and count the two separately. Never describe a report as passing
 when it says `FAIL`, `BLOCKING`, or `not a PASS`; after resolving such a verdict, run its delta
 re-review against the resulting SHA. Fix material findings, refute incorrect findings
-with evidence, and rerun affected checks. Each fix brief names the reviewer's reproducer as its
-acceptance test and the neighbouring cases that must keep working. When a fix to a parser, matcher,
-or validator fails its verification once, choose the fail-safe behavior instead (refuse, omit, or
-narrow the claim) and record a follow-up issue. After round 2, or when the fail-safe changes approved
-behavior, get the human's direction before implementing it. Once required reports pass, do not change the candidate
+with evidence, and rerun affected checks. Fix the class, not the example: fix the shared cause
+across every entry point and representation. Keep one **probe corpus** for the run beside the
+lens reports, holding every probe from every reviewer with its command and expected result; the
+lead writes the probe and neighbouring cases for a Copilot or other external finding that lacks
+them. Rerun the whole corpus after every fix. A fix closes only when every probe in its class
+passes and the controls (neighbouring cases and every earlier passing probe) still pass.
+
+For code that reads syntax (a parser, matcher, rewriter, or validator), make the safe fix first:
+where the code cannot fully interpret its input, it preserves the input, refuses the operation, or
+counts the unknown conservatively across the whole ambiguous region. Only then add recognition
+cases, preferring an existing parser, and record a follow-up issue for input left unsupported.
+When the safe fix changes approved behavior, or after round 2, ask the human before applying it. Once required reports pass, do not change the candidate
 solely for optional cleanup or a non-material simplification that cites no repository rule,
 specification requirement, or concrete failure mode; record it as non-material unless the human
 asks, because any edit reopens the selected contract. Ask the human when a finding changes approved intent or
@@ -299,5 +320,6 @@ Inspect `git worktree list --porcelain` and remove every clean worktree that was
 initial inventory and explicitly created by this run. Preserve pre-existing, dirty, or
 uncertain-ownership worktrees and report why they remain.
 
-Report the PR URL, head SHA, checks run, review disposition, and accepted limitations. Leave the
+Report the PR URL, head SHA, checks run, review disposition, missed and fix-introduced counts, and
+accepted limitations. Leave the
 merge to the human.
