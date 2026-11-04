@@ -97,8 +97,25 @@ gate is satisfied too.
 
 ## 3. Challenge the change
 
-Load `model-orchestration` before delegation and apply the approved review contract against one
-merge-base and head SHA:
+Load `model-orchestration` before delegation.
+
+**Round 0: should this PR exist?** At every level, before any lens, draft push, or Copilot request,
+one fresh cross-family judge receives the diff, specification, and repository rules and answers,
+each with cited evidence:
+
+- (a) Root cause or symptom? Name the layer where the meaning or behaviour is lost.
+- (b) Does it work on an unrelated domain or schema, with no fixed keyword lists or label tables?
+- (c) Is there measured user-facing value? A change switched off with no measurement, or a narrow
+  metric moving while the outcome metric stays flat, counts as no.
+- (d) Is there a simpler fix that removes the problem class rather than guarding it?
+
+For a change with no runtime behaviour, such as documentation or tests, the judge marks (a) and
+(b) not applicable, and (c) needs the specification's stated need instead of a measurement.
+A symptom in (a), a no in (b) or (c), or a yes in (d) stops the PR: bring the judge's answers and
+the alternative to the human before spending review effort. Round 0 is not a round in the count below
+and does not use the two-round cap; rerun it when the human chooses a different fix.
+
+Then apply the approved review contract against one merge-base and head SHA:
 
 - `low`: the lead applies Standards, Spec, and deletion-first Simplicity lenses; Copilot remains the
   external review.
@@ -305,6 +322,7 @@ only when:
 
 - prescribed local and remote checks are satisfied for that SHA, with waived checks reported as
   waived;
+- Round 0 passed, or the human chose to proceed after it stopped the PR;
 - the section 3 review contract holds for that exact SHA;
 - GitHub reports the branch mergeable;
 - no required review requests changes;
