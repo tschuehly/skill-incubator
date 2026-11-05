@@ -9,6 +9,14 @@
       "vendoredFromHash": "e880ad90e8a0a8384f5cfae2cdd6a854e2de5d89",
       "upstreamUpdatedAt": "2026-07-24T11:42:19+02:00"
     },
+    "kunchenguid/kun": {
+      "source": "kunchenguid/kun",
+      "sourceUrl": "https://github.com/kunchenguid/kun.git",
+      "sourceRevision": "c855c4dfed4343f3d36073792183b0400eb95597",
+      "skillPath": "skills/kun/SKILL.md",
+      "vendoredFromHash": "71718940c99062bf0d8d768c57e1c8ffca8936c4",
+      "upstreamUpdatedAt": "2026-11-05T03:12:16-08:00"
+    },
     "mattpocock/code-review": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
