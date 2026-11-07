@@ -16,7 +16,9 @@ pushing the current branch and opening or updating its pull request. It never au
 Invocation accepts `[low|medium|high|critical] [<pr-number-or-branch>]`. Before honoring a supplied
 level or classifying an omitted one, resolve the target with read-only repository and PR evidence and
 read its applicable agent instructions, contribution guidance, and build policy to establish the
-mandatory floor. When a level is supplied, use the higher of it and that floor and state any raise.
+mandatory floor. Read the existing PR's Copilot request and review state and the repository's recent
+Copilot reviews for evidence that a request registers and quota remains; when it shows Copilot
+unavailable, ask for a substitute judge in the same question as the level. When a level is supplied, use the higher of it and that floor and state any raise.
 When it is omitted, recommend the highest applicable level below, state what that level will run,
 and ask the human to approve, choose another level, or cancel. Before approval, create no worktree
 and run no tests, reviews, edits, commits, pushes, or PR mutations.
@@ -81,9 +83,12 @@ A failure is a **known flake** only when it matches a documented flaky failure m
 or the same nondeterministic failure reproduces on an unchanged target-branch SHA; for a failure
 outside the diff, rerun that single test on the target-branch SHA to get this evidence. Record the test,
 failure message, and baseline evidence under Verification. That check is **waived**, never passed.
-A check is **satisfied** when it passes or is waived; every other failure blocks. At `medium` and
-`high`, when the repository serializes full gates behind a shared lock, use the queue time for
-reviews and affected checks, and queue the full gate for the final candidate only.
+A check is **satisfied** when it passes or is waived; every other failure blocks. Run no more PR or stack owners at once than there are free full-gate slots
+across the Mac, the Windows PC (`~/.local/bin/pc-run <gate>`; exit 75 means the PC is unavailable:
+run locally, never retry), and CI. At `medium` and `high`, when the repository serializes full
+gates behind a shared lock, use the queue time for reviews and affected checks, and queue the full
+gate for the final candidate only; once the lock wait passes about 15 minutes, use CI on the
+candidate's draft push as the final-candidate gate.
 
 Inspect the complete merge-base diff
 and verify that it contains no secrets, accidental files, unrelated changes, or missing user-visible
@@ -138,9 +143,11 @@ mark them draft until section 4's ready condition holds) and request Copilot, so
 join round 1's fix batch instead of arriving after publication. A draft push is preliminary:
 "publication" in this skill means marking the PR ready in section 4. Before reconciling round 1,
 wait for the lenses, section 2's parallel static, architecture, and lint checks and any full gate
-already started, and the draft Copilot review, then inventory Copilot's findings as section 6 describes. When Copilot is unavailable,
-record the gap with its reason and the head SHA; another reviewer is no substitute, and round 1
-proceeds without Copilot only after the human accepts that gap.
+already started, and the draft Copilot review or its approved substitute, then inventory Copilot's findings as section 6 describes. Verify once, before round 1, that the
+request registered in GitHub state. When Copilot is unavailable, record the gap with its reason and
+the head SHA and ask the human once to accept the gap or approve a substitute judge, unless the
+level question already settled it; an approved substitute runs in round 1 alongside the lenses. No
+other reviewer substitutes without that approval.
 
 Each lens writes its report to a path the repository and global rules allow, such as `$PI_TMP`,
 and the lead cites that path.
@@ -205,8 +212,8 @@ accepted limitation.
 
 Cap the loop at two rounds. After round 2, run only fixes for **blocking** findings (security,
 data loss, or a broken specification requirement) and their delta re-reviews; bring every other
-finding to the human as one list, each marked fix-now, follow-up, or accept. A new finding or a
-failed fix verification after round 2 pauses the run for the human.
+finding to the human as one list, each marked fix-now, follow-up, or accept. A new blocking finding,
+a new non-Copilot finding, or a failed fix verification after round 2 pauses the run for the human.
 
 **Complete when:** the review contract holds for the resulting head SHA, every finding has an
 explicit disposition, no material finding remains open without human acceptance, and that SHA
@@ -305,9 +312,10 @@ each fix and one fresh cross-family delta re-review of the feedback fixes; a sco
 starts a new full round (section 3). At
 `critical`, rerun the complete selected review contract from section 3 against the resulting SHA.
 Push every fix from one Copilot review together, so each Copilot round costs one re-review.
-Copilot shares the two-round cap: after its second round, fix only blocking findings and bring the
-rest to the human as one list. After publication, rebase onto a moved target branch at most once,
-and only when GitHub reports a conflict or repository policy requires it; a conflict that needs a
+Copilot shares the two-round cap. From its second round on, only a blocking finding pauses the run;
+add each non-blocking finding to the human's list and keep going. After publication, rebase onto a
+moved target branch only when GitHub reports a conflict or repository policy requires it, at most
+once; a conflict that needs a
 behavior choice goes to the human. Request another
 Copilot review unless the repository's ruleset reviews new pushes automatically, then return to
 observation.
@@ -327,7 +335,8 @@ only when:
 - GitHub reports the branch mergeable;
 - no required review requests changes;
 - no unresolved review thread or top-level acceptance blocker remains;
-- Copilot reviewed that SHA, or the human explicitly accepted documented unavailability;
+- Copilot reviewed that SHA, or the human explicitly accepted documented unavailability and any
+  approved substitute reviewed it;
 - every finding in all Copilot review bodies, including suppressed and earlier findings, is
   explicitly resolved, refuted, or accepted;
 - all adversarial findings are resolved or accepted;
