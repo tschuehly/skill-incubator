@@ -20,26 +20,26 @@
     "mattpocock/code-review": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/code-review/SKILL.md",
-      "vendoredFromHash": "d8e341cee7980127dddda05159bedf25dc853615",
-      "upstreamUpdatedAt": "2026-08-19T13:01:26Z"
+      "vendoredFromHash": "a8ef561571acbb611de8ff19ba6da75b197c63a8",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/codebase-design": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/codebase-design/SKILL.md",
-      "vendoredFromHash": "07ba1cd60efc12d0d3a083005c1d9651cf15e39a",
-      "upstreamUpdatedAt": "2026-09-17T08:29:58Z"
+      "vendoredFromHash": "4cbe1c131e1ea54109cb1e4e5f3c505810db6606",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/diagnosing-bugs": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
-      "vendoredFromHash": "de4236cf34757c4e9ea7afe78d46c023213ff254",
-      "upstreamUpdatedAt": "2026-09-17T08:29:58Z"
+      "vendoredFromHash": "5fdd6cc53385395441910b026c72d71768e993d4",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/domain-modeling": {
       "source": "mattpocock/skills",
@@ -60,10 +60,10 @@
     "mattpocock/grilling": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/productivity/grilling/SKILL.md",
-      "vendoredFromHash": "f0732035b8b1b60ae39454e4191caef32fa91903",
-      "upstreamUpdatedAt": "2026-08-20T10:34:29Z"
+      "vendoredFromHash": "f551b6e0d219fdda0b6abf277f8f915b3127d1e9",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/handoff": {
       "source": "mattpocock/skills",
@@ -73,13 +73,21 @@
       "vendoredFromHash": "ce24892bd2d4b9e7fd5ac9b95c03175e18bef388",
       "upstreamUpdatedAt": "2026-10-06T13:49:26+01:00"
     },
+    "mattpocock/implement": {
+      "source": "mattpocock/skills",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/engineering/implement/SKILL.md",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
+      "vendoredFromHash": "4804b466ab26c9b9d8d42917547db133d1f20a9f",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
+    },
     "mattpocock/improve-codebase-architecture": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
-      "vendoredFromHash": "39bd9cc130f7dfcc4e3ea0b3613f6ebed0d0ad2b",
-      "upstreamUpdatedAt": "2026-09-17T08:29:58Z"
+      "vendoredFromHash": "587147dd230da299cc5e84971cb0a33f6676f8a6",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/prototype": {
       "source": "mattpocock/skills",
@@ -92,34 +100,34 @@
     "mattpocock/research": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/research/SKILL.md",
-      "vendoredFromHash": "0a6796c5667e95ed2301ba7381c123b4acb2ae1a",
-      "upstreamUpdatedAt": "2026-08-19T10:03:37Z"
+      "vendoredFromHash": "2f8f36af48796faed5c687c75bb650071631a984",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/setup-matt-pocock-skills": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/setup-matt-pocock-skills/SKILL.md",
-      "vendoredFromHash": "0b280474a635c9c0efc2bcb2665c87163851bf14",
-      "upstreamUpdatedAt": "2026-10-06T13:53:46+01:00"
+      "vendoredFromHash": "b644b684781fd5baae57f6be000a180a4d4448d7",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/tdd": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/tdd/SKILL.md",
-      "vendoredFromHash": "bf1bf5ffcd63aa8abce830f2955a853c121fb463",
-      "upstreamUpdatedAt": "2026-09-17T08:29:58Z"
+      "vendoredFromHash": "667dbdd00c09d0e2189e082986e6a4d61a67c2a6",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/teach": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/productivity/teach/SKILL.md",
-      "vendoredFromHash": "2ab11f2f51f3c29771edb5d4258d807a49462491",
-      "upstreamUpdatedAt": "2026-08-19T10:03:37Z"
+      "vendoredFromHash": "3fd617b610e59acbb99644de1ef37e394ff53cd1",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/to-questionnaire": {
       "source": "mattpocock/skills",
@@ -164,18 +172,18 @@
     "mattpocock/wayfinder": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/wayfinder/SKILL.md",
-      "vendoredFromHash": "8ec0462658381bd1606d3f9db14ffc67df6a2a43",
-      "upstreamUpdatedAt": "2026-08-19T10:03:37Z"
+      "vendoredFromHash": "25da74eadc3e388b2f2a2cc716f3d44b2fb9dfe0",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/wizard": {
       "source": "mattpocock/skills",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "sourceRevision": "2b47ffcf2385995a536e43ddc9226e32cf9793d9",
+      "sourceRevision": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
       "skillPath": "skills/engineering/wizard/SKILL.md",
-      "vendoredFromHash": "0a163daf092c6f361158ca9627e81f2cb5230574",
-      "upstreamUpdatedAt": "2026-08-19T10:03:37Z"
+      "vendoredFromHash": "e396d3ba97c723a78ffd350fb14a3c409137b306",
+      "upstreamUpdatedAt": "2026-10-31T14:23:30Z"
     },
     "mattpocock/writing-for-agents": {
       "source": "mattpocock/skills",
