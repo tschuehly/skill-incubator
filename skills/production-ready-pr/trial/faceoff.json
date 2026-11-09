@@ -8,7 +8,6 @@
   "trialTimeoutMinutes": 30,
   "piExtensions": [
     "~/.pi/agent/npm/node_modules/pi-xai-oauth",
-    "~/.pi/agent/npm/node_modules/pi-antigravity-acp-provider",
     "~/.pi/agent/npm/node_modules/pi-meta-oauth",
     "~/.pi/agent/npm/node_modules/@benvargas/pi-claude-code-use",
     "~/IdeaProjects/pi-workbench.installed/extensions/telemetry/index.ts"
