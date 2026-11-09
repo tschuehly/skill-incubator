@@ -21,7 +21,8 @@
     "sol-medium": { "model": "openai-codex/gpt-6.1-sol", "effort": "medium", "provider": "codex", "estimateMinutes": 3 },
     "luna-xhigh": { "model": "openai-codex/gpt-6-luna", "effort": "xhigh", "provider": "codex", "estimateMinutes": 10 },
     "muse-medium": { "model": "meta/muse-spark-1.3", "effort": "medium", "provider": "meta", "estimateMinutes": 3 },
-    "ember-high": { "model": "meta/muse-ember-1.0", "effort": "high", "provider": "meta", "estimateMinutes": 4 }
+    "ember-high": { "model": "meta/muse-ember-1.0", "effort": "high", "provider": "meta", "estimateMinutes": 4 },
+    "ember-low": { "model": "meta/muse-ember-1.0", "effort": "low", "provider": "meta", "estimateMinutes": 3 }
   },
   "providers": {
     "xai": { "quota": "grok", "maxTrials": 36 },
