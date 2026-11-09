@@ -18,6 +18,8 @@
     "grok-low": { "model": "xai-auth/grok-4.7", "effort": "low", "provider": "xai", "estimateMinutes": 6 },
     "grok-high": { "model": "xai-auth/grok-4.7", "effort": "high", "provider": "xai", "estimateMinutes": 25 },
     "gemini-high": { "model": "antigravity-acp/gemini-4-argon", "effort": "high", "provider": "antigravity", "estimateMinutes": 5 },
+    "sol-low": { "model": "openai-codex/gpt-6.1-sol", "effort": "low", "provider": "codex", "estimateMinutes": 3 },
+    "sol-high": { "model": "openai-codex/gpt-6.1-sol", "effort": "high", "provider": "codex", "estimateMinutes": 6 },
     "sol-medium": { "model": "openai-codex/gpt-6.1-sol", "effort": "medium", "provider": "codex", "estimateMinutes": 3 },
     "luna-xhigh": { "model": "openai-codex/gpt-6-luna", "effort": "xhigh", "provider": "codex", "estimateMinutes": 10 },
     "muse-medium": { "model": "meta/muse-spark-1.3", "effort": "medium", "provider": "meta", "estimateMinutes": 3 },
