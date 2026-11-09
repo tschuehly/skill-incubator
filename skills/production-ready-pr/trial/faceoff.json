@@ -31,7 +31,7 @@
     "astra-high": { "model": "openai-codex/gpt-6-astra", "effort": "high", "provider": "codex", "estimateMinutes": 10 }
   },
   "providers": {
-    "xai": { "quota": "grok", "maxTrials": 36 },
+    "xai": { "quota": "grok", "maxTrials": 60 },
     "antigravity": { "quota": "agy", "maxTrials": 40 },
     "codex": { "quota": "codex", "maxTrials": null },
     "meta": { "quota": "meta", "maxTrials": 60, "stopOnFirstFailure": true, "admissionQuotaProvider": "meta" }
