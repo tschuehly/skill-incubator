@@ -110,13 +110,13 @@ Codex quota. Astra is not on the roster.
 
 | Slot | Model | Effort |
 |---|---|---|
-| Round 0 judge | `xai/grok-4.6` | `high` |
+| Round 0 judge | `xai-auth/grok-4.7` | `high` |
 | `medium` combined review; approved Copilot substitute | `antigravity-acp/gemini-4-argon` | `high` |
 | `high` Standards lens | `openai-codex/gpt-6.1-sol` | `medium` |
 | `high` Spec lens | `openai-codex/gpt-6.1-sol` | `high` |
-| `high` Simplicity lens | `xai/grok-4.6` | `medium` |
+| `high` Simplicity lens | `xai-auth/grok-4.7` | `medium` |
 | Readiness judge A: invariants, data flow, abuse cases | `antigravity-acp/gemini-4-argon` | `high` |
-| Readiness judge B: differential, state-transition, compatibility probes | `xai/grok-4.6` | `high` |
+| Readiness judge B: differential, state-transition, compatibility probes | `xai-auth/grok-4.7` | `high` |
 | `critical` readiness judge C: falsify the merged findings | `openai-codex/gpt-6.1-sol` | `xhigh` |
 | Delta re-review of a lens | that lens's model and effort | |
 | Delta re-review of an unflagged change | `openai-codex/gpt-6.1-sol` | `medium` |
