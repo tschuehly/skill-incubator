@@ -104,8 +104,34 @@ gate is satisfied too.
 
 Load `model-orchestration` before delegation.
 
+**Reviewer roster (trial).** Every independent reviewer below launches with the `modelOverride` and
+`effort` from this table, not default routing, so the run compares Grok, Gemini, and Sol and spares
+Codex quota. Astra is not on the roster.
+
+| Slot | Model | Effort |
+|---|---|---|
+| Round 0 judge | `xai/grok-4.6` | `high` |
+| `medium` combined review; approved Copilot substitute | `antigravity-acp/gemini-4-argon` | `high` |
+| `high` Standards lens | `openai-codex/gpt-6.1-sol` | `medium` |
+| `high` Spec lens | `openai-codex/gpt-6.1-sol` | `high` |
+| `high` Simplicity lens | `xai/grok-4.6` | `medium` |
+| Readiness judge A: invariants, data flow, abuse cases | `antigravity-acp/gemini-4-argon` | `high` |
+| Readiness judge B: differential, state-transition, compatibility probes | `xai/grok-4.6` | `high` |
+| `critical` readiness judge C: falsify the merged findings | `openai-codex/gpt-6.1-sol` | `xhigh` |
+| Delta re-review of a lens | that lens's model and effort | |
+| Delta re-review of an unflagged change | `openai-codex/gpt-6.1-sol` | `medium` |
+
+When a slot's model shares the author's family, or its launch blocks, use
+`anthropic/claude-opus-5-5` at the same effort when the author is not Anthropic, otherwise another
+roster model whose family differs from the author's; record the swap and its reason. `light-review`
+keeps default routing. Start every lens report with `MODEL=<provider/model> EFFORT=<level>`. For
+each run, append one JSON line to
+`~/.pi-workbench/scratch/production-ready-pr-trial/ledger.jsonl` with repository, PR, level, and per
+slot: model, effort, material findings, unique defect classes, refuted or noise findings, missed
+findings later caught by another reviewer, and wall time.
+
 **Round 0: should this PR exist?** At every level, before any lens, draft push, or Copilot request,
-one fresh cross-family judge receives the diff, specification, and repository rules and answers,
+the roster's Round 0 judge receives the diff, specification, and repository rules and answers,
 each with cited evidence:
 
 - (a) Root cause or symptom? Name the layer where the meaning or behaviour is lost.
@@ -124,19 +150,16 @@ Then apply the approved review contract against one merge-base and head SHA:
 
 - `low`: the lead applies Standards, Spec, and deletion-first Simplicity lenses; Copilot remains the
   external review.
-- `medium`: dispatch one fresh cross-family `independent-review` combining Standards, Spec,
-  Simplicity, and production-readiness falsification.
-- `high`: run four isolated lenses—Standards, Spec, Simplicity, and one fresh cross-family
-  production-readiness review—keeping their findings hidden from one another until all finish. Load
+- `medium`: dispatch the roster's combined reviewer for Standards, Spec, Simplicity, and
+  production-readiness falsification.
+- `high`: run five isolated lenses on the roster—Standards, Spec, Simplicity, and readiness
+  judges A and B—keeping their findings hidden from one another until all finish. Load
   `code-review` and `ponytail-review` for their review contracts. For a stack, each lens reviews
   every layer's own diff as a separate slice, with the combined diff as context, and reports
   findings per layer; this is still one round.
 
-  Trial, savings not yet measured: at `high` and `critical`, round 1 splits the production-readiness
-  review into two fresh judges, one on each model family. One attacks invariants, data flow, and
-  abuse cases; the other runs differential, state-transition, and compatibility probes. Merge
-  their duplicate defect classes and record each judge's unique ones. Each judge counts as its own
-  lens for delta re-reviews.
+  Merge readiness judges' duplicate defect classes and record each judge's unique ones. Each judge
+  counts as its own lens for delta re-reviews.
 
 At `medium` and above, push the candidate before round 1 as draft PRs (section 4 creates them;
 mark them draft until section 4's ready condition holds) and request Copilot, so its findings
@@ -151,9 +174,10 @@ other reviewer substitutes without that approval.
 
 Each lens writes its report to a path the repository and global rules allow, such as `$PI_TMP`,
 and the lead cites that path.
-- `critical`: run the `high` contract plus the consequence-sized checking panel required by
-  `model-orchestration`, including its final evidence-boundary review. If the required independent
-  families are unavailable, report `ROUTING=BLOCKED` rather than degrading the panel.
+- `critical`: run the `high` contract plus readiness judge C and the consequence-sized checking
+  panel required by `model-orchestration`, including its final evidence-boundary review, drawing
+  panel members from the roster. If the required independent families are unavailable, report
+  `ROUTING=BLOCKED` rather than degrading the panel.
 
 Every independent readiness review receives the diff, specification, repository rules, and
 local-check evidence, and looks for concrete correctness, security, data-loss, concurrency,
@@ -171,11 +195,11 @@ for regressions. The **review contract** for a SHA is the latest full round plus
 passing delta; lenses that passed earlier carry forward, with their reviewed SHA recorded as
 evidence, once every change since the full round has passing delta coverage. A change that no
 lens flagged, such as a fix for a gate failure, gets its delta re-review from the lead at `low`,
-otherwise from one fresh cross-family readiness reviewer. A **scope-expanding** change, one that adds a code path, schema, permission, or behavior
+otherwise from the roster's unflagged-change reviewer. A **scope-expanding** change, one that adds a code path, schema, permission, or behavior
 beyond the finding it fixes, starts a new full round. A rebase or restack keeps the review contract
 when `git range-diff` shows unchanged patches. A hand-resolved conflict always gets a delta
-re-review of the resolution, even when every lens passed: by the lead at `low`, otherwise by one
-fresh cross-family readiness reviewer.
+re-review of the resolution, even when every lens passed: by the lead at `low`, otherwise by the
+roster's unflagged-change reviewer.
 
 State whether the reviewed head is
 intentionally unpublished or a draft; before section 4, reviewers must not treat that expected publication
@@ -308,7 +332,7 @@ agent-authored comment, edit the original after resolution to begin `🤖 ✅ Re
 the evidence; never edit a human-authored comment on their behalf. Do not resolve a human
 reviewer's thread on their behalf. After a push, reapply section 2's gate requirement to the
 resulting SHA. At `low`, rerun the affected lead lenses. At `medium` and `high`, run focused tests for
-each fix and one fresh cross-family delta re-review of the feedback fixes; a scope-expanding change
+each fix and one delta re-review of the feedback fixes by the roster's unflagged-change reviewer; a scope-expanding change
 starts a new full round (section 3). At
 `critical`, rerun the complete selected review contract from section 3 against the resulting SHA.
 Push every fix from one Copilot review together, so each Copilot round costs one re-review.
@@ -347,6 +371,6 @@ Inspect `git worktree list --porcelain` and remove every clean worktree that was
 initial inventory and explicitly created by this run. Preserve pre-existing, dirty, or
 uncertain-ownership worktrees and report why they remain.
 
-Report the PR URL, head SHA, checks run, review disposition, missed and fix-introduced counts, and
-accepted limitations. Leave the
+Report the PR URL, head SHA, checks run, review disposition, missed and fix-introduced counts,
+accepted limitations, and the per-model trial line appended to the ledger. Leave the
 merge to the human.
