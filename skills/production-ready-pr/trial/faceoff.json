@@ -78,12 +78,12 @@
     {
       "id": "prr-me3372-key-in-xtrace", "repo": "me", "pr": "embabel/me#3372",
       "base": "c76b6cdd70", "proposed": "63385a75ad", "fix": "6fa42975af",
-      "provenance": "Not on GitHub: fixed before publication by a production-ready-pr lens; reviewer not recorded",
+      "provenance": "Answer key replaced after stage 0. The original defect (key printed under bash -x) copied the existing OpenAI loader, and its fix left that loader unguarded, so it was hardening. This defect was found by 4 of 6 stage-0 arms and confirmed by the blinded adjudicator; the PR never fixed it, so recall here favours those arms.",
       "defects": [{
-        "id": "api-key-in-xtrace",
-        "description": "load_anthropic_key assigns and exports the keychain secret while shell tracing may be on, so running restart-app.sh under `bash -x` (or with set -x) prints ANTHROPIC_API_KEY in clear text to the trace output/logs.",
-        "ranges": [["restart-app.sh", 103, 113]],
-        "present": ["scripts/restart-app.sh", "export ANTHROPIC_API_KEY=\"\\$key\""]
+        "id": "env-precedence-order",
+        "description": "The new header documents that me/.env (loaded last) wins for each key, but start runs load_anthropic_key and ensure_api_key before load_env_file: a key that exists only in me/.env makes ensure_api_key fail, and an empty ANTHROPIC_API_KEY= line in .env overwrites the keychain value.",
+        "ranges": [["restart-app.sh", 15, 15], ["restart-app.sh", 211, 213]],
+        "present": ["scripts/restart-app.sh", "^  ensure_api_key \\|\\| return 1\\n  load_env_file \\|\\| return 1"]
       }]
     },
     {
