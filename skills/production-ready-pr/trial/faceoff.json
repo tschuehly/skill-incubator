@@ -32,6 +32,18 @@
   "prompt": "Task: review the proposed change in the last commit (`git show HEAD`, \"Proposed change\"; its parent is the code before the change) before it is merged. You may read any file and run local commands, but do not modify files and do not use the network.\n\nReview it as the production-readiness judge. Look for concrete correctness, security, data-loss, concurrency, compatibility, operability and missing-test failure modes, through two lenses:\n- Invariants, data flow and abuse cases: name the invariants the change must keep, follow data from every entry point, and try hostile, malformed and boundary inputs.\n- Differential, state-transition and compatibility probes: compare behaviour before and after the change and against sibling code that solves the same problem; walk every state transition, including concurrent and failure paths; check the callers, configurations and environments that relied on the old behaviour.\nWhen the code reads a grammar or walks a state machine, generate probes from that grammar or state machine (each construct, nesting and transition), not only from examples. Report each problem as a defect class: the violated rule, a minimal failing probe, and the entry points that reach it. Leave out style and naming.\n\nDone means: you have judged whether the change is safe to merge and listed every problem you would block the merge on.\nStop and ask only if: never; nobody can answer during this run.\nExpected output: your review as the final message. For each blocking problem give the file and line, why it is wrong, and how to show it fails. End the message with a fenced ```json block containing an array of the blocking problems, one object per problem: {\"file\": \"<path>\", \"line\": <line number in the proposed version>, \"problem\": \"<one sentence>\"}. Use an empty array if nothing blocks the merge.",
   "cases": [
     {
+      "id": "prr-me3313-blind", "repo": "me", "pr": "embabel/me#3313",
+      "base": "b811a6ad06", "proposed": "06740b0591",
+      "provenance": "Blind: open PR without review; head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-me3134-blind", "repo": "me", "pr": "embabel/me#3134",
+      "base": "5a9bbdc3c6", "proposed": "3a0f192f4c",
+      "provenance": "Blind: open stacked PR without review; head against its merge-base with isolation-2-rebuild (me#3132). No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
       "id": "prr-me3464-comment-scan", "repo": "me", "pr": "embabel/me#3464",
       "base": "7c5b15bec4", "proposed": "352d9e0de0", "fix": "8e15b3ff56",
       "provenance": "Copilot inline review https://github.com/embabel/me/pull/3464#discussion_r4466922997",

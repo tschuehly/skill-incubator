@@ -185,11 +185,12 @@ function buildCases() {
   for (const c of CFG.cases) {
     const dir = path.join(CASES_DIR, c.id);
     mkdirSync(dir, { recursive: true });
-    const [base, proposed, fix] = [c.base, c.proposed, c.fix].map((r) => fullSha(c.repo, r));
-    if (!base || !proposed || !fix) throw new Error(`${c.id}: unknown commit`);
+    // A blind case (an unreviewed PR) has no fix commit and no known defects; it scores valid findings only.
+    const [base, proposed, fix] = [c.base, c.proposed, c.fix].map((r) => r && fullSha(c.repo, r));
+    if (!base || !proposed || (c.fix && !fix)) throw new Error(`${c.id}: unknown commit`);
     writeFileSync(path.join(dir, "case.json"), JSON.stringify({
       id: c.id, role: "review", profile: "reviewer", repo: c.repo, commit: proposed, setup: "setup.sh",
-      source: `${c.pr} replay: proposed ${c.proposed} (parent of review fix ${c.fix}) against merge-base ${c.base}`,
+      source: c.fix ? `${c.pr} replay: proposed ${c.proposed} (parent of review fix ${c.fix}) against merge-base ${c.base}` : `${c.pr} blind: head ${c.proposed} against merge-base ${c.base}`,
       timeoutMinutes: CFG.trialTimeoutMinutes, prompt: CFG.prompt,
       check: { type: "script", script: "check.sh", timeoutMinutes: 2 },
     }, null, 2) + "\n");
@@ -442,7 +443,7 @@ Also give every finding a "cluster": a short kebab-case slug for its underlying 
 Reply with only JSON: {"labels": [{"index": <n>, "label": "<${ids.join("|")}|valid|noise>", "cluster": "<slug>", "reason": "<one sentence>"}]} with one entry per finding.
 
 ## Known defects
-${c.defects.map((d) => `- ${d.id}: ${d.description} (around ${d.ranges.map(([f, a, b]) => `${f}:${a}-${b}`).join(", ")})`).join("\n")}
+${c.defects.length ? "" : "none: no answer key; label every finding valid or noise"}${c.defects.map((d) => `- ${d.id}: ${d.description} (around ${d.ranges.map(([f, a, b]) => `${f}:${a}-${b}`).join(", ")})`).join("\n")}
 ${clusters.length ? `\n## Existing clusters\n${clusters.map((l) => `- ${l.cluster} (${l.label}): ${l.reason}`).join("\n")}\n` : ""}
 ## Change under review
 \`\`\`diff
@@ -647,7 +648,7 @@ function writeLedger() {
       };
     }).filter(Boolean);
     const [owner, num] = c.pr.split("#");
-    appendFileSync(LEDGER, JSON.stringify({ date: DATE, faceoff: true, repository: owner, pr: Number(num), level: "replay", case: c.id, proposed: c.proposed, fix: c.fix, knownDefects: c.defects.map((d) => d.id), slots }) + "\n");
+    appendFileSync(LEDGER, JSON.stringify({ date: DATE, faceoff: true, repository: owner, pr: Number(num), level: c.fix ? "replay" : "blind", case: c.id, proposed: c.proposed, fix: c.fix, knownDefects: c.defects.map((d) => d.id), slots }) + "\n");
     written.add(c.id);
   }
   writeFileSync(markerFile, JSON.stringify([...written]));
