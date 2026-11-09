@@ -22,7 +22,9 @@
     "luna-xhigh": { "model": "openai-codex/gpt-6-luna", "effort": "xhigh", "provider": "codex", "estimateMinutes": 10 },
     "muse-medium": { "model": "meta/muse-spark-1.3", "effort": "medium", "provider": "meta", "estimateMinutes": 3 },
     "ember-high": { "model": "meta/muse-ember-1.0", "effort": "high", "provider": "meta", "estimateMinutes": 4 },
-    "ember-low": { "model": "meta/muse-ember-1.0", "effort": "low", "provider": "meta", "estimateMinutes": 3 }
+    "ember-low": { "model": "meta/muse-ember-1.0", "effort": "low", "provider": "meta", "estimateMinutes": 3 },
+    "astra-low": { "model": "openai-codex/gpt-6-astra", "effort": "low", "provider": "codex", "estimateMinutes": 4 },
+    "astra-high": { "model": "openai-codex/gpt-6-astra", "effort": "high", "provider": "codex", "estimateMinutes": 10 }
   },
   "providers": {
     "xai": { "quota": "grok", "maxTrials": 36 },
