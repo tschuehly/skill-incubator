@@ -534,13 +534,15 @@ async function adjudicateAll(env) {
 }
 
 // ---------- report ----------
+// Distinct real problems in one trial; an exploratory defect hit sits in both lists and counts once.
+export const materialCount = (r) => new Set([...r.defects, ...r.validClusters]).size;
 function scored() {
   const trials = latestTrials();
   const adjs = Object.fromEntries(CFG.cases.map((c) => {
     const f = path.join(OUT, "adjudications", `${c.id}.json`);
     const a = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null;
-    // Labels made against a different answer key or prompt do not score; a missing fingerprint still does until relabeled.
-    return [c.id, a?.fingerprint && needsRelabel(a, c) ? null : a];
+    // Labels made against a different answer key or prompt, or without a fingerprint, do not score until relabeled.
+    return [c.id, a && needsRelabel(a, c) ? null : a];
   }));
   const rows = [...trials.values()].map((r) => {
     const a = adjs[r.case];
@@ -623,7 +625,7 @@ function writeReport() {
     const noise = adj.reduce((a, r) => a + r.noise, 0);
     const known = adj.filter((r) => r.tokens != null);
     const tok = known.reduce((a, r) => a + r.tokens, 0);
-    const validOnKnown = known.reduce((a, r) => a + r.defects.length + r.validClusters.length, 0);
+    const validOnKnown = known.reduce((a, r) => a + materialCount(r), 0);
     const wall = done.length ? done.reduce((a, r) => a + r.wallMs, 0) / done.length / 60_000 : null;
     const cost = done.reduce((a, r) => a + (r.usage?.cost ?? 0), 0);
     return { arm, cfg: CFG.arms[arm], scheduled: plan.filter((t) => t.arm === arm).length, done: done.length, adj: adj.length, found, possible, extras, noise, tok: known.length ? tok : null, unknownTok: adj.length - known.length, perValid: known.length && validOnKnown ? tok / validOnKnown : null, zeroValid: known.length > 0 && validOnKnown === 0, wall, cost };
@@ -705,7 +707,7 @@ function writeLedger() {
       const mine = classesOf(rs);
       return {
         arm, model: CFG.arms[arm].model, effort: CFG.arms[arm].effort, trials: rs.length,
-        materialFindings: rs.reduce((a, r) => a + r.defects.length + r.validClusters.length, 0),
+        materialFindings: rs.reduce((a, r) => a + materialCount(r), 0),
         uniqueDefectClasses: mine.size, knownDefectsFound: [...new Set(rs.flatMap((r) => r.defects))],
         noiseFindings: rs.reduce((a, r) => a + r.noise, 0),
         missedCaughtByOther: [...allClasses].filter((k) => !mine.has(k)).length,

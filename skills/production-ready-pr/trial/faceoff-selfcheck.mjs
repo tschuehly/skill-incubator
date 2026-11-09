@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Self-check of faceoff.mjs's pure functions on in-memory inputs: node faceoff-selfcheck.mjs
 import assert from "node:assert/strict";
-import { appReadings, caseFingerprint, codexbarReading, mergeReadings, needsRelabel, pairStats, pct, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
+import { appReadings, caseFingerprint, codexbarReading, mergeReadings, needsRelabel, materialCount, pairStats, pct, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
 
 const at = Date.parse("2026-11-09T13:00:00Z");
 const fresh = "2026-11-09T12:50:00Z", stale = "2026-11-09T10:00:00Z";
@@ -61,4 +61,8 @@ p = pairStats(rows, cases, "a", "b", 1);
 assert.deepEqual([p.n, p.found, p.possible, p.extras], [2, 1, 2, 2], "exploratory counts extras, not recall");
 assert.equal(pct(p.found, p.possible), "50%");
 ok("exploratory excluded from recall");
+
+// 7. An exploratory defect hit is in both lists after scoring; it counts as one real problem.
+assert.equal(materialCount({ defects: ["e1"], validClusters: ["e1", "v1"] }), 2);
+ok("exploratory hit counted once");
 console.log("faceoff self-check passed");
