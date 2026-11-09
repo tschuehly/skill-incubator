@@ -13,7 +13,7 @@ pushing the current branch and opening or updating its pull request. It never au
 
 ## Select intensity
 
-Invocation accepts `[low|medium|high|critical] [<pr-number-or-branch>]`. Before honoring a supplied
+Invocation accepts `[low|medium|high|critical] [faceoff] [<pr-number-or-branch>]`. Before honoring a supplied
 level or classifying an omitted one, resolve the target with read-only repository and PR evidence and
 read its applicable agent instructions, contribution guidance, and build policy to establish the
 mandatory floor. Read the existing PR's Copilot request and review state and the repository's recent
@@ -129,6 +129,17 @@ each run, append one JSON line to
 `~/.pi-workbench/scratch/production-ready-pr-trial/ledger.jsonl` with repository, PR, level, and per
 slot: model, effort, material findings, unique defect classes, refuted or noise findings, missed
 findings later caught by another reviewer, and wall time.
+
+**Face-off (trial).** When the invocation includes `faceoff` (at `medium` and above), round 1's
+readiness review becomes a blind face-off. One frozen brief covering both judge A and judge B
+focuses runs on the same SHA on `xai-auth/grok-4.7`, `antigravity-acp/gemini-4-argon`, and
+`openai-codex/gpt-6.1-sol`, all at `high`. `openai-codex/gpt-6-astra` at `high` joins as a baseline
+only when the human names it. These contestants replace judges A, B, and C for that round; the
+other lenses run as usual. Skip a contestant from the author's family. Keep every report hidden from
+the other contestants. The lead adjudicates each finding by running its probe or citing a refutation,
+then merges duplicate classes. Credit each contestant with valid defect classes, unique valid classes,
+noise findings, and wall time. Show that scoreboard to the human before fixing. Each contestant
+receives the delta re-review of its own material findings. Mark the ledger line `"faceoff": true`.
 
 **Round 0: should this PR exist?** At every level, before any lens, draft push, or Copilot request,
 the roster's Round 0 judge receives the diff, specification, and repository rules and answers,
