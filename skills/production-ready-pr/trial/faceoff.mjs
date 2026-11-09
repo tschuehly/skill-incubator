@@ -68,7 +68,7 @@ const pick = (name, all) => {
   return all.filter((x) => !want || want.includes(x));
 };
 const CASES = pick("cases", CFG.cases.map((c) => c.id)).map((id) => CFG.cases.find((c) => c.id === id));
-const ARMS = pick("arms", Object.keys(CFG.arms));
+const ARMS = pick("arms", Object.keys(CFG.arms).filter((a) => !CFG.arms[a].retired));
 const REPS = Number(opt("reps") ?? CFG.repetitions);
 const TRIALS = path.join(OUT, "trials.jsonl");
 const BLOCKS = path.join(OUT, "blocks.jsonl");
