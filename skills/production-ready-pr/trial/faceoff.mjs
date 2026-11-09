@@ -131,33 +131,44 @@ function quotaFor(provider, model = "", snapshot = quota()) {
 // CodexBar reads plans quota-axi cannot (Grok and Gemini through browser sessions; Claude when its quota
 // endpoint is rate limited). The app's widget snapshot carries what the app shows, including providers
 // its CLI cannot reach without the app's keychain and cookie permissions; the CLI is the fallback.
-// A reading counts as fresh when it is under an hour old. agy maps to CodexBar's Gemini plan reading,
-// which may be a different pool from Antigravity's.
-const CODEXBAR = { grok: ["grok"], claude: ["claude"], codex: ["codex"], agy: ["gemini", "antigravity"], meta: ["muse", "museai"] };
+// A reading counts as fresh when it is under an hour old. agy maps to Antigravity only: CodexBar's Gemini
+// plan is a different pool, and its Antigravity CLI reading needs the Antigravity app running.
+const CODEXBAR = { grok: ["grok"], claude: ["claude"], codex: ["codex"], agy: ["antigravity"], meta: ["muse", "museai"] };
 const CODEXBAR_SNAPSHOT = path.join(HOME, "Library/Group Containers/Y5PE65HELJ.com.steipete.codexbar/widget-snapshot.json");
+const WINDOW_KEYS = ["primary", "secondary", "tertiary"];
+// App snapshot entries and CLI usage both carry primary/secondary/tertiary windows; that key is the window
+// identity. The app's usageRows are only what it displays, so they are not used.
+export function codexbarReading(source, u) {
+  const windows = WINDOW_KEYS.filter((k) => typeof u?.[k]?.usedPercent === "number").map((k) => ({ id: `codexbar:${k}`, percentRemaining: Math.round(100 - u[k].usedPercent) }));
+  return windows.length ? { source, updatedAt: u.updatedAt, windows } : null;
+}
+export const appReadings = (ids, snapshot) => (snapshot?.entries ?? []).filter((e) => ids.includes(e.provider)).map((e) => codexbarReading("codexbar-app", e)).filter(Boolean);
+// Per window, the freshest reading wins; the result is fresh when any window is, and each window keeps its own freshness.
+export function mergeReadings(provider, readings, at = Date.now()) {
+  const best = new Map();
+  for (const r of readings) for (const w of r.windows) {
+    const t = Date.parse(r.updatedAt ?? 0) || 0;
+    if (!best.has(w.id) || t > best.get(w.id).t) best.set(w.id, { t, w: { ...w, source: r.source, fresh: at - t < 3_600_000 } });
+  }
+  if (!best.size) return null;
+  const windows = [...best.values()].map((x) => x.w);
+  return { provider, source: [...new Set(windows.map((w) => w.source))].join("+"), state: windows.some((w) => w.fresh) ? "fresh" : "stale", windows };
+}
 function codexbarQuota(provider) {
   const ids = CODEXBAR[provider];
   if (!ids) return null;
-  const reading = (windows, updatedAt, source) => windows.length
-    ? { provider, source, state: Date.now() - Date.parse(updatedAt ?? 0) < 3_600_000 ? "fresh" : "stale", windows } : null;
-  try {
-    const e = JSON.parse(readFileSync(CODEXBAR_SNAPSHOT, "utf8")).entries.find((x) => ids.includes(x.provider));
-    const r = e && reading((e.usageRows ?? []).filter((w) => typeof w.percentLeft === "number").map((w) => ({ id: `codexbar:${w.title ?? w.id}`, percentRemaining: Math.round(w.percentLeft) })), e.updatedAt, "codexbar-app");
-    if (r) return r;
-  } catch {}
+  const readings = [];
+  try { readings.push(...appReadings(ids, JSON.parse(readFileSync(CODEXBAR_SNAPSHOT, "utf8")))); } catch {}
   for (const id of ids) {
-    try {
-      const u = JSON.parse(sh(`codexbar usage --provider ${id} --json --no-color`, { timeout: 60_000 }).stdout)[0]?.usage;
-      const r = u && reading(["primary", "secondary", "tertiary"].filter((k) => typeof u[k]?.usedPercent === "number").map((k) => ({ id: `codexbar:${k}`, percentRemaining: 100 - u[k].usedPercent })), u.updatedAt, "codexbar-cli");
-      if (r) return r;
-    } catch {}
+    try { readings.push(codexbarReading("codexbar-cli", JSON.parse(sh(`codexbar usage --provider ${id} --json --no-color`, { timeout: 60_000 }).stdout)[0]?.usage)); } catch {}
   }
-  return null;
+  return mergeReadings(provider, readings.filter(Boolean));
 }
-// Stale or missing telemetry never stops a block; the provider's trial cap does.
-function quotaStop(qf) {
+// Stale or missing telemetry never stops a block; the provider's trial cap does. Any fresh window below
+// the threshold stops it.
+export function quotaStop(qf) {
   if (qf.state !== "fresh") return null;
-  const low = qf.windows.find((w) => typeof w.percentRemaining === "number" && w.percentRemaining < CFG.stopBelowPercent);
+  const low = qf.windows.find((w) => w.fresh !== false && typeof w.percentRemaining === "number" && w.percentRemaining < CFG.stopBelowPercent);
   return low ? `${qf.provider} ${low.id} quota at ${low.percentRemaining}% (< ${CFG.stopBelowPercent}%)` : null;
 }
 const freeGB = () => { const s = statfsSync(HOME); return (s.bavail * s.bsize) / 2 ** 30; };
@@ -434,30 +445,9 @@ function pooled(caseId) {
   return [...map.entries()].sort(([a], [b]) => h(a).localeCompare(h(b))).map(([key, v]) => ({ key, ...v }));
 }
 
-// Labels every pooled finding of a case once. A later stage sends only findings not labeled before,
-// with the clusters already in use, so earlier labels stay fixed and Claude usage grows with new findings.
-async function adjudicateCase(c, env) {
-  const file = path.join(OUT, "adjudications", `${c.id}.json`);
-  const prev = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : { case: c.id, items: [], labels: [], runs: [] };
-  const known = new Map(prev.items.map((i) => [norm(i), i]));
-  let next = prev.items.length ? Math.max(...prev.items.map((i) => i.index)) + 1 : 0;
-  const merged = pooled(c.id).map(({ key, ...i }) => (known.has(key) ? { ...known.get(key), sources: i.sources } : { ...i, index: next++, fresh: true }));
-  const fresh = merged.filter((i) => i.fresh);
-  const save = (a) => writeFileSync(file, JSON.stringify(a, null, 2));
-  const strip = (items) => items.map(({ fresh: _f, ...i }) => i);
-  if (!fresh.length) { const a = { ...prev, items: strip(merged) }; save(a); return a; }
-  const adj = CFG.adjudicator;
-  const qf = quotaFor(adj.quota, adj.model);
-  const stop = quotaStop(qf);
-  if (stop) { console.log(`${c.id}: adjudication skipped (${stop})`); return { ...prev, skipped: stop }; }
-  const dir = path.join(OUT, "adj", c.id);
-  const ws = path.join(dir, "ws");
-  buildWorkspace(c, ws, env);
-  let diff = sh("git show --stat --patch HEAD", { cwd: ws }).stdout;
-  if (diff.length > 200_000) diff = `${diff.slice(0, 200_000)}\n[diff truncated; read the files in the working directory]`;
+function adjPrompt(c, clusters, diff, fresh) {
   const ids = c.defects.map((d) => d.id);
-  const clusters = [...new Map(prev.labels.filter((l) => l.label !== "noise").map((l) => [l.cluster, l])).values()];
-  const prompt = `You are adjudicating anonymous code-review findings on one proposed change. The working directory holds the proposed version; the change is below. You may read any file; do not modify files.
+  return `You are adjudicating anonymous code-review findings on one proposed change. The working directory holds the proposed version; the change is below. You may read any file; do not modify files.
 
 For every finding decide one label:
 - a known-defect id from the list below, only when the finding describes that same failure (same broken rule and consequence), not merely the same file or line;
@@ -477,6 +467,40 @@ ${diff}
 
 ## Findings
 ${fresh.map((i) => `${i.index}. ${i.file}:${i.line} — ${i.problem}`).join("\n")}`;
+}
+// Labels depend on the case's answer key and the prompt contract; a change to either relabels the case.
+// A file without a fingerprint (written before fingerprints) is relabeled on the next adjudication.
+export const caseFingerprint = (c) => createHash("sha256").update(JSON.stringify([c.id, c.defects, adjPrompt.toString()])).digest("hex");
+export const needsRelabel = (prev, c) => !!prev && prev.fingerprint !== caseFingerprint(c);
+
+// Labels every pooled finding of a case once. A later stage sends only findings not labeled before,
+// with the clusters already in use, so earlier labels stay fixed and Claude usage grows with new findings.
+async function adjudicateCase(c, env) {
+  const file = path.join(OUT, "adjudications", `${c.id}.json`);
+  const fingerprint = caseFingerprint(c);
+  let prev = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+  // Runs are kept for the token total and log numbering; items and labels start over.
+  if (needsRelabel(prev, c)) { console.log(`${c.id}: answer key or prompt changed since labeling; relabeling ${prev.items.length} findings`); prev = { ...prev, items: [], labels: [] }; }
+  prev = { case: c.id, items: [], labels: [], runs: [], ...prev, fingerprint };
+  const known = new Map(prev.items.map((i) => [norm(i), i]));
+  let next = prev.items.length ? Math.max(...prev.items.map((i) => i.index)) + 1 : 0;
+  const merged = pooled(c.id).map(({ key, ...i }) => (known.has(key) ? { ...known.get(key), sources: i.sources } : { ...i, index: next++, fresh: true }));
+  const fresh = merged.filter((i) => i.fresh);
+  const save = (a) => writeFileSync(file, JSON.stringify(a, null, 2));
+  const strip = (items) => items.map(({ fresh: _f, ...i }) => i);
+  if (!fresh.length) { const a = { ...prev, items: strip(merged) }; save(a); return a; }
+  const adj = CFG.adjudicator;
+  const qf = quotaFor(adj.quota, adj.model);
+  const stop = quotaStop(qf);
+  if (stop) { console.log(`${c.id}: adjudication skipped (${stop})`); return { ...prev, skipped: stop }; }
+  const dir = path.join(OUT, "adj", c.id);
+  const ws = path.join(dir, "ws");
+  buildWorkspace(c, ws, env);
+  let diff = sh("git show --stat --patch HEAD", { cwd: ws }).stdout;
+  if (diff.length > 200_000) diff = `${diff.slice(0, 200_000)}\n[diff truncated; read the files in the working directory]`;
+  const ids = c.defects.map((d) => d.id);
+  const clusters = [...new Map(prev.labels.filter((l) => l.label !== "noise").map((l) => [l.cluster, l])).values()];
+  const prompt = adjPrompt(c, clusters, diff, fresh);
   const logFile = path.join(dir, `pi-${prev.runs.length}.jsonl`);
   writeFileSync(logFile, "");
   const started = now();
@@ -496,7 +520,7 @@ ${fresh.map((i) => `${i.index}. ${i.file}:${i.line} — ${i.problem}`).join("\n"
   rmSync(ws, { recursive: true, force: true });
   // Unlabeled fresh findings stay out of items, so the next adjudication run asks about them again.
   const labeledIdx = new Set((labels ?? []).map((l) => l.index));
-  const a = { case: c.id, items: strip(merged.filter((i) => !i.fresh || labeledIdx.has(i.index))), labels: [...prev.labels, ...(labels ?? [])], runs: [...prev.runs, runRec] };
+  const a = { case: c.id, fingerprint, items: strip(merged.filter((i) => !i.fresh || labeledIdx.has(i.index))), labels: [...prev.labels, ...(labels ?? [])], runs: [...prev.runs, runRec] };
   a.tokens = a.runs.every((r) => r.tokens != null) ? a.runs.reduce((s, r) => s + r.tokens, 0) : null;
   save(a);
   console.log(`${local(now())} adjudicated ${c.id}: ${fresh.length} new findings, ${runRec.labeled} labeled, tokens=${runRec.tokens ?? "unknown"}${runRec.error ? ` (${String(runRec.error).slice(0, 160)})` : ""}`);
@@ -514,7 +538,9 @@ function scored() {
   const trials = latestTrials();
   const adjs = Object.fromEntries(CFG.cases.map((c) => {
     const f = path.join(OUT, "adjudications", `${c.id}.json`);
-    return [c.id, existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null];
+    const a = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null;
+    // Labels made against a different answer key or prompt do not score; a missing fingerprint still does until relabeled.
+    return [c.id, a?.fingerprint && needsRelabel(a, c) ? null : a];
   }));
   const rows = [...trials.values()].map((r) => {
     const a = adjs[r.case];
@@ -532,7 +558,8 @@ function scored() {
       else if (l.label === "valid") clusters.add(l.cluster);
       else defects.add(l.label);
     }
-    for (const d of defects) clusters.delete(d);
+    // An exploratory case's defect hit counts as a valid finding, not towards recall.
+    for (const d of defects) if (CFG.cases.find((c) => c.id === r.case)?.exploratory) clusters.add(d); else clusters.delete(d);
     // A trial counts only once every one of its findings is labeled; otherwise its recall is unknown.
     return { ...r, adjudicated: unlabeled === 0, defects: [...defects], validClusters: [...clusters], noise, unlabeled };
   });
@@ -550,24 +577,48 @@ function campaignScope() {
   };
 }
 
+// An exploratory case's answer key was chosen after seeing arm outputs, so it is no independent oracle:
+// its findings count as valid or noise, but never towards recall.
+const caseOf = (id, cases = CFG.cases) => cases.find((c) => c.id === id);
+export const recallDefects = (r, cases = CFG.cases) => (caseOf(r.case, cases)?.exploratory ? [] : r.defects);
+export const recallPossible = (id, cases = CFG.cases) => { const c = caseOf(id, cases); return c?.exploratory ? 0 : c?.defects.length ?? 0; };
+export const pct = (found, possible) => (possible ? `${Math.round((100 * found) / possible)}%` : "-");
+// Pairs from solo results: union per case and repetition where both arms have an adjudicated trial.
+export function pairStats(rows, cases, armA, armB, reps) {
+  let n = 0, found = 0, possible = 0, extras = 0, tok = 0, unknown = false;
+  for (const c of cases) for (let rep = 0; rep < reps; rep++) {
+    const a = rows.find((r) => r.key === `${c.id}|${armA}|${rep}` && r.adjudicated);
+    const b = rows.find((r) => r.key === `${c.id}|${armB}|${rep}` && r.adjudicated);
+    if (!a || !b) continue;
+    n++; possible += recallPossible(c.id, cases);
+    found += new Set([...recallDefects(a, cases), ...recallDefects(b, cases)]).size;
+    extras += new Set([...a.validClusters, ...b.validClusters]).size;
+    if (a.tokens == null || b.tokens == null) unknown = true; else tok += a.tokens + b.tokens;
+  }
+  return { n, found, possible, extras, tok: unknown ? null : tok };
+}
+
 function writeReport() {
   const { rows, adjs } = scored();
   const { plan, cases: CASES, arms: ARMS, reps: REPS } = campaignScope();
   const stages = readJsonl(STAGES);
   const blocks = readJsonl(BLOCKS);
-  const defectCount = Object.fromEntries(CFG.cases.map((c) => [c.id, c.defects.length]));
   const fmt = (n) => (n == null ? "unknown" : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
   const L = [];
   L.push(`# production-ready-pr reviewer face-off — ${DATE}`, "");
   L.push(`Written ${local(now())}${deadlineHit ? " (deadline reached: partial)" : ""}. Cases: ${CASES.length} replayed review fixes; arms: ${ARMS.length}; repetitions: ${REPS}. Raw data: \`${OUT}\`.`, "");
-  L.push("Scoring: one blinded adjudication per case (" + CFG.adjudicator.model + " " + CFG.adjudicator.effort + ") labels each pooled, deduplicated finding as a known defect (semantic match), a valid extra, or noise. Recall = known defects found / known defects in the adjudicated trials. Tokens = input + output + cache read + cache write as Pi reports them; `unknown` when the provider reports none.", "");
+  L.push("Scoring: one blinded adjudication per case (" + CFG.adjudicator.model + " " + CFG.adjudicator.effort + ") labels each pooled, deduplicated finding as a known defect (semantic match), a valid extra, or noise. Recall = known defects found / known defects in the adjudicated trials, excluding exploratory cases. Tokens = input + output + cache read + cache write as Pi reports them; `unknown` when the provider reports none.", "");
 
+  const exploratory = CASES.filter((c) => c.exploratory);
+  if (exploratory.length) L.push("Exploratory cases (answer key not an independent oracle; shown per case and counted for valid extras and noise, excluded from recall, the ranking and pair recall):", ...exploratory.map((c) => `- ${c.id}: ${c.provenance}`), "");
+  const legacy = CASES.filter((c) => adjs[c.id] && !adjs[c.id].fingerprint).map((c) => c.id);
+  if (legacy.length) L.push(`Labels without an answer-key fingerprint (scored as is; relabeled on the next adjudication): ${legacy.join(", ")}.`, "");
   const arms = ARMS.map((arm) => {
     const all = rows.filter((r) => r.arm === arm);
     const done = all.filter((r) => r.status === "done");
     const adj = done.filter((r) => r.adjudicated);
-    const found = adj.reduce((a, r) => a + r.defects.length, 0);
-    const possible = adj.reduce((a, r) => a + defectCount[r.case], 0);
+    const found = adj.reduce((a, r) => a + recallDefects(r).length, 0);
+    const possible = adj.reduce((a, r) => a + recallPossible(r.case), 0);
     const extras = adj.reduce((a, r) => a + r.validClusters.length, 0);
     const noise = adj.reduce((a, r) => a + r.noise, 0);
     const known = adj.filter((r) => r.tokens != null);
@@ -578,7 +629,7 @@ function writeReport() {
     return { arm, cfg: CFG.arms[arm], scheduled: plan.filter((t) => t.arm === arm).length, done: done.length, adj: adj.length, found, possible, extras, noise, tok: known.length ? tok : null, unknownTok: adj.length - known.length, perValid: known.length && validOnKnown ? tok / validOnKnown : null, zeroValid: known.length > 0 && validOnKnown === 0, wall, cost };
   });
   L.push("## Per arm", "", "| arm | model | effort | trials done/scheduled | adjudicated | known defects found | recall | valid extras | noise | tokens | tokens per valid finding | mean wall | cost $ |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|");
-  for (const a of arms) L.push(`| ${a.arm} | ${a.cfg.model} | ${a.cfg.effort} | ${a.done}/${a.scheduled} | ${a.adj} | ${a.found}/${a.possible} | ${a.possible ? `${Math.round((100 * a.found) / a.possible)}%` : "-"} | ${a.extras} | ${a.noise} | ${fmt(a.tok)}${a.unknownTok ? ` (+${a.unknownTok} unknown)` : ""} | ${a.zeroValid ? "n/a (0 valid)" : a.perValid == null ? "unknown" : fmt(Math.round(a.perValid))} | ${a.wall == null ? "-" : `${a.wall.toFixed(1)} min`} | ${a.cost ? a.cost.toFixed(2) : "-"} |`);
+  for (const a of arms) L.push(`| ${a.arm} | ${a.cfg.model} | ${a.cfg.effort} | ${a.done}/${a.scheduled} | ${a.adj} | ${a.found}/${a.possible} | ${pct(a.found, a.possible)} | ${a.extras} | ${a.noise} | ${fmt(a.tok)}${a.unknownTok ? ` (+${a.unknownTok} unknown)` : ""} | ${a.zeroValid ? "n/a (0 valid)" : a.perValid == null ? "unknown" : fmt(Math.round(a.perValid))} | ${a.wall == null ? "-" : `${a.wall.toFixed(1)} min`} | ${a.cost ? a.cost.toFixed(2) : "-"} |`);
   L.push("");
 
   const ranked = [...arms].filter((a) => a.adj).sort((x, y) => y.found - x.found);
@@ -592,27 +643,17 @@ function writeReport() {
     L.push("");
   }
 
-  // Pairs from solo results: union per case and repetition where both arms have an adjudicated trial.
   L.push("## Pair coverage (computed from solo results)", "", "| pair | aligned trials | combined defects found | combined recall | combined valid extras | combined tokens |", "|---|---|---|---|---|---|");
   for (let i = 0; i < ARMS.length; i++) for (let j = i + 1; j < ARMS.length; j++) {
-    let n = 0, found = 0, possible = 0, extras = 0, tok = 0, unknown = false;
-    for (const c of CASES) for (let rep = 0; rep < REPS; rep++) {
-      const a = rows.find((r) => r.key === `${c.id}|${ARMS[i]}|${rep}` && r.adjudicated);
-      const b = rows.find((r) => r.key === `${c.id}|${ARMS[j]}|${rep}` && r.adjudicated);
-      if (!a || !b) continue;
-      n++; possible += c.defects.length;
-      found += new Set([...a.defects, ...b.defects]).size;
-      extras += new Set([...a.validClusters, ...b.validClusters]).size;
-      if (a.tokens == null || b.tokens == null) unknown = true; else tok += a.tokens + b.tokens;
-    }
-    if (n) L.push(`| ${ARMS[i]} + ${ARMS[j]} | ${n} | ${found}/${possible} | ${Math.round((100 * found) / possible)}% | ${extras} | ${unknown ? "unknown" : fmt(tok)} |`);
+    const p = pairStats(rows, CASES, ARMS[i], ARMS[j], REPS);
+    if (p.n) L.push(`| ${ARMS[i]} + ${ARMS[j]} | ${p.n} | ${p.found}/${p.possible} | ${pct(p.found, p.possible)} | ${p.extras} | ${p.tok == null ? "unknown" : fmt(p.tok)} |`);
   }
   L.push("");
 
   L.push("## Per case: who found each known defect", "", "| case | defect | provenance | found by (trials) |", "|---|---|---|---|");
   for (const c of CASES) for (const d of c.defects) {
     const by = rows.filter((r) => r.case === c.id && r.adjudicated && r.defects.includes(d.id)).map((r) => `${r.arm}#${r.rep}`);
-    L.push(`| ${c.id} | ${d.id} | ${c.provenance} | ${by.join(", ") || (rows.some((r) => r.case === c.id && r.adjudicated) ? "none" : "not adjudicated")} |`);
+    L.push(`| ${c.id}${c.exploratory ? " (exploratory)" : ""} | ${d.id} | ${c.provenance} | ${by.join(", ") || (rows.some((r) => r.case === c.id && r.adjudicated) ? "none" : "not adjudicated")} |`);
   }
   L.push("");
 
@@ -680,7 +721,10 @@ function writeLedger() {
 }
 
 // ---------- main ----------
-if (cmd === "build-cases") buildCases();
+// Imported (faceoff-selfcheck.mjs) rather than run: export the pure functions, dispatch nothing.
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (!isMain) {}
+else if (cmd === "build-cases") buildCases();
 else if (cmd === "setup-check") setupCheck();
 else if (cmd === "quota") { const snap = quota(); for (const k of [...Object.values(CFG.providers).map((x) => x.quota), CFG.adjudicator.quota]) console.log(JSON.stringify(quotaFor(k, "", snap))); }
 else if (cmd === "probe") console.log(JSON.stringify(credentialProbe(trialEnv()), null, 2));

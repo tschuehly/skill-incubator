@@ -88,7 +88,7 @@
       }]
     },
     {
-      "id": "prr-me3372-key-in-xtrace", "repo": "me", "pr": "embabel/me#3372",
+      "id": "prr-me3372-key-in-xtrace", "repo": "me", "pr": "embabel/me#3372", "exploratory": true,
       "base": "c76b6cdd70", "proposed": "63385a75ad", "fix": "6fa42975af",
       "provenance": "Answer key replaced after stage 0. The original defect (key printed under bash -x) copied the existing OpenAI loader, and its fix left that loader unguarded, so it was hardening. This defect was found by 4 of 6 stage-0 arms and confirmed by the blinded adjudicator; the PR never fixed it, so recall here favours those arms.",
       "defects": [{
