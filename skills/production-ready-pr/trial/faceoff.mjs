@@ -125,9 +125,34 @@ function quota() {
 // Windows of one quota-axi provider, model-specific windows only for the model in use.
 function quotaFor(provider, model = "", snapshot = quota()) {
   const p = snapshot?.find((x) => x.provider === provider);
-  if (!p) return { provider, state: "absent", windows: [] };
-  const windows = (p.windows ?? []).filter((w) => !w.id.startsWith("model:") || model.includes(w.id.slice(6))).map((w) => ({ id: w.id, percentRemaining: w.percentRemaining }));
-  return { provider, state: p.state?.status ?? "unknown", windows };
+  const own = p ? { provider, state: p.state?.status ?? "unknown", windows: (p.windows ?? []).filter((w) => !w.id.startsWith("model:") || model.includes(w.id.slice(6))).map((w) => ({ id: w.id, percentRemaining: w.percentRemaining })) } : { provider, state: "absent", windows: [] };
+  return own.state === "fresh" ? own : (codexbarQuota(provider) ?? own);
+}
+// CodexBar reads plans quota-axi cannot (Grok and Gemini through browser sessions; Claude when its quota
+// endpoint is rate limited). The app's widget snapshot carries what the app shows, including providers
+// its CLI cannot reach without the app's keychain and cookie permissions; the CLI is the fallback.
+// A reading counts as fresh when it is under an hour old. agy maps to CodexBar's Gemini plan reading,
+// which may be a different pool from Antigravity's.
+const CODEXBAR = { grok: ["grok"], claude: ["claude"], codex: ["codex"], agy: ["gemini", "antigravity"], meta: ["muse", "museai"] };
+const CODEXBAR_SNAPSHOT = path.join(HOME, "Library/Group Containers/Y5PE65HELJ.com.steipete.codexbar/widget-snapshot.json");
+function codexbarQuota(provider) {
+  const ids = CODEXBAR[provider];
+  if (!ids) return null;
+  const reading = (windows, updatedAt, source) => windows.length
+    ? { provider, source, state: Date.now() - Date.parse(updatedAt ?? 0) < 3_600_000 ? "fresh" : "stale", windows } : null;
+  try {
+    const e = JSON.parse(readFileSync(CODEXBAR_SNAPSHOT, "utf8")).entries.find((x) => ids.includes(x.provider));
+    const r = e && reading((e.usageRows ?? []).filter((w) => typeof w.percentLeft === "number").map((w) => ({ id: `codexbar:${w.title ?? w.id}`, percentRemaining: Math.round(w.percentLeft) })), e.updatedAt, "codexbar-app");
+    if (r) return r;
+  } catch {}
+  for (const id of ids) {
+    try {
+      const u = JSON.parse(sh(`codexbar usage --provider ${id} --json --no-color`, { timeout: 60_000 }).stdout)[0]?.usage;
+      const r = u && reading(["primary", "secondary", "tertiary"].filter((k) => typeof u[k]?.usedPercent === "number").map((k) => ({ id: `codexbar:${k}`, percentRemaining: 100 - u[k].usedPercent })), u.updatedAt, "codexbar-cli");
+      if (r) return r;
+    } catch {}
+  }
+  return null;
 }
 // Stale or missing telemetry never stops a block; the provider's trial cap does.
 function quotaStop(qf) {
@@ -657,6 +682,7 @@ function writeLedger() {
 // ---------- main ----------
 if (cmd === "build-cases") buildCases();
 else if (cmd === "setup-check") setupCheck();
+else if (cmd === "quota") { const snap = quota(); for (const k of [...Object.values(CFG.providers).map((x) => x.quota), CFG.adjudicator.quota]) console.log(JSON.stringify(quotaFor(k, "", snap))); }
 else if (cmd === "probe") console.log(JSON.stringify(credentialProbe(trialEnv()), null, 2));
 else if (cmd === "run") await run();
 else if (cmd === "adjudicate") { mkdirSync(path.join(OUT, "adjudications"), { recursive: true }); await adjudicateAll(trialEnv()); }
