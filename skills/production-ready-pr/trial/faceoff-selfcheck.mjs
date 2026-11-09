@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Self-check of faceoff.mjs's pure functions on in-memory inputs: node faceoff-selfcheck.mjs
 import assert from "node:assert/strict";
-import { appReadings, caseFingerprint, codexbarReading, mergeReadings, needsRelabel, materialCount, pairStats, pct, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
+import { appReadings, blockStopAfter, caseFingerprint, codexbarReading, mergeReadings, needsRelabel, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
 
 const at = Date.parse("2026-11-09T13:00:00Z");
 const fresh = "2026-11-09T12:50:00Z", stale = "2026-11-09T10:00:00Z";
@@ -65,4 +65,12 @@ ok("exploratory excluded from recall");
 // 7. An exploratory defect hit is in both lists after scoring; it counts as one real problem.
 assert.equal(materialCount({ defects: ["e1"], validClusters: ["e1", "v1"] }), 2);
 ok("exploratory hit counted once");
+// 8. A quota message as the final text is rate-limited and stops the block; a review mentioning rate limits is not.
+const limit = "Usage Limit Reached. Your limit will reset in 6 days";
+assert.ok(quotaFinal(limit));
+assert.match(blockStopAfter({ key: "k", status: "rate-limited", rateLimited: true, reason: quotaFinal(limit) }, {}, true), /rate limit on k/);
+const review = 'Looks fine.\n```json\n[{"file": "a.ts", "line": 3, "problem": "no rate limit on the retry loop"}]\n```';
+assert.equal(quotaFinal(review), null);
+assert.equal(blockStopAfter({ key: "k", status: "done", rateLimited: false }, { stopOnFirstFailure: true }, false), null);
+ok("quota final => rate-limited, block stops; findings mentioning rate limit => done");
 console.log("faceoff self-check passed");

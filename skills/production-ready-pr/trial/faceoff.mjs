@@ -9,6 +9,7 @@
 //   node faceoff.mjs run [--dry-run] [--deadline HH:MM] [--out DIR] [--cases a,b] [--arms x,y] [--reps N] [--no-adjudicate] [--ledger] [--report FILE]
 //   node faceoff.mjs adjudicate [--out DIR] [--cases a,b]
 //   node faceoff.mjs report [--out DIR] [--report FILE] [--ledger]
+//   node faceoff.mjs repair-quota-trials [--dry-run] [--out DIR]
 //
 // Stages share one campaign directory (default results/prr-faceoff): a later stage skips every completed
 // trial, adds its own, re-adjudicates only new findings, and rewrites the same report over everything run.
@@ -28,6 +29,8 @@ const PROJECTS = path.join(HOME, "IdeaProjects");
 const PI_EVAL = process.env.PI_EVAL_SCRIPT ?? path.join(PROJECTS, "pi-workbench.installed/scripts/pi-eval.mjs");
 const LEDGER = process.env.PRR_FACEOFF_LEDGER ?? path.join(HOME, ".pi-workbench/scratch/production-ready-pr-trial/ledger.jsonl");
 const RATE_LIMIT = /\b429\b|rate.?limit|too many requests|resource.?exhausted|usage limit|quota exceeded|insufficient.?quota/i;
+// A provider out of quota may answer with a normal final message instead of an API error.
+const QUOTA_FINAL = /usage limit reached|quota (?:exceeded|exhausted)|rate.?limit|limit will reset|\bresets at\b/i;
 
 const repoPath = (name) => CFG.repos[name].replace(/^~/, HOME);
 const sh = (cmd, opts = {}) => spawnSync("bash", ["-c", cmd], { encoding: "utf8", maxBuffer: 1 << 28, ...opts });
@@ -214,6 +217,19 @@ function parseFindings(text) {
   for (const b of blocks) { try { const v = JSON.parse(b); if (Array.isArray(v)) return v.filter((f) => f && typeof f === "object"); } catch {} }
   return null;
 }
+// The quota message in a final text, or null. Only a final without a findings block counts, so a review
+// that mentions rate limiting in the code is not misread.
+export function quotaFinal(text) {
+  if (parseFindings(text)) return null;
+  return (text ?? "").match(QUOTA_FINAL) ? (text ?? "").replace(/\s+/g, " ").trim().slice(0, 300) : null;
+}
+// Why a provider block stops after trial r, or null to go on.
+export function blockStopAfter(r, pcfg, providerHasDone) {
+  if (r.rateLimited) return `rate limit on ${r.key}: ${String(r.reason).slice(0, 200)}`;
+  // A new provider (stopOnFirstFailure) that fails its first trial is skipped for the rest of the campaign.
+  if (pcfg.stopOnFirstFailure && r.status !== "done" && !providerHasDone) return `first trial failed (${r.status}): ${String(r.reason ?? "").replace(/\s+/g, " ").slice(0, 200)}`;
+  return null;
+}
 const norm = (f) => `${path.basename(String(f.file ?? ""))}|${String(f.line ?? "")}|${String(f.problem ?? "").trim().toLowerCase().replace(/\s+/g, " ")}`;
 
 // ---------- build-cases ----------
@@ -325,11 +341,14 @@ async function runTrial(t, env) {
     const finalTxt = path.join(record.trialDir, "final.txt");
     if (existsSync(finalTxt)) {
       copyFileSync(finalTxt, path.join(OUT, "finals", `${safe}.txt`));
-      record.findings = parseFindings(readFileSync(finalTxt, "utf8"));
+      const text = readFileSync(finalTxt, "utf8");
+      record.findings = parseFindings(text);
+      const quotaMsg = quotaFinal(text);
+      if (quotaMsg) Object.assign(record, { status: "rate-limited", reason: quotaMsg, rateLimited: true });
     }
   }
   const errText = [record.reason, ...(pe?.runs ?? []).map((r) => r.error)].filter(Boolean).join(" ");
-  record.rateLimited = record.status !== "done" && RATE_LIMIT.test(errText);
+  record.rateLimited = record.status === "rate-limited" || (record.status !== "done" && RATE_LIMIT.test(errText));
   record.endedAt = iso();
   appendFileSync(TRIALS, JSON.stringify(record) + "\n");
   console.log(`${local(now())} ${t.key}: ${record.status}${record.findings ? ` findings=${record.findings.length}` : ""} tokens=${record.tokens ?? "unknown"} ${(record.wallMs / 60000).toFixed(1)}m creds=${record.credentialProbe.clean ? "clean" : "PRESENT"}${record.reason && record.status !== "done" ? ` (${String(record.reason).slice(0, 160)})` : ""}`);
@@ -368,9 +387,7 @@ async function providerBlock(prov, trials, env, cutoff) {
     if (block.stop) break;
     const r = await runTrial(t, env);
     block.ran++;
-    if (r.rateLimited) block.stop = `rate limit on ${t.key}: ${String(r.reason).slice(0, 200)}`;
-    // A new provider (stopOnFirstFailure) that fails its first trial is skipped for the rest of the campaign.
-    else if (pcfg.stopOnFirstFailure && r.status !== "done" && ![...latestTrials().values()].some((x) => x.provider === prov && x.status === "done")) block.stop = `first trial failed (${r.status}): ${String(r.reason ?? "").replace(/\s+/g, " ").slice(0, 200)}`;
+    block.stop = blockStopAfter(r, pcfg, [...latestTrials().values()].some((x) => x.provider === prov && x.status === "done"));
   }
   Object.assign(block, { endedAt: iso(), quotaEnd: quotaFor(pcfg.quota, model) });
   appendFileSync(BLOCKS, JSON.stringify(block) + "\n");
@@ -722,6 +739,24 @@ function writeLedger() {
   writeFileSync(markerFile, JSON.stringify([...written]));
 }
 
+// ---------- repair-quota-trials ----------
+// Appends a rate-limited record for each done trial whose final is a quota message, so the last record
+// wins and a later run retries it. trials.jsonl is never rewritten.
+function repairQuotaTrials() {
+  const fixes = [];
+  for (const r of latestTrials().values()) {
+    if (r.status !== "done" || r.findings) continue;
+    const f = path.join(OUT, "finals", `${r.key.replace(/\|/g, "__")}.txt`);
+    const msg = existsSync(f) && quotaFinal(readFileSync(f, "utf8"));
+    if (msg) fixes.push({ ...r, status: "rate-limited", rateLimited: true, reason: msg, repairedAt: iso() });
+  }
+  for (const r of fixes) {
+    console.log(`${flag("dry-run") ? "would append" : "append"} ${r.key}: ${r.reason.slice(0, 120)}`);
+    if (!flag("dry-run")) appendFileSync(TRIALS, JSON.stringify(r) + "\n");
+  }
+  console.log(`${fixes.length} quota trial(s)${flag("dry-run") ? " (dry run, nothing written)" : ""}`);
+}
+
 // ---------- main ----------
 // Imported (faceoff-selfcheck.mjs) rather than run: export the pure functions, dispatch nothing.
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -733,4 +768,5 @@ else if (cmd === "probe") console.log(JSON.stringify(credentialProbe(trialEnv())
 else if (cmd === "run") await run();
 else if (cmd === "adjudicate") { mkdirSync(path.join(OUT, "adjudications"), { recursive: true }); await adjudicateAll(trialEnv()); }
 else if (cmd === "report") { writeReport(); if (flag("ledger")) writeLedger(); }
-else { console.error("usage: faceoff.mjs build-cases | setup-check | run [--dry-run] [--deadline HH:MM] [--out DIR] [--cases a,b] [--arms x,y] [--reps N] [--no-adjudicate] [--ledger] [--report FILE] | adjudicate [--out DIR] [--cases a,b] | report [--out DIR] [--report FILE] [--ledger]"); process.exit(2); }
+else if (cmd === "repair-quota-trials") repairQuotaTrials();
+else { console.error("usage: faceoff.mjs build-cases | setup-check | run [--dry-run] [--deadline HH:MM] [--out DIR] [--cases a,b] [--arms x,y] [--reps N] [--no-adjudicate] [--ledger] [--report FILE] | adjudicate [--out DIR] [--cases a,b] | report [--out DIR] [--report FILE] [--ledger] | repair-quota-trials [--dry-run] [--out DIR]"); process.exit(2); }
