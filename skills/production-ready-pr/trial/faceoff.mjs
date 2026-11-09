@@ -14,7 +14,7 @@
 // trial, adds its own, re-adjudicates only new findings, and rewrites the same report over everything run.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, readdirSync, rmSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,7 @@ const CFG = JSON.parse(readFileSync(path.join(HERE, "faceoff.json"), "utf8"));
 const EVAL_HOME = path.join(HOME, ".pi-workbench/evals");
 const CASES_DIR = path.join(EVAL_HOME, "cases");
 const PROJECTS = path.join(HOME, "IdeaProjects");
-const PI_EVAL = path.join(PROJECTS, "pi-workbench.installed/scripts/pi-eval.mjs");
+const PI_EVAL = process.env.PI_EVAL_SCRIPT ?? path.join(PROJECTS, "pi-workbench.installed/scripts/pi-eval.mjs");
 const LEDGER = process.env.PRR_FACEOFF_LEDGER ?? path.join(HOME, ".pi-workbench/scratch/production-ready-pr-trial/ledger.jsonl");
 const RATE_LIMIT = /\b429\b|rate.?limit|too many requests|resource.?exhausted|usage limit|quota exceeded|insufficient.?quota/i;
 
@@ -56,7 +56,8 @@ const OUT = path.resolve(opt("out") ?? path.join(EVAL_HOME, "results", CFG.id));
 // The campaign's date is fixed by its first stage, so every stage rewrites the same report.
 const META = path.join(OUT, "campaign.json");
 const DATE = existsSync(META) ? JSON.parse(readFileSync(META, "utf8")).date : new Date().toLocaleDateString("sv-SE");
-const REPORT = path.resolve(opt("report") ?? path.join(EVAL_HOME, "reports", `${CFG.id}-${DATE}.md`));
+// A custom --out keeps its report beside its results, so a test run cannot overwrite the campaign report.
+const REPORT = path.resolve(opt("report") ?? (opt("out") ? path.join(OUT, "report.md") : path.join(EVAL_HOME, "reports", `${CFG.id}-${DATE}.md`)));
 const pick = (name, all) => {
   const want = list(name) ?? (name === "cases" ? list("case") : undefined);
   const unknown = want?.filter((x) => !all.includes(x)) ?? [];
@@ -73,18 +74,15 @@ const STAGES = path.join(OUT, "stages.jsonl");
 // ---------- environment ----------
 // Trials must not reach GitHub with Thomas's identity: drop gh/git credentials and agent sockets, point gh
 // at an empty config, give git no global or system config (the Xcode system config sets osxkeychain), and
-// make git's ssh transport fail. With an empty config gh still hands out the keychain token through
-// `gh auth token`, so GH_TOKEN is set to an invalid placeholder, which gh prefers over the keychain.
-// Pi's model auth (~/.pi/agent/auth.json, provider extensions) is untouched.
-const GH_PLACEHOLDER = "invalid-faceoff-placeholder";
-// pi-eval's sandbox denies ~/IdeaProjects, where a configured Pi package (pi-goal) lives, so a plainly
-// discovered Pi exits with EPERM. A `pi` shim on PATH (outside every denied path) starts Pi with discovery
-// off and only the extensions a trial needs: the provider extensions, telemetry and pi-claude-code-use.
+// make git's ssh transport fail. pi-eval's sandbox denies the login keychain and the tools that hand out
+// stored credentials (gh, security, git's keychain helper). Pi's model auth (~/.pi/agent/auth.json,
+// provider extensions) is untouched.
+// A `pi` shim on PATH starts Pi with discovery off and only the extensions a trial needs (the provider
+// extensions, telemetry and pi-claude-code-use), so every arm runs with the same small harness.
 function piShim() {
   const dir = path.join(HOME, ".pi-workbench/run/prr-faceoff-bin");
   const real = sh("command -v pi", { env: { ...process.env, PATH: process.env.PATH.split(":").filter((p) => p !== dir).join(":") } }).stdout.trim();
   if (!real) throw new Error("pi not found on PATH");
-  // Real paths: the sandbox denies the ~/IdeaProjects/*.installed symlinks themselves.
   const exts = CFG.piExtensions.map((e) => `-e ${q(realpathSync(e.replace(/^~/, HOME)))}`).join(" ");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "pi"), `#!/bin/sh\n# Written by faceoff.mjs: Pi for sandboxed face-off trials.\nexec ${q(real)} --no-extensions ${exts} "$@"\n`, { mode: 0o755 });
@@ -94,29 +92,30 @@ function piShim() {
 function trialEnv() {
   const env = { ...process.env, PATH: `${piShim()}:${process.env.PATH}` };
   for (const k of Object.keys(env)) if (/^(GH_|GITHUB|GIT_ASKPASS|SSH_ASKPASS|SSH_AUTH_SOCK|GCM_)|_GH_TOKEN$|GITHUB_TOKEN|COPILOT.*TOKEN/i.test(k)) delete env[k];
-  const ghDir = path.join(OUT, "env", "gh-empty");
-  mkdirSync(ghDir, { recursive: true });
   delete env.PI_WORKBENCH_ROUTING_OVERLAY;
   return {
     ...env,
-    GH_CONFIG_DIR: ghDir, GH_PROMPT_DISABLED: "1", GH_TOKEN: GH_PLACEHOLDER, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
+    GH_PROMPT_DISABLED: "1", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "false",
     ...Object.fromEntries(Object.keys(CFG.repos).map((r) => [`PI_EVAL_REPO_${r.toUpperCase()}`, repoPath(r)])),
   };
 }
 
-// Evidence that the trial environment holds no GitHub credential. ls-remote of a private repo is a
-// read-only, unauthenticated request: it must fail.
+// Evidence that a trial, inside pi-eval's sandbox, holds no GitHub credential. ls-remote of a private repo
+// is a read-only, unauthenticated request: it must fail.
 function credentialProbe(env) {
-  const r = sh(`names=$(env | cut -d= -f1 | grep -E -i '^(GH_|GITHUB|GIT_ASKPASS|SSH_AUTH_SOCK|GCM_)|TOKEN' | grep -v -x -E 'GH_CONFIG_DIR|GH_PROMPT_DISABLED|GH_TOKEN' | tr '\\n' ' ')
-[ "$(gh auth token 2>/dev/null)" = ${q(GH_PLACEHOLDER)} ]; dummy=$?
+  const dir = path.join(OUT, "env", "probe");
+  mkdirSync(dir, { recursive: true });
+  const script = `names=$(env | cut -d= -f1 | grep -E -i '^(GH_|GITHUB|GIT_ASKPASS|SSH_AUTH_SOCK|GCM_)|TOKEN' | grep -v -x -E 'GH_PROMPT_DISABLED' | tr '\\n' ' ')
+gh auth token >/dev/null 2>&1 || security find-generic-password -s gh:github.com -w >/dev/null 2>&1; dummy=$?
 gh api user >/dev/null 2>&1; api=$?
 helper=$(git config --get-all credential.helper | tr '\\n' ' ')
 git ls-remote https://github.com/embabel/me HEAD >/dev/null 2>&1; ls=$?
-printf '%s\\n%s\\n%s\\n%s\\n%s\\n' "$names" "$dummy" "$api" "$helper" "$ls"`, { env, timeout: 60_000 });
+printf '%s\\n%s\\n%s\\n%s\\n%s\\n' "$names" "$dummy" "$api" "$helper" "$ls"`;
+  const r = spawnSync("sandbox-exec", ["-p", sandboxProfile(dir), "bash", "-c", script], { cwd: dir, env, encoding: "utf8", timeout: 60_000 });
   const [names, dummy, api, helper, ls] = r.stdout.split("\n");
-  const probe = { credentialEnvVars: names.trim().split(" ").filter(Boolean), ghTokenIsPlaceholder: dummy === "0", ghApiUserExit: Number(api), gitCredentialHelper: helper.trim() || null, privateRepoLsRemoteExit: Number(ls) };
-  probe.clean = !probe.credentialEnvVars.length && probe.ghTokenIsPlaceholder && probe.ghApiUserExit !== 0 && !probe.gitCredentialHelper && probe.privateRepoLsRemoteExit !== 0;
+  const probe = { credentialEnvVars: names.trim().split(" ").filter(Boolean), ghTokenReadable: dummy === "0", ghApiUserExit: Number(api), gitCredentialHelper: helper.trim() || null, privateRepoLsRemoteExit: Number(ls) };
+  probe.clean = !probe.credentialEnvVars.length && !probe.ghTokenReadable && probe.ghApiUserExit !== 0 && !probe.gitCredentialHelper && probe.privateRepoLsRemoteExit !== 0;
   return probe;
 }
 
@@ -265,10 +264,7 @@ async function runTrial(t, env) {
   const logFile = path.join(OUT, "logs", `${safe}.log`);
   writeFileSync(logFile, "");
   const started = now();
-  // --preserve-symlinks-main keeps pi-eval's ROOT at ~/IdeaProjects/pi-workbench.installed. Resolved to
-  // ~/.pi-workbench/installed/<id>, its sandbox would deny that folder and leave ~/IdeaProjects (the source
-  // repositories with the fix commits) readable.
-  const res = await runChild("node", ["--preserve-symlinks-main", PI_EVAL, "run", campaignFile], { cwd: OUT, env: { ...env, ...admissionEnv(t.arm) }, logFile, timeoutMs: (CFG.trialTimeoutMinutes + 15) * 60_000 });
+  const res = await runChild("node", [PI_EVAL, "run", campaignFile], { cwd: OUT, env: { ...env, ...admissionEnv(t.arm) }, logFile, timeoutMs: (CFG.trialTimeoutMinutes + 15) * 60_000 });
   record.wallMs = now() - started;
   record.quotaAfter = quotaFor(qp, arm.model);
   const log = readFileSync(logFile, "utf8");
@@ -390,12 +386,11 @@ async function run() {
 }
 
 // ---------- adjudication ----------
+// pi-eval's trial sandbox, readable only at allowDir among the denied folders.
 function sandboxProfile(allowDir) {
-  const real = (p) => (existsSync(p) ? realpathSync(p) : p);
-  const deny = [real(PROJECTS), real(EVAL_HOME), real(path.join(HOME, ".pi/agent/sessions")), real(path.join(HOME, ".pi-web"))];
-  const allow = [...readdirSync(PROJECTS).filter((d) => d.endsWith(".installed")).map((d) => path.join(PROJECTS, d)), real(allowDir)];
-  const rule = (verb, p) => `(${verb} file-read-data (subpath ${q(p)}))`;
-  return `(version 1)(allow default)${deny.map((p) => rule("deny", p)).join("")}${allow.map((p) => rule("allow", p)).join("")}`;
+  const r = spawnSync("node", [PI_EVAL, "sandbox-profile", allowDir], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`pi-eval sandbox-profile failed: ${r.stderr}`);
+  return r.stdout.trim();
 }
 
 function pooled(caseId) {
@@ -619,7 +614,7 @@ function writeReport() {
   if (!any) L.push("- none");
   L.push("", "## Credential isolation", "");
   const probes = rows.filter((r) => r.credentialProbe);
-  L.push(`${probes.filter((r) => r.credentialProbe.clean).length}/${probes.length} trial environments had no GitHub credential (no GH_/GITHUB/token env vars besides an invalid GH_TOKEN placeholder, \`gh auth token\` returns only the placeholder, \`gh api user\` fails, no git credential helper, \`git ls-remote\` of private embabel/me fails).`);
+  L.push(`${probes.filter((r) => r.credentialProbe.clean).length}/${probes.length} trial environments had no GitHub credential (inside pi-eval's sandbox: no GH_/GITHUB/token env vars, \`gh auth token\` and \`security\` find no GitHub token, \`gh api user\` fails, no git credential helper, \`git ls-remote\` of private embabel/me fails).`);
   mkdirSync(path.dirname(REPORT), { recursive: true });
   writeFileSync(REPORT, L.join("\n") + "\n");
   console.log(`report: ${REPORT}`);
