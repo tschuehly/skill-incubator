@@ -117,7 +117,7 @@
   "providers": {
     "xai": {
       "quota": "grok",
-      "maxTrials": 60
+      "maxTrials": 66
     },
     "antigravity": {
       "quota": "agy",
