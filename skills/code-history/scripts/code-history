@@ -91,37 +91,55 @@ def blame(rev, path, ranges=None):
     return Counter(l[:40] for l in out.splitlines() if re.match(r"^[0-9a-f]{40} \d+ \d+", l))
 
 
+def capped(churn):
+    """Top MAX_FILES paths by changed lines, plus the omitted rest."""
+    ranked = sorted(churn, key=lambda p: -churn[p])
+    return ranked[:MAX_FILES], ranked[MAX_FILES:]
+
+
+def numstat(cmd, *args):
+    """Changed lines per path from NUL-delimited --numstat output (paths unquoted)."""
+    churn = Counter()
+    for rec in (git(cmd, "--numstat", "-z", "--no-renames", *args) or "").split("\0"):
+        parts = rec.strip("\n").split("\t", 2)
+        if len(parts) == 3:
+            churn[parts[2]] += sum(int(n) for n in parts[:2] if n.isdigit())
+    return churn
+
+
 def diff_scope(base):
     mb = git("merge-base", base, "HEAD").strip()
-    ranges, path = defaultdict(list), None
-    for line in git("diff", "-U0", "--no-color", "--no-renames", mb).splitlines():
-        if line.startswith("--- "):
-            path = None if line == "--- /dev/null" else line[6:]
-        elif line.startswith("@@") and path:
-            m = re.match(r"@@ -(\d+)(?:,(\d+))?", line)
-            start, count = int(m[1]), int(m[2] or 1)
-            # Pure insertion: blame the neighbouring lines that frame it.
-            ranges[path].append((start, start + count - 1) if count else (max(start, 1), start + 1))
+    files, omitted = capped(numstat("diff", mb))
     owners, lines = Counter(), 0
-    for path, rs in list(ranges.items())[:MAX_FILES]:
+    for path in files:
+        # Per-file diff: inside -U0 output only hunk headers start with "@@", so content can't fake a header.
+        rs = []
+        for line in git("--literal-pathspecs", "diff", "-U0", "--no-color", "--no-renames", mb, "--", path).splitlines():
+            m = re.match(r"@@ -(\d+)(?:,(\d+))?", line)
+            if m:
+                start, count = int(m[1]), int(m[2] or 1)
+                # Pure insertion: blame the neighbouring lines that frame it.
+                rs.append((start, start + count - 1) if count else (max(start, 1), start + 1))
         length = len((git("show", f"{mb}:{path}", check=False) or "").splitlines())
         rs = [(s, min(e, length)) for s, e in rs if s <= length]
         if rs:
             c = blame(mb, path, rs)
             owners += c
             lines += sum(c.values())
-    return mb[:9], list(ranges), owners, lines
+    return mb[:9], files, omitted, owners, lines
 
 
 def paths_scope(paths):
-    files = (git("ls-files", "--", *paths) or "").split("\n")
-    files = [f for f in files if f][:MAX_FILES]
+    files, omitted = [f for f in (git("ls-files", "-z", "--", *paths) or "").split("\0") if f], []
+    if len(files) > MAX_FILES:  # rank by recent churn so the cap keeps the most-edited files
+        churn = numstat("log", "--format=", "-n", "200", "--", *paths)
+        files, omitted = capped({f: churn[f] for f in files})
     owners = Counter()
     for f in files:
         owners += blame("HEAD", f)
     for sha in (git("log", "--format=%H", "-n", "200", "--", *paths) or "").split():
         owners.setdefault(sha, 0)  # superseded commits still compete on recency
-    return files, owners, sum(owners.values())
+    return files, omitted, owners, sum(owners.values())
 
 
 def commit_info(sha):
@@ -207,7 +225,7 @@ def render(title, scope, gh, top, issues, loose, hits, issue_hints):
     for p in top:
         d = p.get("detail") or {}
         head = f"### #{p['number']} {d.get('title') or p['commits'][0]['subject']}"
-        meta = f"{p['lines']} lines · {d.get('merged_at', '')[:10] or p['commits'][0]['date']} · @{(d.get('user') or {}).get('login') or p['commits'][0]['author']}"
+        meta = f"{p['lines']} lines · {(d.get('merged_at') or '')[:10] or p['commits'][0]['date']} · @{(d.get('user') or {}).get('login') or p['commits'][0]['author']}"
         out += [head, f"{meta} · {d['html_url']}" if d.get("html_url") else meta]
         if d.get("body"):
             out.append(clip(d["body"], PR_BODY))
@@ -251,13 +269,16 @@ def main():
         IGNORE_REVS = os.path.exists(".git-blame-ignore-revs")
         gh = GH(github_repo())
         if a.diff:
-            mb, files, owners, lines = diff_scope(a.diff)
+            mb, files, omitted, owners, lines = diff_scope(a.diff)
             title, scope = f"--diff {a.diff}", f"Merge-base {mb} · {len(files)} files · {lines} touched or removed lines blamed"
         else:
-            files, owners, lines = paths_scope(a.paths)
+            files, omitted, owners, lines = paths_scope(a.paths)
             title, scope = "--paths " + " ".join(a.paths), f"{len(files)} files · {lines} current lines blamed"
         if gh.repo:
             scope += f" · {gh.repo}"
+        if omitted:
+            names = ", ".join(omitted[:20]) + (", …" if len(omitted) > 20 else "")
+            scope += f"\n> Cap {MAX_FILES} files by changed lines; omitted {len(omitted)} files: {names}"
         top, issues, loose, hits, hints = build(gh, rank(owners), set(files), a.keywords)
         sys.stdout.write(render(title, scope, gh, top, issues, loose, hits, hints))
     except RuntimeError as e:

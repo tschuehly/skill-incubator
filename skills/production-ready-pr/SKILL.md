@@ -146,10 +146,12 @@ receives the delta re-review of its own material findings. Mark the ledger line 
 
 **History context.** Once per run, before Round 0, save the output of
 `<skill-dir>/../code-history/scripts/code-history --diff <merge-base>` beside the lens reports.
-Round 0 and the Standards and Spec lenses (at `medium`, both combined reviewers) receive it as
-"design intent behind the touched code; flag only if the diff reverses a stated decision, cite the
-PR". A finding that rests only on history is tagged `history:` and cites the PR and the decision it
-reverses. The readiness judges, the Simplicity lens, and face-off contestants review without it.
+At every level, Round 0 and whoever holds the Standards and Spec lenses receive it as "design intent
+behind the touched code; flag only if the diff reverses a stated decision, cite the PR": the lead at
+`low`, both combined reviewers at `medium`, and the separate Standards and Spec lenses at `high` and
+`critical`. A finding that rests only on history is tagged `history:` and cites the PR and the
+decision it reverses. The separate Simplicity lens, the readiness judges, and face-off contestants
+review without it.
 
 **Round 0: should this PR exist?** At every level, before any lens, draft push, or Copilot request,
 the roster's Round 0 judge receives the diff, specification, repository rules, and history context
