@@ -81,5 +81,6 @@ assert.match(blockStopAfter({ key: "k", status: "error", rateLimited: false, tok
 assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: null, turns: 0, reason: warn + "something else" }, {}, true), null, "startup EPERM warning alone is not a failure");
 assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: 7655, turns: 2, reason: "xAI API error: Responses failed. No API key" }, {}, true), null, "spent tokens => existing rules");
 assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: null, turns: 1, reason: "Error: Failed to load extension" }, {}, true), null, "took turns => existing rules");
+assert.ok(blockStopAfter({ key: "m", status: "error", rateLimited: false, tokens: null, turns: 0, reason: 'Error: Model "openai-codex/nope" not found' }, {}, true), "pi's quoted model-not-found diagnostic stops the block");
 ok("startup failure without tokens => block stops; API error after tokens => unchanged");
 console.log("faceoff self-check passed");

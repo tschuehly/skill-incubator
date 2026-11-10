@@ -33,7 +33,7 @@ const RATE_LIMIT = /\b429\b|rate.?limit|too many requests|resource.?exhausted|us
 const QUOTA_FINAL = /usage limit reached|quota (?:exceeded|exhausted)|rate.?limit|limit will reset|\bresets at\b/i;
 // Pi failing to start: every later trial fails the same way. EPERM/ENOENT count only as a line-leading
 // error, not the "Warning: Could not read …: Error: EPERM" a normal start prints.
-const STARTUP_FAILURE = /failed to load extension|extension path does not exist|no api key|unknown model|model not found|^Error: (?:EPERM|ENOENT)\b/im;
+const STARTUP_FAILURE = /failed to load extension|extension path does not exist|no api key|unknown model|model (?:"[^"\n]*" )?not found|^Error: (?:EPERM|ENOENT)\b/im;
 
 const repoPath = (name) => CFG.repos[name].replace(/^~/, HOME);
 const sh = (cmd, opts = {}) => spawnSync("bash", ["-c", cmd], { encoding: "utf8", maxBuffer: 1 << 28, ...opts });
