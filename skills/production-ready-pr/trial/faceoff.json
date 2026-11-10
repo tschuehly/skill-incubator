@@ -129,7 +129,7 @@
     },
     "meta": {
       "quota": "meta",
-      "maxTrials": 60,
+      "maxTrials": 80,
       "stopOnFirstFailure": true,
       "admissionQuotaProvider": "meta"
     }
