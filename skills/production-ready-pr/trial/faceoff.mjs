@@ -941,7 +941,7 @@ async function nightly() {
   } catch (e) { failed = e; console.error(`nightly: ${e.message}; judging and reporting what exists`); }
   refreshCases();
   mkdirSync(path.join(OUT, "adjudications"), { recursive: true });
-  await adjudicateAll(trialEnv());
+  try { await adjudicateAll(trialEnv()); } catch (e) { failed ??= e; console.error(`nightly: adjudication skipped: ${e.message}; reporting what exists`); }
   refreshCases();
   writeReport();
   mkdirSync(CAMP.reports, { recursive: true });
