@@ -130,7 +130,8 @@ keeps default routing. Start every lens report with `MODEL=<provider/model> EFFO
 each run, append one JSON line to
 `~/.pi-workbench/scratch/production-ready-pr-trial/ledger.jsonl` with repository, PR, level, and per
 slot: model, effort, material findings, unique defect classes, refuted or noise findings, missed
-findings later caught by another reviewer, and wall time.
+findings later caught by another reviewer, wall time, and status (`reported`, or `timed_out` with
+launch time and the head SHA it reviewed).
 
 **Face-off (trial).** When the invocation includes `faceoff` (at `medium` and above), round 1's
 readiness review becomes a blind face-off. One frozen brief covering both judge A and judge B
@@ -179,15 +180,18 @@ Then apply the approved review contract against one merge-base and head SHA:
   At `high` and `critical`, readiness judge B (Grok, about 19 minutes) runs **async**: launch it
   with the other lenses, but reconcile and fix round 1 without waiting for it. When it reports,
   its findings join round 1 like a late Copilot review: probe, reconcile, and fix them before
-  publication; it re-reviews a fix of its own finding as round 2. Don't mark the PR ready until
+  publication. Start round 2 only after judge B has reported or timed out, so its fixes share
+  round 2's delta re-reviews and the two-round cap holds. At `critical`, launch judge C after A and
+  B report or B times out, and include B's findings in C's brief. Don't mark the PR ready until
   judge B has reported or 30 minutes have passed since its launch; on timeout, record the gap with
-  the head SHA in the section-7 report and the ledger.
+  the head SHA in the section-7 report and the ledger. A face-off is synchronous: its
+  scoreboard needs every contestant before fixing.
 
 At `medium` and above, push the candidate before round 1 as draft PRs (section 4 creates them;
 mark them draft until section 4's ready condition holds) and request Copilot, so its findings
 join round 1's fix batch instead of arriving after publication. A draft push is preliminary:
 "publication" in this skill means marking the PR ready in section 4. Before reconciling round 1,
-wait for the lenses, section 2's parallel static, architecture, and lint checks and any full gate
+wait for every synchronous lens (not async judge B), section 2's parallel static, architecture, and lint checks and any full gate
 already started, and the draft Copilot review or its approved substitute, then inventory Copilot's findings as section 6 describes. Verify once, before round 1, that the
 request registered in GitHub state. When Copilot is unavailable, record the gap with its reason and
 the head SHA and ask the human once to accept the gap or approve a substitute judge, unless the
