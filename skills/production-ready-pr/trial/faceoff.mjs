@@ -31,6 +31,9 @@ const LEDGER = process.env.PRR_FACEOFF_LEDGER ?? path.join(HOME, ".pi-workbench/
 const RATE_LIMIT = /\b429\b|rate.?limit|too many requests|resource.?exhausted|usage limit|quota exceeded|insufficient.?quota/i;
 // A provider out of quota may answer with a normal final message instead of an API error.
 const QUOTA_FINAL = /usage limit reached|quota (?:exceeded|exhausted)|rate.?limit|limit will reset|\bresets at\b/i;
+// Pi failing to start: every later trial fails the same way. EPERM/ENOENT count only as a line-leading
+// error, not the "Warning: Could not read …: Error: EPERM" a normal start prints.
+const STARTUP_FAILURE = /failed to load extension|extension path does not exist|no api key|unknown model|model not found|^Error: (?:EPERM|ENOENT)\b/im;
 
 const repoPath = (name) => CFG.repos[name].replace(/^~/, HOME);
 const sh = (cmd, opts = {}) => spawnSync("bash", ["-c", cmd], { encoding: "utf8", maxBuffer: 1 << 28, ...opts });
@@ -226,6 +229,8 @@ export function quotaFinal(text) {
 // Why a provider block stops after trial r, or null to go on.
 export function blockStopAfter(r, pcfg, providerHasDone) {
   if (r.rateLimited) return `rate limit on ${r.key}: ${String(r.reason).slice(0, 200)}`;
+  // A trial that spent no tokens and took no turns never reached the model; a startup error stops the block.
+  if (r.status !== "done" && !r.tokens && !r.turns && STARTUP_FAILURE.test(r.reason ?? "")) return `pi failed to start on ${r.key}: ${String(r.reason).match(STARTUP_FAILURE)[0]} (${String(r.reason).replace(/\s+/g, " ").slice(-200)})`;
   // A new provider (stopOnFirstFailure) that fails its first trial is skipped for the rest of the campaign.
   if (pcfg.stopOnFirstFailure && r.status !== "done" && !providerHasDone) return `first trial failed (${r.status}): ${String(r.reason ?? "").replace(/\s+/g, " ").slice(0, 200)}`;
   return null;
@@ -395,6 +400,8 @@ async function providerBlock(prov, trials, env, cutoff) {
 }
 
 async function run() {
+  const missing = CFG.piExtensions.filter((e) => !existsSync(e.replace(/^~/, HOME)));
+  if (missing.length) { console.error(`piExtensions path(s) missing, refusing to run: ${missing.join(", ")}`); process.exit(3); }
   const plan = schedule();
   const cutoff = DEADLINE - CFG.adjudicationReserveMinutes * 60_000;
   const trials = latestTrials();

@@ -73,4 +73,13 @@ const review = 'Looks fine.\n```json\n[{"file": "a.ts", "line": 3, "problem": "n
 assert.equal(quotaFinal(review), null);
 assert.equal(blockStopAfter({ key: "k", status: "done", rateLimited: false }, { stopOnFirstFailure: true }, false), null);
 ok("quota final => rate-limited, block stops; findings mentioning rate limit => done");
+// 9. Pi failing to start (no tokens, no turns) stops the block; an API error after work follows the old rules.
+const warn = "Warning: Could not read /h/.pi/agent/AGENTS.md: Error: EPERM: operation not permitted\n";
+const startup = warn + 'Error: Failed to load extension "/x/ext": Extension path does not exist: /x/ext\nHint: Start without extensions using "pi -ne".\n';
+assert.match(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: null, turns: 0, reason: startup }, {}, true), /pi failed to start on k: Failed to load extension/);
+assert.match(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: null, turns: 0, reason: "Error: ENOENT: no such file or directory, lstat '/x'" }, {}, true), /pi failed to start/);
+assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: null, turns: 0, reason: warn + "something else" }, {}, true), null, "startup EPERM warning alone is not a failure");
+assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: 7655, turns: 2, reason: "xAI API error: Responses failed. No API key" }, {}, true), null, "spent tokens => existing rules");
+assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: null, turns: 1, reason: "Error: Failed to load extension" }, {}, true), null, "took turns => existing rules");
+ok("startup failure without tokens => block stops; API error after tokens => unchanged");
 console.log("faceoff self-check passed");
