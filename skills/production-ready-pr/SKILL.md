@@ -168,13 +168,20 @@ Then apply the approved review contract against one merge-base and head SHA:
   duplicate defect classes and record each reviewer's unique ones. The pair is round 1 only: a later
   round sends each finding to the reviewer that raised it.
 - `high`: run five isolated lenses on the roster—Standards, Spec, Simplicity, and readiness
-  judges A and B—keeping their findings hidden from one another until all finish. Load
+  judges A and B—keeping each lens blind to the others' findings. Load
   `code-review` and `ponytail-review` for their review contracts. For a stack, each lens reviews
   every layer's own diff as a separate slice, with the combined diff as context, and reports
   findings per layer; this is still one round.
 
   Merge readiness judges' duplicate defect classes and record each judge's unique ones. Each judge
   counts as its own lens for delta re-reviews.
+
+  At `high` and `critical`, readiness judge B (Grok, about 19 minutes) runs **async**: launch it
+  with the other lenses, but reconcile and fix round 1 without waiting for it. When it reports,
+  its findings join round 1 like a late Copilot review: probe, reconcile, and fix them before
+  publication; it re-reviews a fix of its own finding as round 2. Don't mark the PR ready until
+  judge B has reported or 30 minutes have passed since its launch; on timeout, record the gap with
+  the head SHA in the section-7 report and the ledger.
 
 At `medium` and above, push the candidate before round 1 as draft PRs (section 4 creates them;
 mark them draft until section 4's ready condition holds) and request Copilot, so its findings
@@ -292,7 +299,8 @@ system outcome without requiring codebase context. Use these sections in order:
 
 For a stacked PR, explain this layer's distinct outcome and its dependency on adjacent layers.
 
-Make the PR ready for review after the local readiness gate passes. Request Copilot review of the
+Make the PR ready for review after the local readiness gate passes and, at `high` and above, async
+judge B has reported or timed out (section 3). Request Copilot review of the
 published head with `--reviewer @copilot`; findings from its draft review belong to the same
 reconciliation as round 1. If the repository requests Copilot through a ruleset, confirm the request in
 GitHub state instead of issuing a duplicate. A failed or unavailable Copilot request is explicit;
