@@ -105,8 +105,8 @@ gate is satisfied too.
 Load `model-orchestration` before delegation.
 
 **Reviewer roster (trial).** Every independent reviewer below launches with the `modelOverride` and
-`effort` from this table, not default routing, so the run compares Grok, Ember, and Sol and spares
-Codex quota. Astra is not on the roster.
+`effort` from this table, not default routing, so the run compares Grok, Ember, and Sol. Astra is not on the
+roster.
 
 | Slot | Model | Effort |
 |---|---|---|
