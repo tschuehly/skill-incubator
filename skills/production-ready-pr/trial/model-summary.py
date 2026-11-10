@@ -24,6 +24,13 @@ noise = collections.Counter()
 for f in glob.glob(os.path.join(out, "adjudications", "*.json")):
     a = json.load(open(f))
     items = {i["index"]: i for i in a["items"]}
+    # VERIFY_DIR=<dir>: a second judge's <case>.json verdicts replace the first judge's labels for that case.
+    vf = os.path.join(os.environ.get("VERIFY_DIR", ""), os.path.basename(f))
+    if os.environ.get("VERIFY_DIR") and os.path.exists(vf):
+        v = {x["index"]: x["label"] for x in json.load(open(vf))["verdicts"]}
+        lab = lambda l: v.get(l["index"], l["label"])
+        # A finding moved onto a known defect joins that defect's cluster, as the first judge's contract requires.
+        a["labels"] = [{**l, "label": lab(l), "cluster": lab(l) if lab(l) not in ("valid", "noise") else l["cluster"]} for l in a["labels"]]
     for l in a["labels"]:
         for s in items[l["index"]]["sources"]:
             case, arm, rep = s.split("|")
