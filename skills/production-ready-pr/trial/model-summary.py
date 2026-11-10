@@ -17,7 +17,9 @@ for line in open(os.path.join(out, "trials.jsonl")):
 done = [r for r in trials.values() if r.get("status") == "done"]
 arms = sorted({r["arm"] for r in trials.values()})
 
-found = collections.defaultdict(lambda: collections.defaultdict(set))  # arm -> kind -> {(case, cluster)}
+cfg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "faceoff.json")))
+exploratory = {c["id"] for c in cfg["cases"] if c.get("exploratory")}
+found = collections.defaultdict(lambda: collections.defaultdict(set))  # (arm, rep) -> kind -> {(case, cluster)}
 noise = collections.Counter()
 for f in glob.glob(os.path.join(out, "adjudications", "*.json")):
     a = json.load(open(f))
@@ -25,31 +27,52 @@ for f in glob.glob(os.path.join(out, "adjudications", "*.json")):
     for l in a["labels"]:
         for s in items[l["index"]]["sources"]:
             case, arm, rep = s.split("|")
-            if rep != "0":
-                continue
+            if (trials.get(s) or {}).get("status") != "done":
+                continue  # a later retry or quota repair superseded this attempt
             if l["label"] == "noise":
-                noise[arm] += 1
-            else:
-                found[arm]["known" if l["label"] != "valid" else "valid"].add((case, l["cluster"]))
+                if rep == "0":
+                    noise[arm] += 1
+                continue
+            # Exploratory answer keys were picked after seeing answers: a hit counts as a real problem, not a known defect.
+            kind = "valid" if l["label"] == "valid" else ("exploratory" if case in exploratory else "known")
+            found[(arm, rep)][kind].add((case, l["cluster"]))
 
-def problems(arm):
-    return found[arm]["known"] | found[arm]["valid"]
+def problems(arm, rep="0"):
+    k = found[(arm, rep)]
+    return k["known"] | k["valid"] | k["exploratory"]
 
 everyone = set().union(*(problems(a) for a in arms)) if arms else set()
 
-# Quota per token, per provider window, from blocks with fresh readings at both ends.
-blocks = [json.loads(l) for l in open(os.path.join(out, "blocks.jsonl"))]
-per_token = collections.defaultdict(list)  # (provider, window) -> [(pct used, tokens)]
+# Quota per token, per provider window. Overlapping blocks of one provider share the same quota window, so they
+# merge into one interval; an interval where any reading rose (a window reset) is skipped. Tokens include failed
+# attempts, which also consume quota.
+blocks = sorted((json.loads(l) for l in open(os.path.join(out, "blocks.jsonl"))), key=lambda b: b["startedAt"])
+intervals = []  # [provider, start, end, [blocks]]
 for b in blocks:
-    qs, qe = b.get("quotaStart") or {}, b.get("quotaEnd") or {}
-    if qs.get("state") != "fresh" or qe.get("state") != "fresh":
+    if not b.get("endedAt"):
         continue
-    ts = [r for r in done if r["provider"] == b["provider"] and b["startedAt"] <= r["startedAt"] <= b.get("endedAt", "~") and r.get("tokens")]
-    tok = sum(r["tokens"] for r in ts)
-    end = {w["id"]: w["percentRemaining"] for w in qe.get("windows", [])}
-    for w in qs.get("windows", []):
-        if w["id"] in end and tok:
-            per_token[(b["provider"], w["id"])].append((max(0, w["percentRemaining"] - end[w["id"]]), tok))
+    cur = next((i for i in intervals if i[0] == b["provider"] and b["startedAt"] <= i[2]), None)
+    if cur:
+        cur[2] = max(cur[2], b["endedAt"]); cur[3].append(b)
+    else:
+        intervals.append([b["provider"], b["startedAt"], b["endedAt"], [b]])
+measured_arms = set()
+per_token = collections.defaultdict(list)  # (provider, window) -> [(pct used, tokens)]
+for prov, start, end, bs in intervals:
+    first, last = bs[0].get("quotaStart") or {}, max(bs, key=lambda b: b["endedAt"]).get("quotaEnd") or {}
+    if first.get("state") != "fresh" or last.get("state") != "fresh":
+        continue
+    tok = sum(r["tokens"] for r in trials.values() if r["provider"] == prov and start <= r["startedAt"] <= end and r.get("tokens"))
+    endw = {w["id"]: w["percentRemaining"] for w in last.get("windows", [])}
+    for w in first.get("windows", []):
+        rose = any(
+            {x["id"]: x["percentRemaining"] for x in (b.get("quotaEnd") or {}).get("windows", [])}.get(w["id"], 0)
+            > {x["id"]: x["percentRemaining"] for x in (b.get("quotaStart") or {}).get("windows", [])}.get(w["id"], 101)
+            for b in bs)
+        if w["id"] in endw and tok and not rose:
+            measured_arms |= {r["arm"] for r in trials.values() if r["provider"] == prov and start <= r["startedAt"] <= end and r.get("tokens")}
+        if w["id"] in endw and tok and not rose and endw[w["id"]] <= w["percentRemaining"]:
+            per_token[(prov, w["id"])].append((w["percentRemaining"] - endw[w["id"]], tok))
 
 def pct_per_review(provider, tokens_per_review):
     res = {}
@@ -74,14 +97,16 @@ for arm in arms:
     others = set().union(*(problems(a) for a in arms if a != arm))
     q = pct_per_review(rs[0]["provider"], tpr) if tpr else {}
     qtxt = ", ".join(f"{w}: {v:.2f}%" for w, v in q.items() if v is not None) or "not measured"
-    print(f"| {arm} | {rs[0]['effort']} | {len(rs)} | {len(problems(arm))} ({len(found[arm]['known'])} known) | {len(problems(arm) - others)} | {noise[arm]} | {tpr/1e6:.2f}M | {cost:.2f} | {mins:.1f} | {qtxt} |" if tpr else f"| {arm} | {rs[0]['effort']} | {len(rs)} | {len(problems(arm))} | {len(problems(arm) - others)} | {noise[arm]} | unknown | - | {mins:.1f} | not measured |")
+    if q and arm not in measured_arms:
+        qtxt += " (extrapolated: no measured interval ran this model)"
+    print(f"| {arm} | {rs[0]['effort']} | {len(rs)} | {len(problems(arm))} ({len(found[(arm, "0")]['known'])} known) | {len(problems(arm) - others)} | {noise[arm]} | {tpr/1e6:.2f}M | {cost:.2f} | {mins:.1f} | {qtxt} |" if tpr else f"| {arm} | {rs[0]['effort']} | {len(rs)} | {len(problems(arm))} | {len(problems(arm) - others)} | {noise[arm]} | unknown | - | {mins:.1f} | not measured |")
 
 print("\n## What each model found (rep 0)\n")
 for arm in arms:
     ps = sorted(problems(arm))
     if not ps:
         continue
-    print(f"- **{arm}**: " + "; ".join(f"{c.removeprefix('prr-')} {k}{' (known)' if (c, k) in found[arm]['known'] else ''}" for c, k in ps))
+    print(f"- **{arm}**: " + "; ".join(f"{c.removeprefix('prr-')} {k}{' (known)' if (c, k) in found[(arm, '0')]['known'] else ' (exploratory key)' if (c, k) in found[(arm, '0')]['exploratory'] else ''}" for c, k in ps))
 
 print("\n## Problems found by no other model\n")
 for arm in arms:
@@ -90,19 +115,29 @@ for arm in arms:
     if only:
         print(f"- **{arm}**: " + "; ".join(f"{c.removeprefix('prr-')} {k}" for c, k in only))
 
-# Review sets: models run in parallel, so a set's runtime is its slowest member's median.
+# Review sets: members run in parallel, so per PR the set takes as long as its slowest member; the set's runtime
+# is the median over PRs every member reviewed (rep 0).
 import itertools, statistics
-cfg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "faceoff.json")))
 live = [a for a in arms if a in cfg["arms"] and not cfg["arms"][a].get("retired") and any(r["arm"] == a and r["rep"] == 0 for r in done)]
-med = {a: statistics.median(r["wallMs"] / 60000 for r in done if r["arm"] == a) for a in live}
+wall = {(r["arm"], r["case"]): r["wallMs"] / 60000 for r in done if r["rep"] == 0}
 tok = {a: statistics.mean(r["tokens"] for r in done if r["arm"] == a and r["rep"] == 0 and r.get("tokens")) for a in live}
+def set_minutes(s):
+    per = [max(wall[(a, c)] for a in s) for c in {c for (_, c) in wall} if all((a, c) in wall for a in s)]
+    return statistics.median(per) if per else float("nan")
 print(f"\n## Review sets (rep 0, {len(everyone)} problems; retired models excluded)\n")
-print("| set | problems | median minutes | tokens/review |\n|---|---|---|---|")
-rows = []
+print("| set | problems | median minutes (slowest member per PR) | tokens/review |\n|---|---|---|---|")
+rows = [(len(set().union(*(problems(a) for a in s))), s) for k in (1, 2, 3) for s in itertools.combinations(live, k)]
 for k in (1, 2, 3):
-    for s in itertools.combinations(live, k):
-        rows.append((len(set().union(*(problems(a) for a in s))), -max(med[a] for a in s), s))
-for k in (1, 2, 3):
-    best = sorted((r for r in rows if len(r[2]) == k), reverse=True)[:6]
-    for n, m, s in best:
-        print(f"| {' + '.join(s)} | {n} | {-m:.1f} | {sum(tok[a] for a in s)/1e6:.1f}M |")
+    best = sorted((r for r in rows if len(r[1]) == k), key=lambda r: (-r[0], set_minutes(r[1])))[:6]
+    for n, s in best:
+        print(f"| {' + '.join(s)} | {n} | {set_minutes(s):.1f} | {sum(tok[a] for a in s)/1e6:.1f}M |")
+
+# Repeat consistency on matched cases only: a case counts when both reps of that model completed it.
+print("\n## Repeat consistency (cases where both repetitions completed)\n")
+print("| model | matched cases | rep 0 | rep 1 | found both times | union |\n|---|---|---|---|---|---|")
+for a in arms:
+    both = {r["case"] for r in done if r["arm"] == a and r["rep"] == 0} & {r["case"] for r in done if r["arm"] == a and r["rep"] == 1}
+    if not both:
+        continue
+    p0 = {x for x in problems(a, "0") if x[0] in both}; p1 = {x for x in problems(a, "1") if x[0] in both}
+    print(f"| {a} | {len(both)} | {len(p0)} | {len(p1)} | {len(p0 & p1)} | {len(p0 | p1)} |")
