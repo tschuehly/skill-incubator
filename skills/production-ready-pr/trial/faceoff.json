@@ -527,6 +527,42 @@
       "proposed": "da6ea67d64",
       "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
       "defects": []
+    },
+    {
+      "id": "prr-me3313v2-blind",
+      "repo": "me",
+      "pr": "embabel/me#3313",
+      "base": "2c60e94a3a",
+      "proposed": "4e639aec41",
+      "provenance": "Blind (2026-11-10, revived; prr-me3313-blind holds the older head 06740b0591): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-me3714-blind",
+      "repo": "me",
+      "pr": "embabel/me#3714",
+      "base": "2c60e94a3a",
+      "proposed": "1c0f0c5191",
+      "provenance": "Blind (2026-11-10): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-me3132-blind",
+      "repo": "me",
+      "pr": "embabel/me#3132",
+      "base": "077201f8ab",
+      "proposed": "5a9bbdc3c6",
+      "provenance": "Blind (2026-11-10): open PR (the base of me#3134), head against its merge-base with isolation-1b-derived. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-me3134v2-blind",
+      "repo": "me",
+      "pr": "embabel/me#3134",
+      "base": "5a9bbdc3c6",
+      "proposed": "074d42352e",
+      "provenance": "Blind (2026-11-10; prr-me3134-blind holds the older head 3a0f192f4c): open stacked PR, head against me#3132's head 5a9bbdc3c6 (isolation-2-rebuild), so reviewers see only #3134's own layer. No answer key; scores valid findings only.",
+      "defects": []
     }
   ],
   "dropped": [
