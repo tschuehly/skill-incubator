@@ -105,20 +105,22 @@ gate is satisfied too.
 Load `model-orchestration` before delegation.
 
 **Reviewer roster (trial).** Every independent reviewer below launches with the `modelOverride` and
-`effort` from this table, not default routing, so the run compares Grok, Gemini, and Sol and spares
+`effort` from this table, not default routing, so the run compares Grok, Ember, and Sol and spares
 Codex quota. Astra is not on the roster.
 
 | Slot | Model | Effort |
 |---|---|---|
 | Round 0 judge | `xai-auth/grok-4.7` | `high` |
-| `medium` combined review; approved Copilot substitute | `antigravity-acp/gemini-4-argon` | `high` |
+| `medium` combined review: two reviewers in parallel | `openai-codex/gpt-6.1-sol` and `meta/muse-ember-1.0` | `high` |
+| Approved Copilot substitute | `meta/muse-ember-1.0` | `high` |
 | `high` Standards lens | `openai-codex/gpt-6.1-sol` | `medium` |
 | `high` Spec lens | `openai-codex/gpt-6.1-sol` | `high` |
 | `high` Simplicity lens | `xai-auth/grok-4.7` | `medium` |
-| Readiness judge A: invariants, data flow, abuse cases | `antigravity-acp/gemini-4-argon` | `high` |
+| Readiness judge A: invariants, data flow, abuse cases | `meta/muse-ember-1.0` | `high` |
 | Readiness judge B: differential, state-transition, compatibility probes | `xai-auth/grok-4.7` | `high` |
 | `critical` readiness judge C: falsify the merged findings | `openai-codex/gpt-6.1-sol` | `xhigh` |
 | Delta re-review of a lens | that lens's model and effort | |
+| Delta re-review of a `medium` finding | the combined reviewer that raised it; Sol when both did | `high` |
 | Delta re-review of an unflagged change | `openai-codex/gpt-6.1-sol` | `medium` |
 
 When a slot's model shares the author's family, or its launch blocks, use
@@ -132,7 +134,7 @@ findings later caught by another reviewer, and wall time.
 
 **Face-off (trial).** When the invocation includes `faceoff` (at `medium` and above), round 1's
 readiness review becomes a blind face-off. One frozen brief covering both judge A and judge B
-focuses runs on the same SHA on `xai-auth/grok-4.7`, `antigravity-acp/gemini-4-argon`, and
+focuses runs on the same SHA on `xai-auth/grok-4.7`, `meta/muse-ember-1.0`, and
 `openai-codex/gpt-6.1-sol`, all at `high`. `openai-codex/gpt-6-astra` at `high` joins as a baseline
 only when the human names it. These contestants replace judges A, B, and C for that round; the
 other lenses run as usual. Skip a contestant from the author's family. Keep every report hidden from
@@ -161,8 +163,10 @@ Then apply the approved review contract against one merge-base and head SHA:
 
 - `low`: the lead applies Standards, Spec, and deletion-first Simplicity lenses; Copilot remains the
   external review.
-- `medium`: dispatch the roster's combined reviewer for Standards, Spec, Simplicity, and
-  production-readiness falsification.
+- `medium`: dispatch both roster combined reviewers in parallel on one brief for Standards, Spec,
+  Simplicity, and production-readiness falsification, each blind to the other's report; merge
+  duplicate defect classes and record each reviewer's unique ones. The pair is round 1 only: a later
+  round sends each finding to the reviewer that raised it.
 - `high`: run five isolated lenses on the roster—Standards, Spec, Simplicity, and readiness
   judges A and B—keeping their findings hidden from one another until all finish. Load
   `code-review` and `ponytail-review` for their review contracts. For a stack, each lens reviews
