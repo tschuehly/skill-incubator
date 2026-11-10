@@ -89,3 +89,20 @@ for arm in arms:
     only = sorted(problems(arm) - others)
     if only:
         print(f"- **{arm}**: " + "; ".join(f"{c.removeprefix('prr-')} {k}" for c, k in only))
+
+# Review sets: models run in parallel, so a set's runtime is its slowest member's median.
+import itertools, statistics
+cfg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "faceoff.json")))
+live = [a for a in arms if a in cfg["arms"] and not cfg["arms"][a].get("retired") and any(r["arm"] == a and r["rep"] == 0 for r in done)]
+med = {a: statistics.median(r["wallMs"] / 60000 for r in done if r["arm"] == a) for a in live}
+tok = {a: statistics.mean(r["tokens"] for r in done if r["arm"] == a and r["rep"] == 0 and r.get("tokens")) for a in live}
+print(f"\n## Review sets (rep 0, {len(everyone)} problems; retired models excluded)\n")
+print("| set | problems | median minutes | tokens/review |\n|---|---|---|---|")
+rows = []
+for k in (1, 2, 3):
+    for s in itertools.combinations(live, k):
+        rows.append((len(set().union(*(problems(a) for a in s))), -max(med[a] for a in s), s))
+for k in (1, 2, 3):
+    best = sorted((r for r in rows if len(r[2]) == k), reverse=True)[:6]
+    for n, m, s in best:
+        print(f"| {' + '.join(s)} | {n} | {-m:.1f} | {sum(tok[a] for a in s)/1e6:.1f}M |")
