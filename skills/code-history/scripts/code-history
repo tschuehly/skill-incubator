@@ -101,7 +101,8 @@ def numstat(cmd, *args):
     """Changed lines per path from NUL-delimited --numstat output (paths unquoted)."""
     churn = Counter()
     for rec in (git(cmd, "--numstat", "-z", "--no-renames", *args) or "").split("\0"):
-        parts = rec.strip("\n").split("\t", 2)
+        # lstrip: -z keeps a trailing newline that belongs to the filename.
+        parts = rec.lstrip("\n").split("\t", 2)
         if len(parts) == 3:
             churn[parts[2]] += sum(int(n) for n in parts[:2] if n.isdigit())
     return churn

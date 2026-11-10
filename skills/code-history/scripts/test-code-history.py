@@ -141,4 +141,11 @@ assert re.search(r"^### #31 .*\n2 lines", out, re.M), "quoted non-ASCII path bla
 assert re.search(r"omitted 3 files: f\d\d\.txt, f\d\d\.txt, f\d\d\.txt$", out, re.M), "cap must name omitted files"
 assert re.search(r"^### #32 .*\n28 lines", out, re.M), out[:600]
 
+write("nl.txt\n", ["x"])                                                # filename ending in a newline
+commit("judy", "Add newline name (#33)")
+sh("git", "branch", "base3")
+write("nl.txt\n", ["X"])
+commit("ivan", "Edit newline name")
+assert re.search(r"^### #33 .*\n1 lines", cli("--diff", "base3"), re.M), "trailing-newline filename blamed zero lines"
+
 print("code-history self-check: PASS")
