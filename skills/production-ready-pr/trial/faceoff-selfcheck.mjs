@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { adjudicationStopBelow, appReadings, blockStopAfter, capStop, caseFingerprint, livePr, LOCK_BUSY, lockedArgv, readCasesFile, registerCase, trialCap, codexbarReading, floorSkip, isComplete, liveCaseId, mergeReadings, needsRelabel, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
+import { adjudicationStopBelow, appReadings, blockStopAfter, capStop, caseFingerprint, livePr, LOCK_BUSY, locked, lockedArgv, readCasesFile, registerCase, trialCap, codexbarReading, floorSkip, isComplete, liveCaseId, mergeReadings, needsRelabel, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
 
 const at = Date.parse("2026-11-09T13:00:00Z");
 const fresh = "2026-11-09T12:50:00Z", stale = "2026-11-09T10:00:00Z";
@@ -110,6 +110,11 @@ const hold = `require("fs").appendFileSync(${JSON.stringify(ran)}, "x"); setTime
 assert.deepEqual((await Promise.all([wrapped(hold), wrapped(hold)])).sort(), [0, LOCK_BUSY]);
 assert.equal(readFileSync(ran, "utf8"), "x", "exactly one runner ran");
 ok("two wrapped runners at once: one runs, the other exits 75");
+assert.equal(locked([], () => ({ status: 0 })), 0);
+assert.equal(locked([], () => ({ status: LOCK_BUSY })), LOCK_BUSY);
+assert.throws(() => locked([], () => ({ status: null, error: new Error("spawn python3 ENOENT") })), /ENOENT/);
+assert.throws(() => locked([], () => ({ status: 1 })), /exit 1/);
+ok("locked: python3 missing or a failed pass throws, never reads as done");
 // 11b. The runner node process holds the lock itself: SIGKILL on it leaves the lock free.
 const waitFor = (f) => new Promise((resolve) => { const t = setInterval(() => existsSync(f) && readFileSync(f, "utf8") && (clearInterval(t), resolve()), 20); });
 const pidFile = path.join(tmp, "pid");

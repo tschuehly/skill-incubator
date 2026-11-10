@@ -835,7 +835,12 @@ const LOCK_EXEC = [
 ].join("\n");
 // Arguments for `python3`: no shell, the command runs as the lock holder.
 export const lockedArgv = (lock, argv) => ["-c", LOCK_EXEC, lock, ...argv];
-const locked = (args) => spawnSync("python3", lockedArgv(LOCK, [process.execPath, fileURLToPath(import.meta.url), "--campaign", CAMPAIGN_ARG, ...args]), { stdio: "inherit" }).status;
+// Returns 0 or LOCK_BUSY; a launch failure or any other exit throws, so a broken pass is never read as "done".
+export function locked(args, run = spawnSync) {
+  const r = run("python3", lockedArgv(LOCK, [process.execPath, fileURLToPath(import.meta.url), "--campaign", CAMPAIGN_ARG, ...args]), { stdio: "inherit" });
+  if (r.status === 0 || r.status === LOCK_BUSY) return r.status;
+  throw new Error(`locked pass failed: ${r.error?.message ?? `exit ${r.status ?? r.signal}`}`);
+}
 
 // A campaign's cases: its cases file plus one `cases.d/<id>.json` per registered case. Registering writes
 // only its own file (temp file, then rename), so concurrent evals never read-modify-write a shared file.
