@@ -11,7 +11,7 @@ The plan establishes the intended outcome, acceptance basis, constraints, and in
 ## Prepare
 
 1. Resolve the first existing Markdown plan in the arguments, accepting an optional leading `@` or verb such as `Execute`. Treat the rest as constraints. Ask for the path when resolution is ambiguous.
-2. Read the plan, repository instructions, and authority they reference. Confirm the requested outcome still applies to current repository state.
+2. Read the plan, repository instructions, and authority they reference. Confirm the requested outcome still applies to current repository state. Before changing code in an area with history, run the `code-history` skill's `--paths` mode on it and cite the PR whenever the work reverses a decision it records.
 3. Identify consequential assumptions and the cheapest evidence that could falsify the proposed direction before expensive implementation.
 4. Divide the plan into phases. A phase is done when one reviewable outcome is committed and its acceptance evidence passes. Split independent outcomes before implementation.
 

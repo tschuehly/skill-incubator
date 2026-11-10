@@ -144,9 +144,16 @@ then merges duplicate classes. Credit each contestant with valid defect classes,
 noise findings, and wall time. Show that scoreboard to the human before fixing. Each contestant
 receives the delta re-review of its own material findings. Mark the ledger line `"faceoff": true`.
 
+**History context.** Once per run, before Round 0, save the output of
+`<skill-dir>/../code-history/scripts/code-history --diff <merge-base>` beside the lens reports.
+Round 0 and the Standards and Spec lenses (at `medium`, both combined reviewers) receive it as
+"design intent behind the touched code; flag only if the diff reverses a stated decision, cite the
+PR". A finding that rests only on history is tagged `history:` and cites the PR and the decision it
+reverses. The readiness judges, the Simplicity lens, and face-off contestants review without it.
+
 **Round 0: should this PR exist?** At every level, before any lens, draft push, or Copilot request,
-the roster's Round 0 judge receives the diff, specification, and repository rules and answers,
-each with cited evidence:
+the roster's Round 0 judge receives the diff, specification, repository rules, and history context
+and answers, each with cited evidence:
 
 - (a) Root cause or symptom? Name the layer where the meaning or behaviour is lost.
 - (b) Does it work on an unrelated domain or schema, with no fixed keyword lists or label tables?

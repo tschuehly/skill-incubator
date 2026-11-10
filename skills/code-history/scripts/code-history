@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""Design intent behind code: git blame/log -> GitHub PRs -> linked issues, as capped Markdown.
+
+  code-history --diff <base>                  # lines a change touches or removes, blamed at the merge-base
+  code-history --paths <path>... [--keywords K...]  # areas about to change, before a diff exists
+
+Read-only: git reads plus `gh api`/`gh search` GETs. Without gh auth or a GitHub remote it prints
+git-only output and says so.
+"""
+import argparse, json, os, re, shutil, subprocess, sys
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
+
+TOP_PRS, TOP_ISSUES, TOP_COMMITS = 5, 3, 15
+PR_BODY, ISSUE_BODY, COMMENT_LEN, COMMENTS = 600, 300, 300, 5
+CHAR_CAP = 16000  # about 4k tokens
+MAX_FILES, MASS_FILES = 30, 200
+BOT = re.compile(r"\[bot\]|dependabot|renovate|github-actions|maven-release-plugin", re.I)
+FORMAT = re.compile(r"^\W*(style|chore)?(\([^)]*\))?:?\s*(re)?format|spotless|ktlint|prettier|apply (code )?style", re.I)
+MAINTAINER = {"OWNER", "MEMBER", "COLLABORATOR"}
+ISSUE_REF = re.compile(r"(?<![\w/&])#(\d+)\b")
+IGNORE_REVS = False
+
+
+def run(*cmd, check=True):
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if check and r.returncode:
+        raise RuntimeError(f"{' '.join(cmd[:3])}: {r.stderr.strip()[:200]}")
+    return r.stdout if r.returncode == 0 else None
+
+
+def git(*a, check=True):
+    return run("git", *a, check=check)
+
+
+def clip(text, n):
+    # A fence cut mid-block would swallow the rest of the report.
+    text = re.sub(r"<!--.*?-->", "", text or "", flags=re.S).replace("```", "'''").replace("~~~", "'''")
+    text = re.sub(r"^\s*#+\s+", "", text, flags=re.M)  # body headings would break the report's outline
+    text = re.sub(r"\n\s*\n+", "\n", text).strip()
+    return text if len(text) <= n else text[:n].rstrip() + "…"
+
+
+def github_repo():
+    remotes = (git("remote", check=False) or "").split()
+    for name in sorted(remotes, key=lambda r: (r != "upstream", r != "origin")):
+        url = git("remote", "get-url", name, check=False) or ""
+        m = re.search(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", url.strip())
+        if m:
+            return f"{m[1]}/{m[2]}"
+    return None
+
+
+class GH:
+    def __init__(self, repo):
+        self.repo, self.notes = repo, []
+        if not repo:
+            self.ok = False
+            self.notes.append("No GitHub remote: git-only output; PR numbers come from commit subjects.")
+        elif not shutil.which("gh") or run("gh", "auth", "status", "--hostname", "github.com", check=False) is None:
+            self.ok = False
+            self.notes.append("gh is missing or not authenticated: git-only output; PR numbers come from commit subjects.")
+        else:
+            self.ok = True
+
+    def get(self, path):  # read-only REST GET; None on any failure
+        if not self.ok:
+            return None
+        out = run("gh", "api", "-X", "GET", f"repos/{self.repo}/{path}", check=False)
+        try:
+            return json.loads(out) if out else None
+        except json.JSONDecodeError:
+            return None
+
+    def search(self, kind, words):
+        if not self.ok:
+            return []
+        out = run("gh", "search", kind, "--repo", self.repo, "--limit", "5",
+                  "--json", "number,title,url,state", "--", *words, check=False)
+        return json.loads(out) if out else []
+
+
+def blame(rev, path, ranges=None):
+    """Count lines per commit; ranges are (start, end) 1-based inclusive."""
+    args = ["blame", "-w", "-C", "--line-porcelain"]
+    if IGNORE_REVS:
+        args += ["--ignore-revs-file", ".git-blame-ignore-revs"]
+    for s, e in ranges or []:
+        args += ["-L", f"{s},{e}"]
+    out = git(*args, rev, "--", path, check=False) or ""
+    return Counter(l[:40] for l in out.splitlines() if re.match(r"^[0-9a-f]{40} \d+ \d+", l))
+
+
+def diff_scope(base):
+    mb = git("merge-base", base, "HEAD").strip()
+    ranges, path = defaultdict(list), None
+    for line in git("diff", "-U0", "--no-color", "--no-renames", mb).splitlines():
+        if line.startswith("--- "):
+            path = None if line == "--- /dev/null" else line[6:]
+        elif line.startswith("@@") and path:
+            m = re.match(r"@@ -(\d+)(?:,(\d+))?", line)
+            start, count = int(m[1]), int(m[2] or 1)
+            # Pure insertion: blame the neighbouring lines that frame it.
+            ranges[path].append((start, start + count - 1) if count else (max(start, 1), start + 1))
+    owners, lines = Counter(), 0
+    for path, rs in list(ranges.items())[:MAX_FILES]:
+        length = len((git("show", f"{mb}:{path}", check=False) or "").splitlines())
+        rs = [(s, min(e, length)) for s, e in rs if s <= length]
+        if rs:
+            c = blame(mb, path, rs)
+            owners += c
+            lines += sum(c.values())
+    return mb[:9], list(ranges), owners, lines
+
+
+def paths_scope(paths):
+    files = (git("ls-files", "--", *paths) or "").split("\n")
+    files = [f for f in files if f][:MAX_FILES]
+    owners = Counter()
+    for f in files:
+        owners += blame("HEAD", f)
+    for sha in (git("log", "--format=%H", "-n", "200", "--", *paths) or "").split():
+        owners.setdefault(sha, 0)  # superseded commits still compete on recency
+    return files, owners, sum(owners.values())
+
+
+def commit_info(sha):
+    an, ae, date, ts, subj, body = git("show", "-s", "--format=%an%x00%ae%x00%cs%x00%ct%x00%s%x00%b", sha).split("\x00", 5)
+    nfiles = len([l for l in git("show", "--format=", "--name-only", sha).splitlines() if l])
+    return dict(sha=sha, author=an, email=ae, date=date, ts=int(ts), subject=subj, body=body, files=nfiles)
+
+
+def noise(c):
+    return bool(BOT.search(c["author"]) or BOT.search(c["email"]) or BOT.search(c["subject"])
+                or FORMAT.search(c["subject"]) or c["files"] > MASS_FILES)
+
+
+def rank(owners):
+    """Commits by owned lines, then recency, with bots and mass-format commits dropped."""
+    shas = sorted(owners, key=lambda s: -owners[s])[:TOP_COMMITS * 4]
+    infos = [commit_info(s) for s in shas if not s.startswith("0000000")]
+    infos = [dict(c, lines=owners[c["sha"]]) for c in infos if not noise(c)]
+    infos.sort(key=lambda c: (-c["lines"], -c["ts"]))
+    return infos[:TOP_COMMITS]
+
+
+def build(gh, commits, files, keywords):
+    def pr_of(c):
+        pulls = gh.get(f"commits/{c['sha']}/pulls")
+        if pulls:
+            merged = [p for p in pulls if p.get("merged_at")] or pulls
+            return merged[0]["number"]
+        m = re.search(r"\(#(\d+)\)\s*$", c["subject"])
+        return int(m[1]) if m else None
+
+    with ThreadPoolExecutor(8) as ex:
+        nums = list(ex.map(pr_of, commits))
+    prs, loose = {}, []
+    for c, n in zip(commits, nums):
+        if n is None:
+            loose.append(c)
+        else:
+            p = prs.setdefault(n, dict(number=n, lines=0, ts=0, commits=[]))
+            p["lines"] += c["lines"]
+            p["ts"] = max(p["ts"], c["ts"])
+            p["commits"].append(c)
+    top = sorted(prs.values(), key=lambda p: (-p["lines"], -p["ts"]))[:TOP_PRS]
+
+    issue_score = Counter()
+    for p in top:
+        d = gh.get(f"pulls/{p['number']}")
+        if d and d.get("user", {}).get("type") == "Bot":
+            p["bot"] = True
+            continue
+        p["detail"] = d
+        if d:
+            comments = gh.get(f"pulls/{p['number']}/comments?per_page=100") or []
+            p["comments"] = [x for x in comments if x.get("path") in files
+                             and x.get("author_association") in MAINTAINER
+                             and x.get("user", {}).get("type") != "Bot"][:COMMENTS]
+        text = " ".join([(d or {}).get("body") or ""] + [c["subject"] + " " + c["body"] for c in p["commits"]])
+        refs = {int(n) for n in ISSUE_REF.findall(text)} - {p["number"]}
+        p["refs"] = sorted(refs)
+        for n in refs:
+            issue_score[n] += p["lines"] + 1
+    top = [p for p in top if not p.get("bot")]
+    for c in loose:
+        for n in ISSUE_REF.findall(c["subject"] + " " + c["body"]):
+            issue_score[int(n)] += c["lines"] + 1
+
+    issues = []
+    for n, _ in issue_score.most_common(10):
+        if len(issues) == TOP_ISSUES or not gh.ok:
+            break
+        d = gh.get(f"issues/{n}")
+        if d and "pull_request" not in d and d.get("user", {}).get("type") != "Bot":
+            issues.append(d)
+    hits = [(k, h) for k in ("prs", "issues") for h in gh.search(k, keywords)] if keywords else []
+    return top, issues, loose, hits, [n for n, _ in issue_score.most_common(TOP_ISSUES)]
+
+
+def render(title, scope, gh, top, issues, loose, hits, issue_hints):
+    out = [f"# Code history: {title}", scope, ""]
+    out += [f"> {n}" for n in gh.notes] + ([""] if gh.notes else [])
+    out += ["Design intent behind the touched code. Flag only where a change reverses a stated decision, citing the PR.", ""]
+    out.append("## PRs")
+    for p in top:
+        d = p.get("detail") or {}
+        head = f"### #{p['number']} {d.get('title') or p['commits'][0]['subject']}"
+        meta = f"{p['lines']} lines · {d.get('merged_at', '')[:10] or p['commits'][0]['date']} · @{(d.get('user') or {}).get('login') or p['commits'][0]['author']}"
+        out += [head, f"{meta} · {d['html_url']}" if d.get("html_url") else meta]
+        if d.get("body"):
+            out.append(clip(d["body"], PR_BODY))
+        for x in p.get("comments", []):
+            out.append(f"- review @{x['user']['login']} ({x['path']}): {clip(x['body'], COMMENT_LEN)}")
+        if p.get("refs"):
+            out.append("Links: " + ", ".join(f"#{n}" for n in p["refs"][:8]))
+        out.append("")
+    if not top:
+        out += ["(none found)", ""]
+    if issues:
+        out.append("## Issues")
+        for i in issues:
+            out += [f"### #{i['number']} {i['title']} ({i.get('state', '')}) · {i['html_url']}", clip(i.get("body"), ISSUE_BODY), ""]
+    elif issue_hints and not gh.ok:
+        out += ["## Issues", "Referenced (unverified): " + ", ".join(f"#{n}" for n in issue_hints), ""]
+    if loose:
+        out.append("## Commits without a PR")
+        out += [f"- {c['sha'][:9]} {c['date']} {c['author']}: {c['subject']} ({c['lines']} lines)" for c in loose[:8]]
+        out.append("")
+    if hits:
+        out.append("## Keyword search")
+        out += [f"- {k[:-1]} #{h['number']} {h['title']} ({h.get('state', '')}) {h['url']}" for k, h in hits]
+    text = "\n".join(out).rstrip() + "\n"
+    return text if len(text) <= CHAR_CAP else text[:CHAR_CAP] + "\n…(truncated at ~4k tokens)\n"
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--diff", metavar="BASE")
+    mode.add_argument("--paths", nargs="+")
+    ap.add_argument("--keywords", nargs="+", default=[])
+    a = ap.parse_args()
+    global IGNORE_REVS
+    try:
+        # Work from the repository root so blame, diff and GitHub comment paths agree.
+        prefix = git("rev-parse", "--show-prefix").strip()
+        os.chdir(git("rev-parse", "--show-toplevel").strip())
+        a.paths = [os.path.normpath(prefix + p) for p in a.paths or []]
+        IGNORE_REVS = os.path.exists(".git-blame-ignore-revs")
+        gh = GH(github_repo())
+        if a.diff:
+            mb, files, owners, lines = diff_scope(a.diff)
+            title, scope = f"--diff {a.diff}", f"Merge-base {mb} · {len(files)} files · {lines} touched or removed lines blamed"
+        else:
+            files, owners, lines = paths_scope(a.paths)
+            title, scope = "--paths " + " ".join(a.paths), f"{len(files)} files · {lines} current lines blamed"
+        if gh.repo:
+            scope += f" · {gh.repo}"
+        top, issues, loose, hits, hints = build(gh, rank(owners), set(files), a.keywords)
+        sys.stdout.write(render(title, scope, gh, top, issues, loose, hits, hints))
+    except RuntimeError as e:
+        sys.exit(f"code-history: {e}")
+
+
+if __name__ == "__main__":
+    main()
