@@ -12,154 +12,513 @@
     "~/.pi/agent/npm/node_modules/@benvargas/pi-claude-code-use",
     "~/IdeaProjects/pi-workbench.installed/extensions/telemetry/index.ts"
   ],
-  "repos": { "me": "~/IdeaProjects/embabel/me", "embabel-agent": "~/IdeaProjects/embabel/embabel-agent" },
+  "repos": {
+    "me": "~/IdeaProjects/embabel/me",
+    "embabel-agent": "~/IdeaProjects/embabel/embabel-agent",
+    "embabel-agent-experimental": "~/IdeaProjects/embabel/embabel-agent-experimental",
+    "appliance": "~/IdeaProjects/embabel/appliance"
+  },
   "arms": {
-    "grok-low": { "model": "xai-auth/grok-4.7", "effort": "low", "provider": "xai", "estimateMinutes": 6 },
-    "grok-high": { "model": "xai-auth/grok-4.7", "effort": "high", "provider": "xai", "estimateMinutes": 25 },
-    "gemini-low": { "model": "antigravity-acp/gemini-4-argon", "effort": "low", "provider": "antigravity", "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)", "estimateMinutes": 5 },
-    "gemini-pro-high": { "model": "antigravity-acp/gemini-3.1-pro", "effort": "high", "provider": "antigravity", "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)", "estimateMinutes": 6 },
-    "gemini-flash-high": { "model": "antigravity-acp/gemini-3.8-flash", "effort": "high", "provider": "antigravity", "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)", "estimateMinutes": 4 },
-    "gemini-high": { "model": "antigravity-acp/gemini-4-argon", "effort": "high", "provider": "antigravity", "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)", "estimateMinutes": 5 },
-    "sol-low": { "model": "openai-codex/gpt-6.1-sol", "effort": "low", "provider": "codex", "estimateMinutes": 3 },
-    "sol-high": { "model": "openai-codex/gpt-6.1-sol", "effort": "high", "provider": "codex", "estimateMinutes": 6 },
-    "sol-medium": { "model": "openai-codex/gpt-6.1-sol", "effort": "medium", "provider": "codex", "estimateMinutes": 3 },
-    "luna-xhigh": { "model": "openai-codex/gpt-6-luna", "effort": "xhigh", "provider": "codex", "estimateMinutes": 10 },
-    "muse-medium": { "model": "meta/muse-spark-1.3", "effort": "medium", "provider": "meta", "estimateMinutes": 3 },
-    "ember-high": { "model": "meta/muse-ember-1.0", "effort": "high", "provider": "meta", "estimateMinutes": 4 },
-    "ember-low": { "model": "meta/muse-ember-1.0", "effort": "low", "provider": "meta", "estimateMinutes": 3 },
-    "astra-low": { "model": "openai-codex/gpt-6-astra", "effort": "low", "provider": "codex", "estimateMinutes": 4 },
-    "astra-high": { "model": "openai-codex/gpt-6-astra", "effort": "high", "provider": "codex", "estimateMinutes": 10 }
+    "grok-low": {
+      "model": "xai-auth/grok-4.7",
+      "effort": "low",
+      "provider": "xai",
+      "estimateMinutes": 6
+    },
+    "grok-high": {
+      "model": "xai-auth/grok-4.7",
+      "effort": "high",
+      "provider": "xai",
+      "estimateMinutes": 25
+    },
+    "gemini-low": {
+      "model": "antigravity-acp/gemini-4-argon",
+      "effort": "low",
+      "provider": "antigravity",
+      "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)",
+      "estimateMinutes": 5
+    },
+    "gemini-pro-high": {
+      "model": "antigravity-acp/gemini-3.1-pro",
+      "effort": "high",
+      "provider": "antigravity",
+      "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)",
+      "estimateMinutes": 6
+    },
+    "gemini-flash-high": {
+      "model": "antigravity-acp/gemini-3.8-flash",
+      "effort": "high",
+      "provider": "antigravity",
+      "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)",
+      "estimateMinutes": 4
+    },
+    "gemini-high": {
+      "model": "antigravity-acp/gemini-4-argon",
+      "effort": "high",
+      "provider": "antigravity",
+      "retired": "provider uninstalled 2026-11-09 (Antigravity ToS risk)",
+      "estimateMinutes": 5
+    },
+    "sol-low": {
+      "model": "openai-codex/gpt-6.1-sol",
+      "effort": "low",
+      "provider": "codex",
+      "estimateMinutes": 3
+    },
+    "sol-high": {
+      "model": "openai-codex/gpt-6.1-sol",
+      "effort": "high",
+      "provider": "codex",
+      "estimateMinutes": 6
+    },
+    "sol-medium": {
+      "model": "openai-codex/gpt-6.1-sol",
+      "effort": "medium",
+      "provider": "codex",
+      "estimateMinutes": 3
+    },
+    "luna-xhigh": {
+      "model": "openai-codex/gpt-6-luna",
+      "effort": "xhigh",
+      "provider": "codex",
+      "estimateMinutes": 10
+    },
+    "muse-medium": {
+      "model": "meta/muse-spark-1.3",
+      "effort": "medium",
+      "provider": "meta",
+      "estimateMinutes": 3
+    },
+    "ember-high": {
+      "model": "meta/muse-ember-1.0",
+      "effort": "high",
+      "provider": "meta",
+      "estimateMinutes": 4
+    },
+    "ember-low": {
+      "model": "meta/muse-ember-1.0",
+      "effort": "low",
+      "provider": "meta",
+      "estimateMinutes": 3
+    },
+    "astra-low": {
+      "model": "openai-codex/gpt-6-astra",
+      "effort": "low",
+      "provider": "codex",
+      "estimateMinutes": 4
+    },
+    "astra-high": {
+      "model": "openai-codex/gpt-6-astra",
+      "effort": "high",
+      "provider": "codex",
+      "estimateMinutes": 10
+    }
   },
   "providers": {
-    "xai": { "quota": "grok", "maxTrials": 60 },
-    "antigravity": { "quota": "agy", "maxTrials": 40 },
-    "codex": { "quota": "codex", "maxTrials": null },
-    "meta": { "quota": "meta", "maxTrials": 60, "stopOnFirstFailure": true, "admissionQuotaProvider": "meta" }
+    "xai": {
+      "quota": "grok",
+      "maxTrials": 60
+    },
+    "antigravity": {
+      "quota": "agy",
+      "maxTrials": 40
+    },
+    "codex": {
+      "quota": "codex",
+      "maxTrials": null
+    },
+    "meta": {
+      "quota": "meta",
+      "maxTrials": 60,
+      "stopOnFirstFailure": true,
+      "admissionQuotaProvider": "meta"
+    }
   },
-  "adjudicator": { "model": "anthropic/claude-opus-5-5", "effort": "medium", "quota": "claude", "concurrency": 3, "timeoutMinutes": 20, "estimateMinutes": 12 },
+  "adjudicator": {
+    "model": "anthropic/claude-opus-5-5",
+    "effort": "medium",
+    "quota": "claude",
+    "concurrency": 3,
+    "timeoutMinutes": 20,
+    "estimateMinutes": 12
+  },
   "prompt": "Task: review the proposed change in the last commit (`git show HEAD`, \"Proposed change\"; its parent is the code before the change) before it is merged. You may read any file and run local commands, but do not modify files and do not use the network.\n\nReview it as the production-readiness judge. Look for concrete correctness, security, data-loss, concurrency, compatibility, operability and missing-test failure modes, through two lenses:\n- Invariants, data flow and abuse cases: name the invariants the change must keep, follow data from every entry point, and try hostile, malformed and boundary inputs.\n- Differential, state-transition and compatibility probes: compare behaviour before and after the change and against sibling code that solves the same problem; walk every state transition, including concurrent and failure paths; check the callers, configurations and environments that relied on the old behaviour.\nWhen the code reads a grammar or walks a state machine, generate probes from that grammar or state machine (each construct, nesting and transition), not only from examples. Report each problem as a defect class: the violated rule, a minimal failing probe, and the entry points that reach it. Leave out style and naming.\n\nDone means: you have judged whether the change is safe to merge and listed every problem you would block the merge on.\nStop and ask only if: never; nobody can answer during this run.\nExpected output: your review as the final message. For each blocking problem give the file and line, why it is wrong, and how to show it fails. End the message with a fenced ```json block containing an array of the blocking problems, one object per problem: {\"file\": \"<path>\", \"line\": <line number in the proposed version>, \"problem\": \"<one sentence>\"}. Use an empty array if nothing blocks the merge.",
   "cases": [
     {
-      "id": "prr-me3313-blind", "repo": "me", "pr": "embabel/me#3313",
-      "base": "b811a6ad06", "proposed": "06740b0591",
+      "id": "prr-me3313-blind",
+      "repo": "me",
+      "pr": "embabel/me#3313",
+      "base": "b811a6ad06",
+      "proposed": "06740b0591",
       "provenance": "Blind: open PR without review; head against its merge-base with main. No answer key; scores valid findings only.",
       "defects": []
     },
     {
-      "id": "prr-me3134-blind", "repo": "me", "pr": "embabel/me#3134",
-      "base": "5a9bbdc3c6", "proposed": "3a0f192f4c",
+      "id": "prr-me3134-blind",
+      "repo": "me",
+      "pr": "embabel/me#3134",
+      "base": "5a9bbdc3c6",
+      "proposed": "3a0f192f4c",
       "provenance": "Blind: open stacked PR without review; head against its merge-base with isolation-2-rebuild (me#3132). No answer key; scores valid findings only.",
       "defects": []
     },
     {
-      "id": "prr-me3464-comment-scan", "repo": "me", "pr": "embabel/me#3464",
-      "base": "7c5b15bec4", "proposed": "352d9e0de0", "fix": "8e15b3ff56",
+      "id": "prr-me3464-comment-scan",
+      "repo": "me",
+      "pr": "embabel/me#3464",
+      "base": "7c5b15bec4",
+      "proposed": "352d9e0de0",
+      "fix": "8e15b3ff56",
       "provenance": "Copilot inline review https://github.com/embabel/me/pull/3464#discussion_r4466922997",
-      "defects": [{
-        "id": "auto-submitted-comment-strip-quadratic",
-        "description": "autoSubmittedKeyword strips RFC 5322 comments from the sender-controlled Auto-Submitted header by repeatedly removing only the innermost (...) pairs until none remain, so N nested comments cost N full-string passes: quadratic work per message (CPU denial of service at ingestion), called by both the Gmail and Exchange assemblers.",
-        "ranges": [["MachineMailHeaders.kt", 34, 39], ["MachineMailHeaders.kt", 67, 67]],
-        "present": ["assistant/src/main/kotlin/com/embabel/me/integration/email/MachineMailHeaders.kt", "while \\(COMMENT\\.containsMatchIn"]
-      }]
+      "defects": [
+        {
+          "id": "auto-submitted-comment-strip-quadratic",
+          "description": "autoSubmittedKeyword strips RFC 5322 comments from the sender-controlled Auto-Submitted header by repeatedly removing only the innermost (...) pairs until none remain, so N nested comments cost N full-string passes: quadratic work per message (CPU denial of service at ingestion), called by both the Gmail and Exchange assemblers.",
+          "ranges": [
+            [
+              "MachineMailHeaders.kt",
+              34,
+              39
+            ],
+            [
+              "MachineMailHeaders.kt",
+              67,
+              67
+            ]
+          ],
+          "present": [
+            "assistant/src/main/kotlin/com/embabel/me/integration/email/MachineMailHeaders.kt",
+            "while \\(COMMENT\\.containsMatchIn"
+          ]
+        }
+      ]
     },
     {
-      "id": "prr-me3319-inflated-amount", "repo": "me", "pr": "embabel/me#3319",
-      "base": "7c5b15bec4", "proposed": "5e794c68c9", "fix": "03c25906a9",
+      "id": "prr-me3319-inflated-amount",
+      "repo": "me",
+      "pr": "embabel/me#3319",
+      "base": "7c5b15bec4",
+      "proposed": "5e794c68c9",
+      "fix": "03c25906a9",
       "provenance": "Copilot inline review https://github.com/embabel/me/pull/3319#discussion_r4459423986",
-      "defects": [{
-        "id": "amount-check-accepts-inflated-values",
-        "description": "The honesty evals' amount checks match the rent's leading digits only (`1[,.\\s]?850(?!\\d|[.,]\\d*[1-9])`, and the same shape for 420), so an inflated amount such as EUR 1,850,000, 1 850 000 or EUR 420,000 still passes the check; the eval cannot catch a reply that states the wrong rent.",
-        "ranges": [["honesty-multipart-missing-field-one-reread.yml", 66, 74], ["honesty-multipart-null-field-no-reread.yml", 68, 72]],
-        "present": ["assistant/src/test/resources/test-prompts/honesty-multipart-missing-field-one-reread.yml", "850\\(\\?!\\\\d\\|\\[\\.,\\]\\\\d\\*\\[1-9\\]\\)"]
-      }]
+      "defects": [
+        {
+          "id": "amount-check-accepts-inflated-values",
+          "description": "The honesty evals' amount checks match the rent's leading digits only (`1[,.\\s]?850(?!\\d|[.,]\\d*[1-9])`, and the same shape for 420), so an inflated amount such as EUR 1,850,000, 1 850 000 or EUR 420,000 still passes the check; the eval cannot catch a reply that states the wrong rent.",
+          "ranges": [
+            [
+              "honesty-multipart-missing-field-one-reread.yml",
+              66,
+              74
+            ],
+            [
+              "honesty-multipart-null-field-no-reread.yml",
+              68,
+              72
+            ]
+          ],
+          "present": [
+            "assistant/src/test/resources/test-prompts/honesty-multipart-missing-field-one-reread.yml",
+            "850\\(\\?!\\\\d\\|\\[\\.,\\]\\\\d\\*\\[1-9\\]\\)"
+          ]
+        }
+      ]
     },
     {
-      "id": "prr-me3373-first-listener", "repo": "me", "pr": "embabel/me#3373",
-      "base": "b6987ddde4", "proposed": "6bc7d448d2", "fix": "e0af5611ff",
+      "id": "prr-me3373-first-listener",
+      "repo": "me",
+      "pr": "embabel/me#3373",
+      "base": "b6987ddde4",
+      "proposed": "6bc7d448d2",
+      "fix": "e0af5611ff",
       "provenance": "Copilot review summary https://github.com/embabel/me/pull/3373#pullrequestreview-5755886623",
-      "defects": [{
-        "id": "sweep-checks-only-first-listener",
-        "description": "kotlin_daemon_sweep inspects only the first PID lsof reports listening on a registration's port (`head -1`); when several processes listen on that port (different local addresses), an unrelated first listener makes the sweep delete the live daemon's registration and force an unnecessary restart.",
-        "ranges": [["kotlin-daemon.sh", 36, 47]],
-        "present": ["scripts/ci/kotlin-daemon.sh", "sTCP:LISTEN 2> /dev/null \\| head -1"]
-      }]
+      "defects": [
+        {
+          "id": "sweep-checks-only-first-listener",
+          "description": "kotlin_daemon_sweep inspects only the first PID lsof reports listening on a registration's port (`head -1`); when several processes listen on that port (different local addresses), an unrelated first listener makes the sweep delete the live daemon's registration and force an unnecessary restart.",
+          "ranges": [
+            [
+              "kotlin-daemon.sh",
+              36,
+              47
+            ]
+          ],
+          "present": [
+            "scripts/ci/kotlin-daemon.sh",
+            "sTCP:LISTEN 2> /dev/null \\| head -1"
+          ]
+        }
+      ]
     },
     {
-      "id": "prr-me3367-java-version-line", "repo": "me", "pr": "embabel/me#3367",
-      "base": "48fbd42b25", "proposed": "c8a0177465", "fix": "8a0346e827",
+      "id": "prr-me3367-java-version-line",
+      "repo": "me",
+      "pr": "embabel/me#3367",
+      "base": "48fbd42b25",
+      "proposed": "c8a0177465",
+      "fix": "8a0346e827",
       "provenance": "Not on GitHub: fixed before publication by a production-ready-pr lens; reviewer not recorded",
-      "defects": [{
-        "id": "java-version-read-from-line-one",
-        "description": "toolchain_found reads Java's version only from line 1 of `java -version` output; when JAVA_TOOL_OPTIONS or _JAVA_OPTIONS is set, the JVM prints a 'Picked up ...' notice first, so the found version is empty and the gate/pre-push guard stops with a false toolchain mismatch.",
-        "ranges": [["toolchain.sh", 23, 28]],
-        "present": ["scripts/ci/toolchain.sh", "sed -nE '1s/\\.\\*version"]
-      }]
+      "defects": [
+        {
+          "id": "java-version-read-from-line-one",
+          "description": "toolchain_found reads Java's version only from line 1 of `java -version` output; when JAVA_TOOL_OPTIONS or _JAVA_OPTIONS is set, the JVM prints a 'Picked up ...' notice first, so the found version is empty and the gate/pre-push guard stops with a false toolchain mismatch.",
+          "ranges": [
+            [
+              "toolchain.sh",
+              23,
+              28
+            ]
+          ],
+          "present": [
+            "scripts/ci/toolchain.sh",
+            "sed -nE '1s/\\.\\*version"
+          ]
+        }
+      ]
     },
     {
-      "id": "prr-me3372-key-in-xtrace", "repo": "me", "pr": "embabel/me#3372", "exploratory": true,
-      "base": "c76b6cdd70", "proposed": "63385a75ad", "fix": "6fa42975af",
+      "id": "prr-me3372-key-in-xtrace",
+      "repo": "me",
+      "pr": "embabel/me#3372",
+      "exploratory": true,
+      "base": "c76b6cdd70",
+      "proposed": "63385a75ad",
+      "fix": "6fa42975af",
       "provenance": "Answer key replaced after stage 0. The original defect (key printed under bash -x) copied the existing OpenAI loader, and its fix left that loader unguarded, so it was hardening. This defect was found by 4 of 6 stage-0 arms and confirmed by the blinded adjudicator; the PR never fixed it, so recall here favours those arms.",
-      "defects": [{
-        "id": "env-precedence-order",
-        "description": "The new header documents that me/.env (loaded last) wins for each key, but start runs load_anthropic_key and ensure_api_key before load_env_file: a key that exists only in me/.env makes ensure_api_key fail, and an empty ANTHROPIC_API_KEY= line in .env overwrites the keychain value.",
-        "ranges": [["restart-app.sh", 15, 15], ["restart-app.sh", 211, 213]],
-        "present": ["scripts/restart-app.sh", "^  ensure_api_key \\|\\| return 1\\n  load_env_file \\|\\| return 1"]
-      }]
+      "defects": [
+        {
+          "id": "env-precedence-order",
+          "description": "The new header documents that me/.env (loaded last) wins for each key, but start runs load_anthropic_key and ensure_api_key before load_env_file: a key that exists only in me/.env makes ensure_api_key fail, and an empty ANTHROPIC_API_KEY= line in .env overwrites the keychain value.",
+          "ranges": [
+            [
+              "restart-app.sh",
+              15,
+              15
+            ],
+            [
+              "restart-app.sh",
+              211,
+              213
+            ]
+          ],
+          "present": [
+            "scripts/restart-app.sh",
+            "^  ensure_api_key \\|\\| return 1\\n  load_env_file \\|\\| return 1"
+          ]
+        }
+      ]
     },
     {
-      "id": "prr-me3318-role-cache-policy", "repo": "me", "pr": "embabel/me#3318",
-      "base": "c76b6cdd70", "proposed": "828b00337f", "fix": "6c4538861e",
+      "id": "prr-me3318-role-cache-policy",
+      "repo": "me",
+      "pr": "embabel/me#3318",
+      "base": "c76b6cdd70",
+      "proposed": "828b00337f",
+      "fix": "6c4538861e",
       "provenance": "Not on GitHub: fixed before publication by a production-ready-pr lens; reviewer not recorded",
-      "defects": [{
-        "id": "role-cache-policy-overwritten",
-        "description": "withChatPromptCaching checks only the incoming options for an existing Anthropic cache policy; a cache policy that the chat model's role configures (tools-only, off, custom TTL) is applied later when the framework merges role options under these, so the forced CONVERSATION_HISTORY policy overrides the role's own policy.",
-        "ranges": [["ChatPromptCaching.kt", 18, 40]],
-        "present": ["assistant/src/main/kotlin/com/embabel/world/llm/ChatPromptCaching.kt", "if \\(!enabled \\|\\| getAnthropicCaching\\(\\) != null\\) return this"]
-      }]
+      "defects": [
+        {
+          "id": "role-cache-policy-overwritten",
+          "description": "withChatPromptCaching checks only the incoming options for an existing Anthropic cache policy; a cache policy that the chat model's role configures (tools-only, off, custom TTL) is applied later when the framework merges role options under these, so the forced CONVERSATION_HISTORY policy overrides the role's own policy.",
+          "ranges": [
+            [
+              "ChatPromptCaching.kt",
+              18,
+              40
+            ]
+          ],
+          "present": [
+            "assistant/src/main/kotlin/com/embabel/world/llm/ChatPromptCaching.kt",
+            "if \\(!enabled \\|\\| getAnthropicCaching\\(\\) != null\\) return this"
+          ]
+        }
+      ]
     },
     {
-      "id": "prr-me3368-industry-catalog", "repo": "me", "pr": "embabel/me#3368",
-      "base": "48fbd42b25", "proposed": "58c40375ad", "fix": "c26646faf8",
+      "id": "prr-me3368-industry-catalog",
+      "repo": "me",
+      "pr": "embabel/me#3368",
+      "base": "48fbd42b25",
+      "proposed": "58c40375ad",
+      "fix": "c26646faf8",
       "provenance": "Not on GitHub: fixed before publication by a production-ready-pr lens; reviewer not recorded",
-      "defects": [{
-        "id": "industry-catalog-bypasses-generation-publish",
-        "description": "The change makes the schema, segment, owner-data and population caches publish through a generation check so a fetch racing a lifecycle event or eviction is not kept, but the industry catalog cache (cachedCatalog/industryCatalog) still stores unconditionally: a fetch in flight during an event keeps the old vocabulary for the process lifetime, evict(worldId) never clears it, and a failed fetch caches the 'unavailable' fallback forever.",
-        "ranges": [["KgSchemaService.kt", 88, 92], ["KgSchemaService.kt", 160, 170], ["KgSchemaService.kt", 605, 625]],
-        "present": ["assistant/src/main/kotlin/com/embabel/world/codemode/neural/KgSchemaService.kt", "private var cachedCatalog"]
-      }]
+      "defects": [
+        {
+          "id": "industry-catalog-bypasses-generation-publish",
+          "description": "The change makes the schema, segment, owner-data and population caches publish through a generation check so a fetch racing a lifecycle event or eviction is not kept, but the industry catalog cache (cachedCatalog/industryCatalog) still stores unconditionally: a fetch in flight during an event keeps the old vocabulary for the process lifetime, evict(worldId) never clears it, and a failed fetch caches the 'unavailable' fallback forever.",
+          "ranges": [
+            [
+              "KgSchemaService.kt",
+              88,
+              92
+            ],
+            [
+              "KgSchemaService.kt",
+              160,
+              170
+            ],
+            [
+              "KgSchemaService.kt",
+              605,
+              625
+            ]
+          ],
+          "present": [
+            "assistant/src/main/kotlin/com/embabel/world/codemode/neural/KgSchemaService.kt",
+            "private var cachedCatalog"
+          ]
+        }
+      ]
     },
     {
-      "id": "prr-agent2203-gateway-catalog", "repo": "embabel-agent", "pr": "embabel/embabel-agent#2203",
-      "base": "e89088f43f", "proposed": "8b2644bd5e", "fix": "c13e9fda06",
+      "id": "prr-agent2203-gateway-catalog",
+      "repo": "embabel-agent",
+      "pr": "embabel/embabel-agent#2203",
+      "base": "e89088f43f",
+      "proposed": "8b2644bd5e",
+      "fix": "c13e9fda06",
       "provenance": "Not on GitHub: commit message 'Review findings on the catalog-aware BYOK builder' (pre-publication lens); reviewer not recorded",
       "defects": [
         {
           "id": "gateway-routed-to-responses",
           "description": "llm() applies the OpenAI catalog to any endpoint whose provider is OpenAI, including a custom-base-URL gateway that speaks only Chat Completions; catalog models such as GPT-5.6/GPT-6 are then sent to /v1/responses and fail with 404, breaking a previously working BYOK gateway.",
-          "ranges": [["OpenAiCompatibleModelFactory.kt", 620, 660]],
-          "present": ["embabel-agent-openai/src/main/kotlin/com/embabel/agent/openai/OpenAiCompatibleModelFactory.kt", "val definition = catalogDefinitionFor\\(provider, model\\)$"]
+          "ranges": [
+            [
+              "OpenAiCompatibleModelFactory.kt",
+              620,
+              660
+            ]
+          ],
+          "present": [
+            "embabel-agent-openai/src/main/kotlin/com/embabel/agent/openai/OpenAiCompatibleModelFactory.kt",
+            "val definition = catalogDefinitionFor\\(provider, model\\)$"
+          ]
         },
         {
           "id": "warn-once-set-unbounded",
           "description": "The warn-once set in CapabilityAwareOpenAiOptionsConverter is keyed by model plus the dropped parameter values, so a caller that varies e.g. temperature grows the set without bound (memory leak) and keeps warning instead of warning once.",
-          "ranges": [["converters.kt", 120, 126], ["converters.kt", 182, 190]],
-          "present": ["embabel-agent-openai/src/main/kotlin/com/embabel/agent/openai/converters.kt", "warned\\.add\\(\"\\$model\\|\\$dropped\"\\)"]
+          "ranges": [
+            [
+              "converters.kt",
+              120,
+              126
+            ],
+            [
+              "converters.kt",
+              182,
+              190
+            ]
+          ],
+          "present": [
+            "embabel-agent-openai/src/main/kotlin/com/embabel/agent/openai/converters.kt",
+            "warned\\.add\\(\"\\$model\\|\\$dropped\"\\)"
+          ]
         }
       ]
     },
     {
-      "id": "prr-agent2209-bedrock-cache-rates", "repo": "embabel-agent", "pr": "embabel/embabel-agent#2209",
-      "base": "159c239a78", "proposed": "4026062899", "fix": "c10723358b",
+      "id": "prr-agent2209-bedrock-cache-rates",
+      "repo": "embabel-agent",
+      "pr": "embabel/embabel-agent#2209",
+      "base": "159c239a78",
+      "proposed": "4026062899",
+      "fix": "c10723358b",
       "provenance": "Not on GitHub: fixed before publication by a production-ready-pr lens; reviewer not recorded",
-      "defects": [{
-        "id": "bedrock-drops-cache-rates",
-        "description": "BedrockModelsConfig rebuilds each model's PerTokenPricingModel from only the input and output rates, dropping the configured cache-read and cache-write rates the change introduces, so Bedrock cache tokens are priced at the ordinary input rate and cost/budget figures are wrong.",
-        "ranges": [["BedrockModelsConfig.kt", 186, 196]],
-        "present": ["embabel-agent-autoconfigure/models/embabel-agent-bedrock-autoconfigure/src/main/kotlin/com/embabel/agent/config/models/bedrock/BedrockModelsConfig.kt", "PerTokenPricingModel\\("]
-      }]
+      "defects": [
+        {
+          "id": "bedrock-drops-cache-rates",
+          "description": "BedrockModelsConfig rebuilds each model's PerTokenPricingModel from only the input and output rates, dropping the configured cache-read and cache-write rates the change introduces, so Bedrock cache tokens are priced at the ordinary input rate and cost/budget figures are wrong.",
+          "ranges": [
+            [
+              "BedrockModelsConfig.kt",
+              186,
+              196
+            ]
+          ],
+          "present": [
+            "embabel-agent-autoconfigure/models/embabel-agent-bedrock-autoconfigure/src/main/kotlin/com/embabel/agent/config/models/bedrock/BedrockModelsConfig.kt",
+            "PerTokenPricingModel\\("
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prr-me2931-blind",
+      "repo": "me",
+      "pr": "embabel/me#2931",
+      "base": "d210e6ad76",
+      "proposed": "0b91d54789",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-me3320-blind",
+      "repo": "me",
+      "pr": "embabel/me#3320",
+      "base": "bfb9d367f6",
+      "proposed": "35ce8af1bc",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-me3120-blind",
+      "repo": "me",
+      "pr": "embabel/me#3120",
+      "base": "7c5b15bec4",
+      "proposed": "8a8e0dc31f",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-agent2234-blind",
+      "repo": "embabel-agent",
+      "pr": "embabel/embabel-agent#2234",
+      "base": "de25be155a",
+      "proposed": "b3a174f91e",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-agent2235-blind",
+      "repo": "embabel-agent",
+      "pr": "embabel/embabel-agent#2235",
+      "base": "de25be155a",
+      "proposed": "c945dfe8c6",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-agent2202-blind",
+      "repo": "embabel-agent",
+      "pr": "embabel/embabel-agent#2202",
+      "base": "0e006b44a7",
+      "proposed": "e89088f43f",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-experimental50-blind",
+      "repo": "embabel-agent-experimental",
+      "pr": "embabel/embabel-agent-experimental#50",
+      "base": "ce97673e74",
+      "proposed": "c5f6373db1",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
+    },
+    {
+      "id": "prr-appliance196-blind",
+      "repo": "appliance",
+      "pr": "embabel-worlds/appliance#196",
+      "base": "00bebf2665",
+      "proposed": "da6ea67d64",
+      "provenance": "Blind (2026-11-10 panel backfill): open PR, head against its merge-base with main. No answer key; scores valid findings only.",
+      "defects": []
     }
   ],
   "dropped": [
-    { "pr": "embabel/me#3313", "reason": "single commit, never reviewed: no fix commit to replay" }
+    {
+      "pr": "embabel/me#3313",
+      "reason": "single commit, never reviewed: no fix commit to replay"
+    }
   ]
 }
