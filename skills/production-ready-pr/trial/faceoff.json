@@ -101,6 +101,9 @@
       "provider": "meta",
       "estimateMinutes": 3
     },
+    "terra-high": {"model": "openai-codex/gpt-6.1-terra", "effort": "high", "provider": "codex", "estimateMinutes": 8},
+    "terra-low": {"model": "openai-codex/gpt-6.1-terra", "effort": "low", "provider": "codex", "estimateMinutes": 4},
+    "fable-high": {"model": "anthropic/claude-fable-5-2", "effort": "high", "provider": "claude", "estimateMinutes": 8},
     "astra-low": {
       "model": "openai-codex/gpt-6-astra",
       "effort": "low",
@@ -132,6 +135,10 @@
       "maxTrials": 80,
       "stopOnFirstFailure": true,
       "admissionQuotaProvider": "meta"
+    },
+    "claude": {
+      "quota": "claude",
+      "maxTrials": 30
     }
   },
   "campaigns": {
