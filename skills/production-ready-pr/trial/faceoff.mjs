@@ -20,7 +20,7 @@
 // trial, adds its own, re-adjudicates only new findings, and rewrites the same report over everything run.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +42,7 @@ const argv = process.argv.slice(2);
 const campaignAt = argv.indexOf("--campaign");
 const CAMPAIGN_ARG = campaignAt >= 0 ? argv.splice(campaignAt, 2)[1]?.replace(/^(.*\.json)$/, (f) => path.resolve(f)) : undefined;
 const CAMP = resolveCampaign(CFG, CAMPAIGN_ARG);
-const readCases = () => (existsSync(CAMP.casesFile) ? JSON.parse(readFileSync(CAMP.casesFile, "utf8")) : []);
+const readCases = () => readCasesFile(CAMP.casesFile);
 if (CAMP) Object.assign(CFG, { id: CAMP.id ?? CFG.id, cases: readCases(), repetitions: CAMP.repetitions, minFreeDiskGB: CAMP.minFreeDiskGB });
 const CASES_DIR = CAMP?.casesDir ?? path.join(EVAL_HOME, "cases");
 const PROJECTS = path.join(HOME, "IdeaProjects");
@@ -813,65 +813,32 @@ function repairQuotaTrials() {
 // ---------- eval campaign ----------
 export const liveCaseId = (repo, pr, sha) => `live-${repo}-${pr}-${String(sha).slice(0, 8)}`;
 
-// One runner per campaign: mkdir is atomic. A lock whose PID is dead is stale and taken over; a lock
-// without a PID file is a runner between mkdir and write, stale only after a minute.
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
-export function lockHolder(dir) {
-  if (!existsSync(dir)) return null;
-  let pid = 0;
-  try { pid = Number(readFileSync(path.join(dir, "pid"), "utf8")); } catch {}
-  if (pid) return alive(pid) ? pid : null;
-  try { return now() - statSync(dir).mtimeMs < 60_000 ? -1 : null; } catch { return null; }
-}
-// Taking over a stale lock happens under a second mkdir lock (`<dir>.reclaim`), which re-checks the holder:
-// a contender that saw the same dead holder cannot then delete the lock the first one just took.
-// `beforeReclaim` is a test seam for that interleaving.
-export function acquireLock(dir, pid = process.pid, beforeReclaim = () => {}) {
-  const take = () => {
-    try { mkdirSync(dir); } catch (e) { if (e.code === "EEXIST") return false; throw e; }
-    writeFileSync(path.join(dir, "pid"), String(pid));
-    return true;
-  };
-  if (take()) return true;
-  if (lockHolder(dir)) return false;
-  beforeReclaim();
-  const guard = `${dir}.reclaim`;
-  try { mkdirSync(guard); } catch (e) {
-    if (e.code !== "EEXIST") throw e;
-    // ponytail: a guard left by a reclaimer that died is cleared after a minute by mtime; reclaiming takes milliseconds.
-    try { if (now() - statSync(guard).mtimeMs > 60_000) rmSync(guard, { recursive: true, force: true }); } catch {}
-    return false;
-  }
-  try {
-    if (lockHolder(dir)) return false;
-    rmSync(dir, { recursive: true, force: true });
-    return take();
-  } finally { rmSync(guard, { recursive: true, force: true }); }
-}
-export function releaseLock(dir, pid = process.pid) {
-  try { if (Number(readFileSync(path.join(dir, "pid"), "utf8")) === pid) rmSync(dir, { recursive: true, force: true }); } catch {}
-}
+// One runner per campaign: a kernel advisory lock on `runner.lock`, held by lockf for its command's
+// lifetime and released by the kernel when the holder dies, so nothing is ever stale. -k keeps the file:
+// unlinking it would let a waiter lock the old inode while a newcomer locks a new one.
+// ponytail: macOS /usr/bin/lockf; use flock(1) on Linux if this ever runs there.
+export const LOCK_BUSY = 75;
+export const lockedArgv = (lock, argv) => ["-k", "-t", "0", lock, ...argv];
+const locked = (args) => spawnSync("/usr/bin/lockf", lockedArgv(LOCK, [process.execPath, fileURLToPath(import.meta.url), "--campaign", CAMPAIGN_ARG, ...args]), { stdio: "inherit" }).status;
 
-// Adds a case to a campaign's cases file. The read-modify-write runs under a mkdir lock, so two evals
-// registering at once both land.
+// A campaign's cases: its cases file plus one `cases.d/<id>.json` per registered case. Registering writes
+// only its own file (temp file, then rename), so concurrent evals never read-modify-write a shared file.
+function casesDirOf(file) { return path.join(path.dirname(file), "cases.d"); }
+export function readCasesFile(file) {
+  const cases = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
+  const dir = casesDirOf(file), ids = new Set(cases.map((c) => c.id));
+  const extra = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8"))) : [];
+  extra.sort((a, b) => String(a.registeredAt ?? "").localeCompare(String(b.registeredAt ?? "")) || a.id.localeCompare(b.id));
+  return [...cases, ...extra.filter((c) => !ids.has(c.id))];
+}
 export function registerCase(file, c) {
-  const lock = `${file}.lock`;
-  mkdirSync(path.dirname(file), { recursive: true });
-  for (let i = 0; ; i++) {
-    try { mkdirSync(lock); break; } catch (e) { if (e.code !== "EEXIST") throw e; }
-    // ponytail: a lock left by a registrar that died is cleared after a minute by mtime.
-    try { if (now() - statSync(lock).mtimeMs > 60_000) rmSync(lock, { recursive: true, force: true }); } catch {}
-    if (i >= 400) throw new Error(`cases file lock ${lock} busy`);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-  }
-  try {
-    const cases = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
-    if (cases.some((x) => x.id === c.id)) return false;
-    const tmp = uniqueTmp(file);
-    writeFileSync(tmp, JSON.stringify([...cases, c], null, 2) + "\n");
-    renameSync(tmp, file);
-    return true;
-  } finally { rmSync(lock, { recursive: true, force: true }); }
+  const dest = path.join(casesDirOf(file), `${c.id}.json`);
+  if (existsSync(dest) || readCasesFile(file).some((x) => x.id === c.id)) return false;
+  mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = uniqueTmp(dest);
+  writeFileSync(tmp, JSON.stringify(c, null, 2) + "\n");
+  renameSync(tmp, dest);
+  return true;
 }
 
 // A PR's head and merge-base from `gh pr view` and git, every value passed as an argument (no shell).
@@ -913,8 +880,8 @@ function evalCase() {
   buildCase(c);
   registerCase(CAMP.casesFile, c);
   console.log(`case ${c.id}`);
-  const holder = lockHolder(LOCK);
-  if (holder) { console.log(`runner already active (pid ${holder}); case registered`); return; }
+  // Always launch: a runner that finds the lock held logs "runner already active" and exits; the holder's
+  // runner looks for pending cases again after its pass releases the lock.
   mkdirSync(path.join(OUT, "logs"), { recursive: true });
   const log = path.join(OUT, "logs", `runner-${iso().replace(/[:.]/g, "-")}.log`);
   const fd = openSync(log, "a");
@@ -923,25 +890,20 @@ function evalCase() {
   console.log(`runner pid ${child.pid}\nlog ${log}`);
 }
 
-// Runs each newly registered case once, until none is pending. Retries are the nightly's job.
+// Runs each newly registered case (no trial on the selected arms yet) once, until none is pending.
+// Retries are the nightly's job. Each pass is a `run` child under the lock; the next look for pending
+// cases comes after that child exits, so a case whose eval found the lock held is picked up here.
 async function runner() {
+  if (!CAMP) { console.error("runner needs --campaign"); process.exit(2); }
   mkdirSync(OUT, { recursive: true });
-  if (!acquireLock(LOCK)) { console.log(`runner already active (pid ${lockHolder(LOCK)}); exiting`); return; }
-  process.on("exit", () => releaseLock(LOCK));
   const seen = new Set();
-  const pending = () => { CFG.cases = readCases(); return CFG.cases.filter((c) => !seen.has(c.id)); };
   for (;;) {
-    let todo = pending();
-    if (!todo.length) {
-      // A case registered after the last look but before the release would wait for the nightly; look once more.
-      releaseLock(LOCK);
-      todo = pending();
-      if (!todo.length || !acquireLock(LOCK)) break;
-    }
+    const tried = new Set(readJsonl(TRIALS).filter((r) => ARMS.includes(r.arm)).map((r) => r.case));
+    const todo = readCases().filter((c) => !seen.has(c.id) && !tried.has(c.id));
+    if (!todo.length) break;
     for (const c of todo) seen.add(c.id);
-    CASES = todo;
     console.log(`${local(now())} runner: ${todo.map((c) => c.id).join(", ")}`);
-    await run();
+    if (locked(["run", "--no-adjudicate", ...rest, "--cases", todo.map((c) => c.id).join(",")]) === LOCK_BUSY) { console.log("runner already active; case registered, exiting"); return; }
   }
   console.log(`${local(now())} runner: no case pending; lock released`);
 }
@@ -950,9 +912,8 @@ async function runner() {
 async function nightly() {
   if (!CAMP) { console.error("nightly needs --campaign"); process.exit(2); }
   mkdirSync(OUT, { recursive: true });
-  if (acquireLock(LOCK)) {
-    try { rest.push("--no-adjudicate"); await run(); } finally { rest.pop(); releaseLock(LOCK); }
-  } else console.log(`runner active (pid ${lockHolder(LOCK)}): retries wait for tomorrow`);
+  if (locked(["run", "--no-adjudicate", ...rest]) === LOCK_BUSY) console.log("runner active: retries wait for tomorrow");
+  else await runner(); // cases registered while the retry pass held the lock
   mkdirSync(path.join(OUT, "adjudications"), { recursive: true });
   await adjudicateAll(trialEnv());
   writeReport();

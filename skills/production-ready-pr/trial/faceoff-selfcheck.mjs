@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { acquireLock, adjudicationStopBelow, appReadings, blockStopAfter, capStop, caseFingerprint, livePr, registerCase, trialCap, codexbarReading, floorSkip, isComplete, liveCaseId, lockHolder, mergeReadings, needsRelabel, releaseLock, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
+import { adjudicationStopBelow, appReadings, blockStopAfter, capStop, caseFingerprint, livePr, LOCK_BUSY, lockedArgv, readCasesFile, registerCase, trialCap, codexbarReading, floorSkip, isComplete, liveCaseId, mergeReadings, needsRelabel, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
 
 const at = Date.parse("2026-11-09T13:00:00Z");
 const fresh = "2026-11-09T12:50:00Z", stale = "2026-11-09T10:00:00Z";
@@ -97,31 +97,29 @@ assert.equal(floorSkip(t, low, 40), null);
 assert.equal(floorSkip(t, { ...low, state: "stale" }, 50), null);
 assert.equal(floorSkip(t, low, undefined), null, "a provider without a floor never skips");
 ok("floor skip => skipped-quota record, not complete");
-// 11. The lock refuses a second runner and takes over a stale one.
+// 11. Two lockf-wrapped runners started at once: exactly one runs, the other exits 75.
 const tmp = mkdtempSync(path.join(process.env.PI_TMP ?? tmpdir(), "faceoff-lock-"));
 const lock = path.join(tmp, "runner.lock");
-assert.equal(acquireLock(lock), true);
-assert.equal(acquireLock(lock, 999999), false, "live holder refuses a second runner");
-assert.equal(lockHolder(lock), process.pid);
-const dead = spawnSync("true").pid;
-writeFileSync(path.join(lock, "pid"), String(dead));
-assert.equal(lockHolder(lock), null);
-assert.equal(acquireLock(lock, dead + 1), true, "stale lock taken over");
-assert.equal(Number(readFileSync(path.join(lock, "pid"), "utf8")), dead + 1);
-releaseLock(lock, 1); assert.equal(lockHolder(lock), null, "dead taker's lock is stale");
-ok("lock refuses a second runner, takes over a stale one");
-// 11b. Two contenders see the same dead holder: A reclaims and takes the lock while B is between its check
-// and its reclaim. B must not delete A's new lock.
-writeFileSync(path.join(lock, "pid"), String(dead));
-let aTook = null;
-const bTook = acquireLock(lock, dead + 2, () => { aTook = acquireLock(lock, process.pid); });
-assert.deepEqual([aTook, bTook], [true, false], "only the first contender takes a stale lock");
-assert.equal(Number(readFileSync(path.join(lock, "pid"), "utf8")), process.pid, "A's lock survives B");
-assert.ok(!existsSync(`${lock}.reclaim`), "reclaim guard released");
-writeFileSync(path.join(lock, "pid"), String(dead));
-mkdirSync(`${lock}.reclaim`);
-assert.equal(acquireLock(lock, dead + 3), false, "a reclaim in progress refuses a second reclaimer");
-ok("stale-lock takeover: one winner under the reclaim guard");
+const lockf = (script, onSpawn) => new Promise((resolve) => {
+  const child = spawn("/usr/bin/lockf", lockedArgv(lock, [process.execPath, "-e", script]), { stdio: "ignore" });
+  onSpawn?.(child);
+  child.on("close", (code, signal) => resolve(code ?? signal));
+});
+const ran = path.join(tmp, "ran");
+const hold = `require("fs").appendFileSync(${JSON.stringify(ran)}, "x"); setTimeout(() => {}, 1500)`;
+assert.deepEqual((await Promise.all([lockf(hold), lockf(hold)])).sort(), [0, LOCK_BUSY]);
+assert.equal(readFileSync(ran, "utf8"), "x", "exactly one runner ran");
+ok("two lockf runners at once: one runs, the other exits 75");
+// 11b. A runner killed with SIGKILL leaves the lock free: the next runner takes it with no cleanup.
+const pidFile = path.join(tmp, "pid");
+const killed = lockf(`require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 60000)`);
+const waitFor = (f) => new Promise((resolve) => { const t = setInterval(() => existsSync(f) && readFileSync(f, "utf8") && (clearInterval(t), resolve()), 20); });
+await waitFor(pidFile);
+assert.equal(await lockf(""), LOCK_BUSY, "held while the runner lives");
+process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+await killed;
+assert.equal(await lockf(""), 0, "free after SIGKILL");
+ok("SIGKILLed runner leaves the lock free");
 // 12. Case id from repo, PR and sha; a campaign selects its own dirs.
 assert.equal(liveCaseId("embabel-agent-experimental", "50", "0123456789abcdef"), "live-embabel-agent-experimental-50-01234567");
 const cfg = JSON.parse(readFileSync(new URL("./faceoff.json", import.meta.url), "utf8"));
@@ -137,10 +135,10 @@ assert.equal(resolveCampaign(cfg, file).results, path.join(tmp, "r"));
 assert.throws(() => resolveCampaign(cfg, "nope"), /unknown campaign/);
 ok("case id from repo/pr/sha; campaign selects its own dirs");
 // 13. Caps: the face-off caps all recorded trials (unchanged); an eval campaign caps only one pass.
-assert.deepEqual(trialCap("meta", null), { cap: 60, perPass: false });
+assert.deepEqual(trialCap("meta", null), { cap: 80, perPass: false });
 assert.deepEqual(trialCap("codex", null), { cap: null, perPass: false });
-assert.equal(capStop(trialCap("meta", null), 0, 60), "trial cap 60 reached");
-assert.equal(capStop(trialCap("meta", null), 0, 59), null);
+assert.equal(capStop(trialCap("meta", null), 0, 80), "trial cap 80 reached");
+assert.equal(capStop(trialCap("meta", null), 0, 79), null);
 assert.deepEqual([trialCap("xai", ev).cap, trialCap("meta", ev).cap, trialCap("codex", ev).cap], [60, 60, null]);
 assert.equal(capStop(trialCap("meta", ev), 0, 500), null, "eval keeps running after 60 recorded trials");
 assert.equal(capStop(trialCap("meta", ev), 60, 500), "trial cap 60 per pass reached");
@@ -160,10 +158,12 @@ await Promise.all(ids.map((id) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, ["--input-type=module", "-e", `const m = await import(${JSON.stringify(mod)}); m.registerCase(${JSON.stringify(casesFile)}, { id: ${JSON.stringify(id)} });`], { stdio: "inherit" });
   child.on("close", (code) => (code ? reject(new Error(`registrar ${id} exited ${code}`)) : resolve()));
 })));
-assert.deepEqual(JSON.parse(readFileSync(casesFile, "utf8")).map((x) => x.id).sort(), [...ids].sort());
+assert.deepEqual(readCasesFile(casesFile).map((x) => x.id).sort(), [...ids].sort());
 assert.equal(registerCase(casesFile, { id: "c0" }), false, "a registered case is not added twice");
-assert.ok(!existsSync(`${casesFile}.lock`), "cases lock released");
-ok("12 concurrent registrations, none lost");
+writeFileSync(casesFile, JSON.stringify([{ id: "old" }, { id: "c1" }]));
+assert.equal(registerCase(casesFile, { id: "old" }), false, "a case in cases.json is not added twice");
+assert.deepEqual(readCasesFile(casesFile).map((x) => x.id), ["old", "c1", ...ids.filter((id) => id !== "c1").sort()], "union of cases.json and cases.d");
+ok("12 concurrent registrations, none lost; cases.json ∪ cases.d");
 // 16. A hostile PR branch name reaches git as an argument, never a shell.
 const pwned = path.join(tmp, "pwned");
 const g = (cwd, ...a) => { const r = spawnSync("git", a, { cwd, encoding: "utf8" }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };

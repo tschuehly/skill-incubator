@@ -10,6 +10,14 @@ trials in proportion to their tokens. Readings have 1% resolution, so short bloc
 """
 import collections, glob, json, os, sys
 
+def load_cases(cases_file):
+    """A campaign's cases: cases_file plus one cases.d/<id>.json per registered case (faceoff.mjs readCasesFile)."""
+    cases = json.load(open(cases_file)) if os.path.exists(cases_file) else []
+    ids = {c["id"] for c in cases}
+    extra = [json.load(open(f)) for f in glob.glob(os.path.join(os.path.dirname(cases_file), "cases.d", "*.json"))]
+    return cases + sorted((c for c in extra if c["id"] not in ids), key=lambda c: (c.get("registeredAt", ""), c["id"]))
+
+
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/.pi-workbench/evals/results/prr-faceoff")
 trials = {}
 for line in open(os.path.join(out, "trials.jsonl")):
@@ -19,7 +27,7 @@ done = [r for r in trials.values() if r.get("status") == "done"]
 arms = sorted({r["arm"] for r in trials.values()})
 
 cfg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "faceoff.json")))
-cases = json.load(open(sys.argv[2])) if len(sys.argv) > 2 else cfg["cases"]
+cases = load_cases(sys.argv[2]) if len(sys.argv) > 2 else cfg["cases"]
 exploratory = {c["id"] for c in cases if c.get("exploratory")}
 found = collections.defaultdict(lambda: collections.defaultdict(set))  # (arm, rep) -> kind -> {(case, cluster)}
 noise = collections.Counter()

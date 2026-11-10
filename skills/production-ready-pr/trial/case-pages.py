@@ -7,10 +7,18 @@ case in cases-file (a campaign's cases JSON; default faceoff.json `cases`). Read
 read-only and tolerates live runs: a torn last line in trials.jsonl, missing or half-written
 adjudications, and findings not yet labelled (shown as pending).
 """
-import json, os, re, sys
+import glob, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 QUOTA = re.compile(r"usage limit reached|quota|rate limit|\b429\b", re.I)
+
+
+def load_cases(cases_file):
+    """A campaign's cases: cases_file plus one cases.d/<id>.json per registered case (faceoff.mjs readCasesFile)."""
+    cases = json.load(open(cases_file)) if os.path.exists(cases_file) else []
+    ids = {c["id"] for c in cases}
+    extra = [json.load(open(f)) for f in glob.glob(os.path.join(os.path.dirname(cases_file), "cases.d", "*.json"))]
+    return cases + sorted((c for c in extra if c["id"] not in ids), key=lambda c: (c.get("registeredAt", ""), c["id"]))
 
 
 def load(results):
@@ -182,7 +190,7 @@ def index_line(case, trials, adj):
 
 def main(results, out=os.path.expanduser("~/.pi-workbench/evals/reports/prr-faceoff-cases"), cases_file=None):
     os.makedirs(out, exist_ok=True)
-    cases = json.load(open(cases_file)) if cases_file else json.load(open(os.path.join(HERE, "faceoff.json")))["cases"]
+    cases = load_cases(cases_file) if cases_file else json.load(open(os.path.join(HERE, "faceoff.json")))["cases"]
     trials, adjs, finals = load(results)
     idx = ["# PRR face-off: case pages", "", "One line per PR: known defects and the `arm/rep` trials that found each.", ""]
     for c in cases:
@@ -218,6 +226,14 @@ def selfcheck():
     assert index_line(case, trials, adj).endswith("`d1`: x/0, y/0; `d2`: nobody")
     blind = render_case({**case, "defects": [], "exploratory": True}, trials, None, finals)
     assert "(exploratory, blind: no answer key)" in blind and "_No adjudication yet._" in blind
+    import tempfile
+    with tempfile.TemporaryDirectory(dir=os.environ.get("PI_TMP")) as d:
+        os.makedirs(os.path.join(d, "cases.d"))
+        json.dump([{"id": "a"}], open(os.path.join(d, "cases.json"), "w"))
+        for c in [{"id": "a", "registeredAt": "0"}, {"id": "c", "registeredAt": "2"}, {"id": "b", "registeredAt": "1"}]:
+            json.dump(c, open(os.path.join(d, "cases.d", c["id"] + ".json"), "w"))
+        assert [c["id"] for c in load_cases(os.path.join(d, "cases.json"))] == ["a", "b", "c"]
+        assert [c["id"] for c in load_cases(os.path.join(d, "missing.json"))] == ["a", "b", "c"]
     print("selfcheck ok")
 
 
