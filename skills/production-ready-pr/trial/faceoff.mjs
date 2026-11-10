@@ -96,7 +96,13 @@ const pick = (name, all) => {
   if (unknown.length) { console.error(`unknown --${name}: ${unknown.join(", ")} (known: ${all.join(", ")})`); process.exit(2); }
   return all.filter((x) => !want || want.includes(x));
 };
-let CASES = pick("cases", CFG.cases.map((c) => c.id)).map((id) => CFG.cases.find((c) => c.id === id));
+const pickCases = () => pick("cases", CFG.cases.map((c) => c.id)).map((id) => CFG.cases.find((c) => c.id === id));
+let CASES = pickCases();
+// A campaign's cases grow while it runs (eval registers them): re-read before adjudicating or reporting.
+export function refreshCases() {
+  if (CAMP) { CFG.cases = readCases(); CASES = pickCases(); }
+  return CASES.map((c) => c.id);
+}
 const ARMS = pick("arms", CAMP?.arms ?? Object.keys(CFG.arms).filter((a) => !CFG.arms[a].retired));
 const REPS = Number(opt("reps") ?? CFG.repetitions);
 const TRIALS = path.join(OUT, "trials.jsonl");
@@ -813,13 +819,23 @@ function repairQuotaTrials() {
 // ---------- eval campaign ----------
 export const liveCaseId = (repo, pr, sha) => `live-${repo}-${pr}-${String(sha).slice(0, 8)}`;
 
-// One runner per campaign: a kernel advisory lock on `runner.lock`, held by lockf for its command's
-// lifetime and released by the kernel when the holder dies, so nothing is ever stale. -k keeps the file:
-// unlinking it would let a waiter lock the old inode while a newcomer locks a new one.
-// ponytail: macOS /usr/bin/lockf; use flock(1) on Linux if this ever runs there.
+// One runner per campaign: a kernel flock on `runner.lock`. python3 takes it, then execs the node runner
+// on the same descriptor, so node itself holds the lock and the kernel releases it when node dies; nothing
+// is ever stale. The file is never unlinked: that would let a waiter lock the old inode and a newcomer a new one.
+// ponytail: relies on Node's spawn not passing the lock fd to children (true on macOS, where libuv spawns
+// with POSIX_SPAWN_CLOEXEC_DEFAULT; the self-check proves it). On Linux, verify again before running there.
 export const LOCK_BUSY = 75;
-export const lockedArgv = (lock, argv) => ["-k", "-t", "0", lock, ...argv];
-const locked = (args) => spawnSync("/usr/bin/lockf", lockedArgv(LOCK, [process.execPath, fileURLToPath(import.meta.url), "--campaign", CAMPAIGN_ARG, ...args]), { stdio: "inherit" }).status;
+const LOCK_EXEC = [
+  "import fcntl, os, sys",
+  "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o644)",
+  "try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)",
+  `except BlockingIOError: sys.exit(${LOCK_BUSY})`,
+  "os.set_inheritable(fd, True)",
+  "os.execvp(sys.argv[2], sys.argv[2:])",
+].join("\n");
+// Arguments for `python3`: no shell, the command runs as the lock holder.
+export const lockedArgv = (lock, argv) => ["-c", LOCK_EXEC, lock, ...argv];
+const locked = (args) => spawnSync("python3", lockedArgv(LOCK, [process.execPath, fileURLToPath(import.meta.url), "--campaign", CAMPAIGN_ARG, ...args]), { stdio: "inherit" }).status;
 
 // A campaign's cases: its cases file plus one `cases.d/<id>.json` per registered case. Registering writes
 // only its own file (temp file, then rename), so concurrent evals never read-modify-write a shared file.
@@ -914,8 +930,10 @@ async function nightly() {
   mkdirSync(OUT, { recursive: true });
   if (locked(["run", "--no-adjudicate", ...rest]) === LOCK_BUSY) console.log("runner active: retries wait for tomorrow");
   else await runner(); // cases registered while the retry pass held the lock
+  refreshCases();
   mkdirSync(path.join(OUT, "adjudications"), { recursive: true });
   await adjudicateAll(trialEnv());
+  refreshCases();
   writeReport();
   mkdirSync(CAMP.reports, { recursive: true });
   const py = (script, ...args) => sh(`python3 ${[path.join(HERE, script), ...args].map(q).join(" ")}`);

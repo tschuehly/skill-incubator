@@ -97,29 +97,44 @@ assert.equal(floorSkip(t, low, 40), null);
 assert.equal(floorSkip(t, { ...low, state: "stale" }, 50), null);
 assert.equal(floorSkip(t, low, undefined), null, "a provider without a floor never skips");
 ok("floor skip => skipped-quota record, not complete");
-// 11. Two lockf-wrapped runners started at once: exactly one runs, the other exits 75.
+// 11. Two python-flock-wrapped runners started at once: exactly one runs, the other exits 75.
 const tmp = mkdtempSync(path.join(process.env.PI_TMP ?? tmpdir(), "faceoff-lock-"));
 const lock = path.join(tmp, "runner.lock");
-const lockf = (script, onSpawn) => new Promise((resolve) => {
-  const child = spawn("/usr/bin/lockf", lockedArgv(lock, [process.execPath, "-e", script]), { stdio: "ignore" });
+const wrapped = (script, onSpawn) => new Promise((resolve) => {
+  const child = spawn("python3", lockedArgv(lock, [process.execPath, "-e", script]), { stdio: "ignore" });
   onSpawn?.(child);
   child.on("close", (code, signal) => resolve(code ?? signal));
 });
 const ran = path.join(tmp, "ran");
 const hold = `require("fs").appendFileSync(${JSON.stringify(ran)}, "x"); setTimeout(() => {}, 1500)`;
-assert.deepEqual((await Promise.all([lockf(hold), lockf(hold)])).sort(), [0, LOCK_BUSY]);
+assert.deepEqual((await Promise.all([wrapped(hold), wrapped(hold)])).sort(), [0, LOCK_BUSY]);
 assert.equal(readFileSync(ran, "utf8"), "x", "exactly one runner ran");
-ok("two lockf runners at once: one runs, the other exits 75");
-// 11b. A runner killed with SIGKILL leaves the lock free: the next runner takes it with no cleanup.
-const pidFile = path.join(tmp, "pid");
-const killed = lockf(`require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 60000)`);
+ok("two wrapped runners at once: one runs, the other exits 75");
+// 11b. The runner node process holds the lock itself: SIGKILL on it leaves the lock free.
 const waitFor = (f) => new Promise((resolve) => { const t = setInterval(() => existsSync(f) && readFileSync(f, "utf8") && (clearInterval(t), resolve()), 20); });
+const pidFile = path.join(tmp, "pid");
+let holder;
+const killed = wrapped(`require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 60000)`, (c) => (holder = c));
 await waitFor(pidFile);
-assert.equal(await lockf(""), LOCK_BUSY, "held while the runner lives");
-process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+assert.equal(Number(readFileSync(pidFile, "utf8")), holder.pid, "python exec'd into node: one process");
+assert.equal(await wrapped(""), LOCK_BUSY, "held while the runner lives");
+process.kill(holder.pid, "SIGKILL");
 await killed;
-assert.equal(await lockf(""), 0, "free after SIGKILL");
-ok("SIGKILLed runner leaves the lock free");
+assert.equal(await wrapped(""), 0, "free after SIGKILL");
+ok("SIGKILLed runner node leaves the lock free");
+// 11c. A child the runner spawned (a Pi trial) does not inherit the lock: killing the runner frees it.
+const pids = path.join(tmp, "pids");
+const spawner = `const c = require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" }); require("fs").writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, c.pid])); setTimeout(() => {}, 60000)`;
+const orphaned = wrapped(spawner);
+await waitFor(pids);
+const [runnerPid, childPid] = JSON.parse(readFileSync(pids, "utf8"));
+process.kill(runnerPid, "SIGKILL");
+await orphaned;
+try {
+  assert.doesNotThrow(() => process.kill(childPid, 0), "the trial child still lives");
+  assert.equal(await wrapped(""), 0, "free while the runner's child lives");
+} finally { try { process.kill(childPid, "SIGKILL"); } catch {} }
+ok("runner killed, its child alive: the lock is free");
 // 12. Case id from repo, PR and sha; a campaign selects its own dirs.
 assert.equal(liveCaseId("embabel-agent-experimental", "50", "0123456789abcdef"), "live-embabel-agent-experimental-50-01234567");
 const cfg = JSON.parse(readFileSync(new URL("./faceoff.json", import.meta.url), "utf8"));
@@ -164,6 +179,15 @@ writeFileSync(casesFile, JSON.stringify([{ id: "old" }, { id: "c1" }]));
 assert.equal(registerCase(casesFile, { id: "old" }), false, "a case in cases.json is not added twice");
 assert.deepEqual(readCasesFile(casesFile).map((x) => x.id), ["old", "c1", ...ids.filter((id) => id !== "c1").sort()], "union of cases.json and cases.d");
 ok("12 concurrent registrations, none lost; cases.json ∪ cases.d");
+// 15b. nightly re-reads the campaign's cases: one registered during its retry pass is adjudicated and reported.
+const late = await new Promise((resolve, reject) => {
+  const script = `const m = await import(${JSON.stringify(mod)}); const before = m.refreshCases(); m.registerCase(${JSON.stringify(path.join(tmp, "r/cases.json"))}, { id: "late", defects: [] }); console.log(JSON.stringify([before, m.refreshCases()]));`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script, new URL(import.meta.url).pathname, "--campaign", file], { stdio: ["ignore", "pipe", "inherit"] });
+  let out = ""; child.stdout.on("data", (d) => (out += d));
+  child.on("close", (code) => (code ? reject(new Error(`nightly cases child exited ${code}`)) : resolve(JSON.parse(out))));
+});
+assert.deepEqual(late, [[], ["late"]], "a late-registered case joins nightly's case list");
+ok("nightly's case list includes a case registered during its retry pass");
 // 16. A hostile PR branch name reaches git as an argument, never a shell.
 const pwned = path.join(tmp, "pwned");
 const g = (cwd, ...a) => { const r = spawnSync("git", a, { cwd, encoding: "utf8" }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
