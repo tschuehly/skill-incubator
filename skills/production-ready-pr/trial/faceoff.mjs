@@ -933,8 +933,12 @@ async function runner() {
 async function nightly() {
   if (!CAMP) { console.error("nightly needs --campaign"); process.exit(2); }
   mkdirSync(OUT, { recursive: true });
-  if (locked(["run", "--no-adjudicate", ...rest]) === LOCK_BUSY) console.log("runner active: retries wait for tomorrow");
-  else await runner(); // cases registered while the retry pass held the lock
+  // A failed retry or runner pass is logged and nightly exits non-zero at the end, but still judges and reports what exists.
+  let failed = null;
+  try {
+    if (locked(["run", "--no-adjudicate", ...rest]) === LOCK_BUSY) console.log("runner active: retries wait for tomorrow");
+    else await runner(); // cases registered while the retry pass held the lock
+  } catch (e) { failed = e; console.error(`nightly: ${e.message}; judging and reporting what exists`); }
   refreshCases();
   mkdirSync(path.join(OUT, "adjudications"), { recursive: true });
   await adjudicateAll(trialEnv());
@@ -958,6 +962,7 @@ async function nightly() {
     unverified += n; cases += n ? 1 : 0;
   }
   console.log(`reminder: verify and rate are manual: ${unverified} unverified problems in ${cases} cases (verdicts go to ${path.join(OUT, "verify")}, ratings to ${path.join(OUT, "ratings")})`);
+  if (failed) process.exitCode = 1;
 }
 
 // ---------- main ----------
