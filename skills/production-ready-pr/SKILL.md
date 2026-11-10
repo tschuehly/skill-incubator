@@ -157,12 +157,6 @@ A symptom in (a), a no in (b) or (c), or a yes in (d) stops the PR: bring the ju
 the alternative to the human before spending review effort. Round 0 is not a round in the count below
 and does not use the two-round cap; rerun it when the human chooses a different fix.
 
-**Eval mode (trial).** At `medium` and above, for a repository listed in `trial/faceoff.json`
-`repos`, run `node <skill>/trial/faceoff.mjs --campaign eval eval <repo> <pr>` once Round 0 passes,
-then continue without waiting. It queues a blind model panel in the background. Never read the
-panel's results during the review; they exist only for the nightly comparison. Skip it when the
-invocation includes `noeval` or `PRR_EVAL=0` is set.
-
 Then apply the approved review contract against one merge-base and head SHA:
 
 - `low`: the lead applies Standards, Spec, and deletion-first Simplicity lenses; Copilot remains the
@@ -188,6 +182,14 @@ request registered in GitHub state. When Copilot is unavailable, record the gap 
 the head SHA and ask the human once to accept the gap or approve a substitute judge, unless the
 level question already settled it; an approved substitute runs in round 1 alongside the lenses. No
 other reviewer substitutes without that approval.
+
+**Eval mode (trial).** At `medium` and above, for a repository listed in `trial/faceoff.json`
+`repos`, once the draft PR is pushed, run
+`node <skill>/trial/faceoff.mjs --campaign eval eval <repo> <pr> --sha <reviewed head SHA>`, then
+continue without waiting. It refuses when the PR's remote head is not that SHA, and otherwise queues
+a blind model panel on it in the background. Never read the panel's results during the review; they
+exist only for the nightly comparison. Skip it when the invocation includes `noeval` or `PRR_EVAL=0`
+is set.
 
 Each lens writes its report to a path the repository and global rules allow, such as `$PI_TMP`,
 and the lead cites that path.

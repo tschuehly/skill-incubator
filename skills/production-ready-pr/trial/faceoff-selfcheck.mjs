@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Self-check of faceoff.mjs's pure functions on in-memory inputs: node faceoff-selfcheck.mjs
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { acquireLock, appReadings, blockStopAfter, caseFingerprint, codexbarReading, floorSkip, isComplete, liveCaseId, lockHolder, mergeReadings, needsRelabel, releaseLock, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
+import { acquireLock, adjudicationStopBelow, appReadings, blockStopAfter, capStop, caseFingerprint, livePr, registerCase, trialCap, codexbarReading, floorSkip, isComplete, liveCaseId, lockHolder, mergeReadings, needsRelabel, releaseLock, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
 
 const at = Date.parse("2026-11-09T13:00:00Z");
 const fresh = "2026-11-09T12:50:00Z", stale = "2026-11-09T10:00:00Z";
@@ -110,13 +110,25 @@ assert.equal(acquireLock(lock, dead + 1), true, "stale lock taken over");
 assert.equal(Number(readFileSync(path.join(lock, "pid"), "utf8")), dead + 1);
 releaseLock(lock, 1); assert.equal(lockHolder(lock), null, "dead taker's lock is stale");
 ok("lock refuses a second runner, takes over a stale one");
+// 11b. Two contenders see the same dead holder: A reclaims and takes the lock while B is between its check
+// and its reclaim. B must not delete A's new lock.
+writeFileSync(path.join(lock, "pid"), String(dead));
+let aTook = null;
+const bTook = acquireLock(lock, dead + 2, () => { aTook = acquireLock(lock, process.pid); });
+assert.deepEqual([aTook, bTook], [true, false], "only the first contender takes a stale lock");
+assert.equal(Number(readFileSync(path.join(lock, "pid"), "utf8")), process.pid, "A's lock survives B");
+assert.ok(!existsSync(`${lock}.reclaim`), "reclaim guard released");
+writeFileSync(path.join(lock, "pid"), String(dead));
+mkdirSync(`${lock}.reclaim`);
+assert.equal(acquireLock(lock, dead + 3), false, "a reclaim in progress refuses a second reclaimer");
+ok("stale-lock takeover: one winner under the reclaim guard");
 // 12. Case id from repo, PR and sha; a campaign selects its own dirs.
 assert.equal(liveCaseId("embabel-agent-experimental", "50", "0123456789abcdef"), "live-embabel-agent-experimental-50-01234567");
 const cfg = JSON.parse(readFileSync(new URL("./faceoff.json", import.meta.url), "utf8"));
 const ev = resolveCampaign(cfg, "eval");
 assert.match(ev.results, /\/\.pi-workbench\/evals\/results\/prr-eval$/);
 assert.ok(!ev.casesDir.endsWith("/evals/cases") && ev.casesFile.startsWith(ev.results), "own cases dir and file");
-assert.deepEqual([ev.arms.length, ev.repetitions, ev.floors, ev.minFreeDiskGB], [8, 1, { codex: 50, xai: 40, meta: 35 }, 50]);
+assert.deepEqual([ev.arms.length, ev.repetitions, ev.floors, ev.minFreeDiskGB], [8, 1, { codex: 50, xai: 40, meta: 35, claude: 40 }, 50]);
 assert.ok(ev.arms.every((a) => cfg.arms[a] && !cfg.arms[a].retired));
 assert.equal(resolveCampaign(cfg, undefined), null, "no campaign => face-off defaults");
 const file = path.join(tmp, "c.json");
@@ -124,4 +136,55 @@ writeFileSync(file, JSON.stringify({ ...cfg.campaigns.eval, results: path.join(t
 assert.equal(resolveCampaign(cfg, file).results, path.join(tmp, "r"));
 assert.throws(() => resolveCampaign(cfg, "nope"), /unknown campaign/);
 ok("case id from repo/pr/sha; campaign selects its own dirs");
+// 13. Caps: the face-off caps all recorded trials (unchanged); an eval campaign caps only one pass.
+assert.deepEqual(trialCap("meta", null), { cap: 60, perPass: false });
+assert.deepEqual(trialCap("codex", null), { cap: null, perPass: false });
+assert.equal(capStop(trialCap("meta", null), 0, 60), "trial cap 60 reached");
+assert.equal(capStop(trialCap("meta", null), 0, 59), null);
+assert.deepEqual([trialCap("xai", ev).cap, trialCap("meta", ev).cap, trialCap("codex", ev).cap], [60, 60, null]);
+assert.equal(capStop(trialCap("meta", ev), 0, 500), null, "eval keeps running after 60 recorded trials");
+assert.equal(capStop(trialCap("meta", ev), 60, 500), "trial cap 60 per pass reached");
+ok("trial caps: face-off total, eval per pass");
+// 14. Judging floor: eval adjudication stops below claude 40%, the face-off below 35%.
+const claude38 = { provider: "claude", state: "fresh", windows: [{ id: "weekly", percentRemaining: 38 }] };
+assert.deepEqual([adjudicationStopBelow(ev), adjudicationStopBelow(null)], [40, 35]);
+assert.match(quotaStop(claude38, adjudicationStopBelow(ev)), /38% \(< 40%\)/);
+assert.equal(quotaStop(claude38, adjudicationStopBelow(null)), null);
+assert.equal(quotaStop(claude38), null, "face-off default threshold unchanged");
+ok("adjudication floor: eval 40, face-off 35");
+// 15. Concurrent case registrations all land.
+const casesFile = path.join(tmp, "reg/cases.json");
+const mod = new URL("./faceoff.mjs", import.meta.url).href;
+const ids = Array.from({ length: 12 }, (_, i) => `c${i}`);
+await Promise.all(ids.map((id) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ["--input-type=module", "-e", `const m = await import(${JSON.stringify(mod)}); m.registerCase(${JSON.stringify(casesFile)}, { id: ${JSON.stringify(id)} });`], { stdio: "inherit" });
+  child.on("close", (code) => (code ? reject(new Error(`registrar ${id} exited ${code}`)) : resolve()));
+})));
+assert.deepEqual(JSON.parse(readFileSync(casesFile, "utf8")).map((x) => x.id).sort(), [...ids].sort());
+assert.equal(registerCase(casesFile, { id: "c0" }), false, "a registered case is not added twice");
+assert.ok(!existsSync(`${casesFile}.lock`), "cases lock released");
+ok("12 concurrent registrations, none lost");
+// 16. A hostile PR branch name reaches git as an argument, never a shell.
+const pwned = path.join(tmp, "pwned");
+const g = (cwd, ...a) => { const r = spawnSync("git", a, { cwd, encoding: "utf8" }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+const origin = path.join(tmp, "origin"), clone = path.join(tmp, "clone"), bin = path.join(tmp, "bin");
+mkdirSync(origin); g(origin, "init", "-q", "-b", "main");
+g(origin, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base");
+g(origin, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "head");
+const head = g(origin, "rev-parse", "HEAD"), base = g(origin, "rev-parse", "HEAD~1");
+g(origin, "update-ref", "refs/pull/7/head", head);
+g(origin, "reset", "-q", "--hard", base);
+g(tmp, "clone", "-q", origin, clone);
+mkdirSync(bin);
+const headRefName = `$(touch ${pwned})`;
+writeFileSync(path.join(bin, "gh"), `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify({ headRefOid: head, headRefName, baseRefName: "main", url: "https://github.com/o/r/pull/7" })}\nEOF\n`);
+chmodSync(path.join(bin, "gh"), 0o755);
+const savedPath = process.env.PATH;
+process.env.PATH = `${bin}:${savedPath}`;
+try {
+  const live = livePr(clone, 7);
+  assert.deepEqual([live.info.headRefOid, live.base], [head, base], "fork-head fallback fetched the PR head");
+} finally { process.env.PATH = savedPath; }
+assert.ok(!existsSync(pwned), "branch name ran as a command");
+ok("hostile branch name is never run");
 console.log("faceoff self-check passed");
