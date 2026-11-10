@@ -134,6 +134,19 @@
       "admissionQuotaProvider": "meta"
     }
   },
+  "campaigns": {
+    "eval": {
+      "id": "prr-eval",
+      "results": "~/.pi-workbench/evals/results/prr-eval",
+      "casesDir": "~/.pi-workbench/evals/results/prr-eval/cases",
+      "casesFile": "~/.pi-workbench/evals/results/prr-eval/cases.json",
+      "reports": "~/.pi-workbench/evals/reports/prr-eval",
+      "arms": ["sol-high", "sol-low", "astra-high", "astra-low", "ember-high", "ember-low", "grok-high", "grok-low"],
+      "repetitions": 1,
+      "floors": { "codex": 50, "xai": 40, "meta": 35 },
+      "minFreeDiskGB": 50
+    }
+  },
   "adjudicator": {
     "model": "anthropic/claude-opus-5-5",
     "effort": "medium",

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Per-model summary of a face-off: what each model found, what a review costs, and how much plan
-quota a review uses. Usage: model-summary.py [results-dir] > models.md
+quota a review uses. Usage: model-summary.py [results-dir] [cases-file] > models.md
+(cases-file: a campaign's cases JSON; default faceoff.json `cases`)
 
 Problems are adjudicated clusters (known defects and valid extras; noise excluded), from rep 0 so
 every model reviewed each PR once. Quota per review comes from provider blocks whose start and end
@@ -18,7 +19,8 @@ done = [r for r in trials.values() if r.get("status") == "done"]
 arms = sorted({r["arm"] for r in trials.values()})
 
 cfg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "faceoff.json")))
-exploratory = {c["id"] for c in cfg["cases"] if c.get("exploratory")}
+cases = json.load(open(sys.argv[2])) if len(sys.argv) > 2 else cfg["cases"]
+exploratory = {c["id"] for c in cases if c.get("exploratory")}
 found = collections.defaultdict(lambda: collections.defaultdict(set))  # (arm, rep) -> kind -> {(case, cluster)}
 noise = collections.Counter()
 for f in glob.glob(os.path.join(out, "adjudications", "*.json")):

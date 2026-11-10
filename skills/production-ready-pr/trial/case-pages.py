@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """One Markdown page per face-off case: every model's review side by side, each finding with the
-adjudicator's label. Usage: case-pages.py [results-dir] | case-pages.py --selfcheck
+adjudicator's label. Usage: case-pages.py [results-dir] [out-dir] [cases-file] | case-pages.py --selfcheck
 
-Writes ~/.pi-workbench/evals/reports/prr-faceoff-cases/<case>.md and index.md. Reads results
+Writes <out-dir>/<case>.md and index.md (default ~/.pi-workbench/evals/reports/prr-faceoff-cases), one per
+case in cases-file (a campaign's cases JSON; default faceoff.json `cases`). Reads results
 read-only and tolerates live runs: a torn last line in trials.jsonl, missing or half-written
 adjudications, and findings not yet labelled (shown as pending).
 """
@@ -179,10 +180,9 @@ def index_line(case, trials, adj):
     return head + (" · exploratory" if case.get("exploratory") else "") + " · " + "; ".join(parts)
 
 
-def main(results):
-    out = os.path.expanduser("~/.pi-workbench/evals/reports/prr-faceoff-cases")
+def main(results, out=os.path.expanduser("~/.pi-workbench/evals/reports/prr-faceoff-cases"), cases_file=None):
     os.makedirs(out, exist_ok=True)
-    cases = json.load(open(os.path.join(HERE, "faceoff.json")))["cases"]
+    cases = json.load(open(cases_file)) if cases_file else json.load(open(os.path.join(HERE, "faceoff.json")))["cases"]
     trials, adjs, finals = load(results)
     idx = ["# PRR face-off: case pages", "", "One line per PR: known defects and the `arm/rep` trials that found each.", ""]
     for c in cases:
@@ -225,4 +225,4 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--selfcheck"]:
         selfcheck()
     else:
-        main(sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/.pi-workbench/evals/results/prr-faceoff"))
+        main(*(sys.argv[1:] or [os.path.expanduser("~/.pi-workbench/evals/results/prr-faceoff")]))

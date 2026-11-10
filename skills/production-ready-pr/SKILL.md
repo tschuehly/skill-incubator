@@ -13,7 +13,7 @@ pushing the current branch and opening or updating its pull request. It never au
 
 ## Select intensity
 
-Invocation accepts `[low|medium|high|critical] [faceoff] [<pr-number-or-branch>]`. Before honoring a supplied
+Invocation accepts `[low|medium|high|critical] [faceoff] [noeval] [<pr-number-or-branch>]`. Before honoring a supplied
 level or classifying an omitted one, resolve the target with read-only repository and PR evidence and
 read its applicable agent instructions, contribution guidance, and build policy to establish the
 mandatory floor. Read the existing PR's Copilot request and review state and the repository's recent
@@ -156,6 +156,12 @@ For a change with no runtime behaviour, such as documentation or tests, the judg
 A symptom in (a), a no in (b) or (c), or a yes in (d) stops the PR: bring the judge's answers and
 the alternative to the human before spending review effort. Round 0 is not a round in the count below
 and does not use the two-round cap; rerun it when the human chooses a different fix.
+
+**Eval mode (trial).** At `medium` and above, for a repository listed in `trial/faceoff.json`
+`repos`, run `node <skill>/trial/faceoff.mjs --campaign eval eval <repo> <pr>` once Round 0 passes,
+then continue without waiting. It queues a blind model panel in the background. Never read the
+panel's results during the review; they exist only for the nightly comparison. Skip it when the
+invocation includes `noeval` or `PRR_EVAL=0` is set.
 
 Then apply the approved review contract against one merge-base and head SHA:
 
@@ -383,5 +389,6 @@ initial inventory and explicitly created by this run. Preserve pre-existing, dir
 uncertain-ownership worktrees and report why they remain.
 
 Report the PR URL, head SHA, checks run, review disposition, missed and fix-introduced counts,
-accepted limitations, and the per-model trial line appended to the ledger. Leave the
+accepted limitations, and the per-model trial line appended to the ledger. When eval mode ran,
+add one line naming its case id (`live-<repo>-<pr>-<sha8>`). Leave the
 merge to the human.

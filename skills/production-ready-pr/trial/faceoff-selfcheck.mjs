@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 // Self-check of faceoff.mjs's pure functions on in-memory inputs: node faceoff-selfcheck.mjs
 import assert from "node:assert/strict";
-import { appReadings, blockStopAfter, caseFingerprint, codexbarReading, mergeReadings, needsRelabel, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { acquireLock, appReadings, blockStopAfter, caseFingerprint, codexbarReading, floorSkip, isComplete, liveCaseId, lockHolder, mergeReadings, needsRelabel, releaseLock, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
 
 const at = Date.parse("2026-11-09T13:00:00Z");
 const fresh = "2026-11-09T12:50:00Z", stale = "2026-11-09T10:00:00Z";
@@ -83,4 +87,41 @@ assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tok
 assert.equal(blockStopAfter({ key: "k", status: "error", rateLimited: false, tokens: null, turns: 1, reason: "Error: Failed to load extension" }, {}, true), null, "took turns => existing rules");
 assert.ok(blockStopAfter({ key: "m", status: "error", rateLimited: false, tokens: null, turns: 0, reason: 'Error: Model "openai-codex/nope" not found' }, {}, true), "pi's quoted model-not-found diagnostic stops the block");
 ok("startup failure without tokens => block stops; API error after tokens => unchanged");
+// 10. Eval campaign: a floor skip writes a skipped-quota record that is not complete; above the floor or stale, no skip.
+const t = { key: "live|sol-low|0", case: "live", arm: "sol-low", rep: 0, provider: "codex" };
+const low = { provider: "codex", state: "fresh", windows: [{ id: "weekly", percentRemaining: 45 }] };
+const skip = floorSkip(t, low, 50);
+assert.deepEqual([skip.status, skip.key, skip.provider, skip.window, skip.percent], ["skipped-quota", t.key, "codex", "weekly", 45]);
+assert.equal(isComplete(skip), false, "a skipped trial is retried later");
+assert.equal(floorSkip(t, low, 40), null);
+assert.equal(floorSkip(t, { ...low, state: "stale" }, 50), null);
+assert.equal(floorSkip(t, low, undefined), null, "a provider without a floor never skips");
+ok("floor skip => skipped-quota record, not complete");
+// 11. The lock refuses a second runner and takes over a stale one.
+const tmp = mkdtempSync(path.join(process.env.PI_TMP ?? tmpdir(), "faceoff-lock-"));
+const lock = path.join(tmp, "runner.lock");
+assert.equal(acquireLock(lock), true);
+assert.equal(acquireLock(lock, 999999), false, "live holder refuses a second runner");
+assert.equal(lockHolder(lock), process.pid);
+const dead = spawnSync("true").pid;
+writeFileSync(path.join(lock, "pid"), String(dead));
+assert.equal(lockHolder(lock), null);
+assert.equal(acquireLock(lock, dead + 1), true, "stale lock taken over");
+assert.equal(Number(readFileSync(path.join(lock, "pid"), "utf8")), dead + 1);
+releaseLock(lock, 1); assert.equal(lockHolder(lock), null, "dead taker's lock is stale");
+ok("lock refuses a second runner, takes over a stale one");
+// 12. Case id from repo, PR and sha; a campaign selects its own dirs.
+assert.equal(liveCaseId("embabel-agent-experimental", "50", "0123456789abcdef"), "live-embabel-agent-experimental-50-01234567");
+const cfg = JSON.parse(readFileSync(new URL("./faceoff.json", import.meta.url), "utf8"));
+const ev = resolveCampaign(cfg, "eval");
+assert.match(ev.results, /\/\.pi-workbench\/evals\/results\/prr-eval$/);
+assert.ok(!ev.casesDir.endsWith("/evals/cases") && ev.casesFile.startsWith(ev.results), "own cases dir and file");
+assert.deepEqual([ev.arms.length, ev.repetitions, ev.floors, ev.minFreeDiskGB], [8, 1, { codex: 50, xai: 40, meta: 35 }, 50]);
+assert.ok(ev.arms.every((a) => cfg.arms[a] && !cfg.arms[a].retired));
+assert.equal(resolveCampaign(cfg, undefined), null, "no campaign => face-off defaults");
+const file = path.join(tmp, "c.json");
+writeFileSync(file, JSON.stringify({ ...cfg.campaigns.eval, results: path.join(tmp, "r"), casesDir: path.join(tmp, "r/cases"), casesFile: path.join(tmp, "r/cases.json"), reports: path.join(tmp, "rep") }));
+assert.equal(resolveCampaign(cfg, file).results, path.join(tmp, "r"));
+assert.throws(() => resolveCampaign(cfg, "nope"), /unknown campaign/);
+ok("case id from repo/pr/sha; campaign selects its own dirs");
 console.log("faceoff self-check passed");

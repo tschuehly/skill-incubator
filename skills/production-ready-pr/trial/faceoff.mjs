@@ -10,12 +10,17 @@
 //   node faceoff.mjs adjudicate [--out DIR] [--cases a,b]
 //   node faceoff.mjs report [--out DIR] [--report FILE] [--ledger]
 //   node faceoff.mjs repair-quota-trials [--dry-run] [--out DIR]
+//   node faceoff.mjs --campaign eval eval <repo> <pr> [--arms x,y]   (blind case from a live PR, panel in the background)
+//   node faceoff.mjs --campaign eval runner | nightly
+//
+// --campaign NAME selects faceoff.json `campaigns.NAME` (or a JSON file of that shape): its own results,
+// cases and reports dirs, arms, repetitions, per-provider quota floors and disk floor.
 //
 // Stages share one campaign directory (default results/prr-faceoff): a later stage skips every completed
 // trial, adds its own, re-adjudicates only new findings, and rewrites the same report over everything run.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +29,22 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
 const CFG = JSON.parse(readFileSync(path.join(HERE, "faceoff.json"), "utf8"));
 const EVAL_HOME = path.join(HOME, ".pi-workbench/evals");
-const CASES_DIR = path.join(EVAL_HOME, "cases");
+
+// A campaign has its own dirs, arms, repetitions and quota floors; without one, the face-off defaults hold.
+export function resolveCampaign(cfg, name) {
+  if (!name) return null;
+  const c = name.endsWith(".json") ? JSON.parse(readFileSync(name, "utf8")) : cfg.campaigns?.[name];
+  if (!c) throw new Error(`unknown campaign ${name} (known: ${Object.keys(cfg.campaigns ?? {}).join(", ")})`);
+  const p = (x) => path.resolve(x.replace(/^~/, HOME));
+  return { ...c, name, results: p(c.results), casesDir: p(c.casesDir), casesFile: p(c.casesFile), reports: p(c.reports) };
+}
+const argv = process.argv.slice(2);
+const campaignAt = argv.indexOf("--campaign");
+const CAMPAIGN_ARG = campaignAt >= 0 ? argv.splice(campaignAt, 2)[1]?.replace(/^(.*\.json)$/, (f) => path.resolve(f)) : undefined;
+const CAMP = resolveCampaign(CFG, CAMPAIGN_ARG);
+const readCases = () => (existsSync(CAMP.casesFile) ? JSON.parse(readFileSync(CAMP.casesFile, "utf8")) : []);
+if (CAMP) Object.assign(CFG, { id: CAMP.id ?? CFG.id, cases: readCases(), repetitions: CAMP.repetitions, minFreeDiskGB: CAMP.minFreeDiskGB });
+const CASES_DIR = CAMP?.casesDir ?? path.join(EVAL_HOME, "cases");
 const PROJECTS = path.join(HOME, "IdeaProjects");
 const PI_EVAL = process.env.PI_EVAL_SCRIPT ?? path.join(PROJECTS, "pi-workbench.installed/scripts/pi-eval.mjs");
 const LEDGER = process.env.PRR_FACEOFF_LEDGER ?? path.join(HOME, ".pi-workbench/scratch/production-ready-pr-trial/ledger.jsonl");
@@ -45,7 +65,7 @@ const readJsonl = (f) => (existsSync(f) ? readFileSync(f, "utf8").split("\n").fi
 const fullSha = (repo, rev) => sh(`git -C ${q(repoPath(repo))} rev-parse ${rev}^{commit}`).stdout.trim();
 
 // ---------- arguments ----------
-const [cmd, ...rest] = process.argv.slice(2);
+const [cmd, ...rest] = argv;
 const flag = (name) => rest.includes(`--${name}`);
 const opt = (name) => (rest.includes(`--${name}`) ? rest[rest.indexOf(`--${name}`) + 1] : undefined);
 const list = (name) => opt(name)?.split(",").filter(Boolean);
@@ -57,21 +77,23 @@ function deadlineMs(hhmm = CFG.deadline) {
   if (d.getTime() <= now()) d.setDate(d.getDate() + 1);
   return d.getTime();
 }
-const DEADLINE = deadlineMs(opt("deadline"));
-const OUT = path.resolve(opt("out") ?? path.join(EVAL_HOME, "results", CFG.id));
+// ponytail: an eval runner starts at any hour, so its pass gets 12 hours instead of the face-off's 07:00.
+const DEADLINE = CAMP && !opt("deadline") ? now() + 12 * 3_600_000 : deadlineMs(opt("deadline"));
+const OUT = path.resolve(opt("out") ?? CAMP?.results ?? path.join(EVAL_HOME, "results", CFG.id));
+const LOCK = path.join(OUT, "runner.lock");
 // The campaign's date is fixed by its first stage, so every stage rewrites the same report.
 const META = path.join(OUT, "campaign.json");
 const DATE = existsSync(META) ? JSON.parse(readFileSync(META, "utf8")).date : new Date().toLocaleDateString("sv-SE");
 // A custom --out keeps its report beside its results, so a test run cannot overwrite the campaign report.
-const REPORT = path.resolve(opt("report") ?? (opt("out") ? path.join(OUT, "report.md") : path.join(EVAL_HOME, "reports", `${CFG.id}-${DATE}.md`)));
+const REPORT = path.resolve(opt("report") ?? (opt("out") ? path.join(OUT, "report.md") : CAMP ? path.join(CAMP.reports, "report.md") : path.join(EVAL_HOME, "reports", `${CFG.id}-${DATE}.md`)));
 const pick = (name, all) => {
   const want = list(name) ?? (name === "cases" ? list("case") : undefined);
   const unknown = want?.filter((x) => !all.includes(x)) ?? [];
   if (unknown.length) { console.error(`unknown --${name}: ${unknown.join(", ")} (known: ${all.join(", ")})`); process.exit(2); }
   return all.filter((x) => !want || want.includes(x));
 };
-const CASES = pick("cases", CFG.cases.map((c) => c.id)).map((id) => CFG.cases.find((c) => c.id === id));
-const ARMS = pick("arms", Object.keys(CFG.arms).filter((a) => !CFG.arms[a].retired));
+let CASES = pick("cases", CFG.cases.map((c) => c.id)).map((id) => CFG.cases.find((c) => c.id === id));
+const ARMS = pick("arms", CAMP?.arms ?? Object.keys(CFG.arms).filter((a) => !CFG.arms[a].retired));
 const REPS = Number(opt("reps") ?? CFG.repetitions);
 const TRIALS = path.join(OUT, "trials.jsonl");
 const BLOCKS = path.join(OUT, "blocks.jsonl");
@@ -91,7 +113,10 @@ function piShim() {
   if (!real) throw new Error("pi not found on PATH");
   const exts = CFG.piExtensions.map((e) => `-e ${q(realpathSync(e.replace(/^~/, HOME)))}`).join(" ");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, "pi"), `#!/bin/sh\n# Written by faceoff.mjs: Pi for sandboxed face-off trials.\nexec ${q(real)} --no-extensions ${exts} "$@"\n`, { mode: 0o755 });
+  // Rewrite only on change: another campaign may be starting Pi through this shim right now.
+  const shim = `#!/bin/sh\n# Written by faceoff.mjs: Pi for sandboxed face-off trials.\nexec ${q(real)} --no-extensions ${exts} "$@"\n`;
+  const file = path.join(dir, "pi");
+  if (!existsSync(file) || readFileSync(file, "utf8") !== shim) { writeFileSync(`${file}.tmp`, shim, { mode: 0o755 }); renameSync(`${file}.tmp`, file); }
   return dir;
 }
 
@@ -177,6 +202,13 @@ export function quotaStop(qf) {
   const low = qf.windows.find((w) => w.fresh !== false && typeof w.percentRemaining === "number" && w.percentRemaining < CFG.stopBelowPercent);
   return low ? `${qf.provider} ${low.id} quota at ${low.percentRemaining}% (< ${CFG.stopBelowPercent}%)` : null;
 }
+// An eval campaign skips (not stops at) a trial whose provider has a fresh window below the provider's floor.
+// The record is not "done", so a later run retries the trial.
+export function floorSkip(t, qf, floor) {
+  if (floor == null || qf.state !== "fresh") return null;
+  const low = qf.windows.find((w) => w.fresh !== false && typeof w.percentRemaining === "number" && w.percentRemaining < floor);
+  return low ? { key: t.key, case: t.case, arm: t.arm, rep: t.rep, provider: t.provider, status: "skipped-quota", window: low.id, percent: low.percentRemaining, floor, startedAt: iso(), endedAt: iso() } : null;
+}
 const freeGB = () => { const s = statfsSync(HOME); return (s.bavail * s.bsize) / 2 ** 30; };
 
 // ---------- processes ----------
@@ -238,24 +270,23 @@ export function blockStopAfter(r, pcfg, providerHasDone) {
 const norm = (f) => `${path.basename(String(f.file ?? ""))}|${String(f.line ?? "")}|${String(f.problem ?? "").trim().toLowerCase().replace(/\s+/g, " ")}`;
 
 // ---------- build-cases ----------
-function buildCases() {
-  for (const c of CFG.cases) {
-    const dir = path.join(CASES_DIR, c.id);
-    mkdirSync(dir, { recursive: true });
-    // A blind case (an unreviewed PR) has no fix commit and no known defects; it scores valid findings only.
-    const [base, proposed, fix] = [c.base, c.proposed, c.fix].map((r) => r && fullSha(c.repo, r));
-    if (!base || !proposed || (c.fix && !fix)) throw new Error(`${c.id}: unknown commit`);
-    writeFileSync(path.join(dir, "case.json"), JSON.stringify({
-      id: c.id, role: "review", profile: "reviewer", repo: c.repo, commit: proposed, setup: "setup.sh",
-      source: c.fix ? `${c.pr} replay: proposed ${c.proposed} (parent of review fix ${c.fix}) against merge-base ${c.base}` : `${c.pr} blind: head ${c.proposed} against merge-base ${c.base}`,
-      timeoutMinutes: CFG.trialTimeoutMinutes, prompt: CFG.prompt,
-      check: { type: "script", script: "check.sh", timeoutMinutes: 2 },
-    }, null, 2) + "\n");
-    writeFileSync(path.join(dir, "setup.sh"), `#!/usr/bin/env bash\n# Full merge-base diff (SCOPE=.), neutral subject.\nBASE=${base} PROPOSED=${proposed} SUBJECT="Proposed change" SCOPE=. exec bash ${q(path.join(HERE, "prr-setup.sh"))}\n`);
-    writeFileSync(path.join(dir, "check.sh"), `#!/usr/bin/env bash\nexec python3 ${q(path.join(HERE, "prr-check.py"))}\n`);
-    writeFileSync(path.join(dir, "defects.json"), JSON.stringify({ pr: c.pr, base, proposed, fix, provenance: c.provenance, defects: c.defects }, null, 2) + "\n");
-    console.log(`wrote ${dir}`);
-  }
+function buildCases() { for (const c of CFG.cases) buildCase(c); }
+function buildCase(c) {
+  const dir = path.join(CASES_DIR, c.id);
+  mkdirSync(dir, { recursive: true });
+  // A blind case (an unreviewed PR) has no fix commit and no known defects; it scores valid findings only.
+  const [base, proposed, fix] = [c.base, c.proposed, c.fix].map((r) => r && fullSha(c.repo, r));
+  if (!base || !proposed || (c.fix && !fix)) throw new Error(`${c.id}: unknown commit`);
+  writeFileSync(path.join(dir, "case.json"), JSON.stringify({
+    id: c.id, role: "review", profile: "reviewer", repo: c.repo, commit: proposed, setup: "setup.sh",
+    source: c.fix ? `${c.pr} replay: proposed ${c.proposed} (parent of review fix ${c.fix}) against merge-base ${c.base}` : `${c.pr} blind: head ${c.proposed} against merge-base ${c.base}`,
+    timeoutMinutes: CFG.trialTimeoutMinutes, prompt: CFG.prompt,
+    check: { type: "script", script: "check.sh", timeoutMinutes: 2 },
+  }, null, 2) + "\n");
+  writeFileSync(path.join(dir, "setup.sh"), `#!/usr/bin/env bash\n# Full merge-base diff (SCOPE=.), neutral subject.\nBASE=${base} PROPOSED=${proposed} SUBJECT="Proposed change" SCOPE=. exec bash ${q(path.join(HERE, "prr-setup.sh"))}\n`);
+  writeFileSync(path.join(dir, "check.sh"), `#!/usr/bin/env bash\nexec python3 ${q(path.join(HERE, "prr-check.py"))}\n`);
+  writeFileSync(path.join(dir, "defects.json"), JSON.stringify({ pr: c.pr, base, proposed, fix, provenance: c.provenance, defects: c.defects }, null, 2) + "\n");
+  console.log(`wrote ${dir}`);
 }
 
 // ---------- setup-check ----------
@@ -300,7 +331,7 @@ function schedule() {
   return byProvider;
 }
 function latestTrials() { const m = new Map(); for (const r of readJsonl(TRIALS)) m.set(r.key, r); return m; }
-const isComplete = (r) => r && r.status === "done";
+export const isComplete = (r) => !!r && r.status === "done";
 function armMinutes(arm, trials) {
   const done = [...trials.values()].filter((r) => r.arm === arm && r.wallMs);
   // Never below the configured estimate: the smoke case is the smallest diff.
@@ -382,13 +413,17 @@ async function providerBlock(prov, trials, env, cutoff) {
   const pcfg = CFG.providers[prov];
   const model = CFG.arms[trials[0].arm].model;
   const block = { provider: prov, startedAt: iso(), quotaStart: quotaFor(pcfg.quota, model), ran: 0, stop: null };
-  const launched = () => [...latestTrials().values()].filter((r) => r.provider === prov && !["skipped"].includes(r.status)).length;
+  const launched = () => [...latestTrials().values()].filter((r) => r.provider === prov && !["skipped", "skipped-quota"].includes(r.status)).length;
   for (const t of trials) {
     if (isComplete(latestTrials().get(t.key))) continue;
+    if (block.stop) break;
+    const qf = quotaFor(pcfg.quota, model);
+    const skip = CAMP && !deadlineHit && floorSkip(t, qf, CAMP.floors?.[prov]);
+    if (skip) { appendFileSync(TRIALS, JSON.stringify(skip) + "\n"); console.log(`${local(now())} ${t.key}: skipped-quota (${skip.window} ${skip.percent}% < ${skip.floor}%)`); continue; }
     block.stop ??= deadlineHit || now() >= cutoff ? `launch cutoff ${local(cutoff)} reached`
       : freeGB() < CFG.minFreeDiskGB ? `free disk ${freeGB().toFixed(1)} GB < ${CFG.minFreeDiskGB} GB`
       : pcfg.maxTrials != null && launched() >= pcfg.maxTrials ? `trial cap ${pcfg.maxTrials} reached`
-      : quotaStop(quotaFor(pcfg.quota, model));
+      : CAMP ? null : quotaStop(qf);
     if (block.stop) break;
     const r = await runTrial(t, env);
     block.ran++;
@@ -438,7 +473,8 @@ async function run() {
   const finalize = () => { writeReport(); if (flag("ledger")) writeLedger(); };
   const hard = setTimeout(() => { deadlineHit = true; console.log(`${local(now())} deadline: stopping trials and adjudication`); killAll(); }, DEADLINE - now());
   const force = setTimeout(() => { console.log("deadline + 3 min: writing the partial report and exiting"); finalize(); process.exit(0); }, DEADLINE - now() + 180_000);
-  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { deadlineHit = true; killAll(); finalize(); process.exit(1); });
+  if (!run.signals) for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { deadlineHit = true; killAll(); finalize(); process.exit(1); });
+  run.signals = true;
 
   await Promise.all(Object.entries(plan).map(([prov, ts]) => providerBlock(prov, ts, env, cutoff)));
   if (!flag("no-adjudicate") && !deadlineHit) await adjudicateAll(env);
@@ -764,6 +800,127 @@ function repairQuotaTrials() {
   console.log(`${fixes.length} quota trial(s)${flag("dry-run") ? " (dry run, nothing written)" : ""}`);
 }
 
+// ---------- eval campaign ----------
+export const liveCaseId = (repo, pr, sha) => `live-${repo}-${pr}-${String(sha).slice(0, 8)}`;
+
+// One runner per campaign: mkdir is atomic. A lock whose PID is dead is stale and taken over; a lock
+// without a PID file is a runner between mkdir and write, stale only after a minute.
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
+export function lockHolder(dir) {
+  if (!existsSync(dir)) return null;
+  let pid = 0;
+  try { pid = Number(readFileSync(path.join(dir, "pid"), "utf8")); } catch {}
+  if (pid) return alive(pid) ? pid : null;
+  try { return now() - statSync(dir).mtimeMs < 60_000 ? -1 : null; } catch { return null; }
+}
+export function acquireLock(dir, pid = process.pid) {
+  for (let i = 0; i < 2; i++) {
+    try { mkdirSync(dir); writeFileSync(path.join(dir, "pid"), String(pid)); return true; } catch (e) { if (e.code !== "EEXIST") throw e; }
+    if (lockHolder(dir)) return false;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return false;
+}
+export function releaseLock(dir, pid = process.pid) {
+  try { if (Number(readFileSync(path.join(dir, "pid"), "utf8")) === pid) rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+
+// Reads git and `gh pr view` only; the fetch updates remote-tracking refs, never the working tree.
+function evalCase() {
+  const [repo, pr] = rest;
+  if (!CAMP) { console.error("eval needs --campaign"); process.exit(2); }
+  if (!repo || !/^\d+$/.test(pr ?? "")) { console.error("usage: faceoff.mjs --campaign NAME eval <repo> <pr-number>"); process.exit(2); }
+  if (!CFG.repos[repo]) { console.error(`eval: repo ${repo} is not in faceoff.json repos; skipped`); process.exit(2); }
+  const dir = repoPath(repo);
+  const fail = (what, r) => { console.error(`eval: ${what} failed: ${String(r.stderr || r.stdout).trim().slice(0, 400)}`); process.exit(1); };
+  const gh = sh(`gh pr view ${pr} --json headRefOid,headRefName,baseRefName,url`, { cwd: dir });
+  if (gh.status) fail("gh pr view", gh);
+  const info = JSON.parse(gh.stdout);
+  const has = () => sh(`git -C ${q(dir)} cat-file -e ${info.headRefOid}^{commit}`).status === 0;
+  let f = sh(`git -C ${q(dir)} fetch --quiet origin ${q(info.baseRefName)} ${q(info.headRefName)}`);
+  if (!has()) f = sh(`git -C ${q(dir)} fetch --quiet origin ${q(info.baseRefName)} pull/${pr}/head`); // a fork's head
+  if (!has()) fail("git fetch", f);
+  const mb = sh(`git -C ${q(dir)} merge-base ${q(`origin/${info.baseRefName}`)} ${info.headRefOid}`);
+  if (mb.status) fail("merge-base", mb);
+  const ownerRepo = info.url.match(/github\.com\/([^/]+\/[^/]+)\/pull\//)?.[1] ?? repo;
+  const c = {
+    id: liveCaseId(repo, pr, info.headRefOid), repo, pr: `${ownerRepo}#${pr}`, base: mb.stdout.trim(), proposed: info.headRefOid,
+    head: info.headRefName, baseRef: info.baseRefName, registeredAt: iso(),
+    provenance: `Eval (${new Date().toLocaleDateString("sv-SE")}): live PR head ${info.headRefName} against its merge-base with origin/${info.baseRefName}. No answer key; scores valid findings only.`,
+    defects: [],
+  };
+  buildCase(c);
+  // ponytail: read-modify-write without a lock; two evals in the same second can drop one case. Lock the file if that happens.
+  const cases = readCases();
+  if (!cases.some((x) => x.id === c.id)) {
+    mkdirSync(path.dirname(CAMP.casesFile), { recursive: true });
+    writeFileSync(`${CAMP.casesFile}.tmp`, JSON.stringify([...cases, c], null, 2) + "\n");
+    renameSync(`${CAMP.casesFile}.tmp`, CAMP.casesFile);
+  }
+  console.log(`case ${c.id}`);
+  const holder = lockHolder(LOCK);
+  if (holder) { console.log(`runner already active (pid ${holder}); case registered`); return; }
+  mkdirSync(path.join(OUT, "logs"), { recursive: true });
+  const log = path.join(OUT, "logs", `runner-${iso().replace(/[:.]/g, "-")}.log`);
+  const fd = openSync(log, "a");
+  const child = spawn("nice", ["-n", "10", process.execPath, fileURLToPath(import.meta.url), "--campaign", CAMPAIGN_ARG, "runner", "--no-adjudicate", ...rest.slice(2)], { detached: true, stdio: ["ignore", fd, fd] });
+  child.unref();
+  console.log(`runner pid ${child.pid}\nlog ${log}`);
+}
+
+// Runs each newly registered case once, until none is pending. Retries are the nightly's job.
+async function runner() {
+  mkdirSync(OUT, { recursive: true });
+  if (!acquireLock(LOCK)) { console.log(`runner already active (pid ${lockHolder(LOCK)}); exiting`); return; }
+  process.on("exit", () => releaseLock(LOCK));
+  const seen = new Set();
+  const pending = () => { CFG.cases = readCases(); return CFG.cases.filter((c) => !seen.has(c.id)); };
+  for (;;) {
+    let todo = pending();
+    if (!todo.length) {
+      // A case registered after the last look but before the release would wait for the nightly; look once more.
+      releaseLock(LOCK);
+      todo = pending();
+      if (!todo.length || !acquireLock(LOCK)) break;
+    }
+    for (const c of todo) seen.add(c.id);
+    CASES = todo;
+    console.log(`${local(now())} runner: ${todo.map((c) => c.id).join(", ")}`);
+    await run();
+  }
+  console.log(`${local(now())} runner: no case pending; lock released`);
+}
+
+// One retry of every incomplete trial (rate-limited, skipped-quota, failed), then adjudication and reports.
+async function nightly() {
+  if (!CAMP) { console.error("nightly needs --campaign"); process.exit(2); }
+  mkdirSync(OUT, { recursive: true });
+  if (acquireLock(LOCK)) {
+    try { rest.push("--no-adjudicate"); await run(); } finally { rest.pop(); releaseLock(LOCK); }
+  } else console.log(`runner active (pid ${lockHolder(LOCK)}): retries wait for tomorrow`);
+  mkdirSync(path.join(OUT, "adjudications"), { recursive: true });
+  await adjudicateAll(trialEnv());
+  writeReport();
+  mkdirSync(CAMP.reports, { recursive: true });
+  const py = (script, ...args) => sh(`python3 ${[path.join(HERE, script), ...args].map(q).join(" ")}`);
+  const pages = py("case-pages.py", OUT, path.join(CAMP.reports, "cases"), CAMP.casesFile);
+  console.log((pages.stdout + pages.stderr).trim());
+  const models = py("model-summary.py", OUT, CAMP.casesFile);
+  if (models.status === 0) { writeFileSync(path.join(CAMP.reports, "models.md"), models.stdout); console.log(`models: ${path.join(CAMP.reports, "models.md")}`); }
+  else console.log(`model-summary failed: ${models.stderr.trim().slice(-300)}`);
+  // Verify and rate stay manual: count the problems (known or valid labels) no verify/<case>.json verdict covers.
+  let unverified = 0, cases = 0;
+  for (const c of CFG.cases) {
+    const a = path.join(OUT, "adjudications", `${c.id}.json`);
+    if (!existsSync(a)) continue;
+    const vf = path.join(OUT, "verify", `${c.id}.json`);
+    const v = new Set(existsSync(vf) ? JSON.parse(readFileSync(vf, "utf8")).verdicts.map((x) => x.index) : []);
+    const n = JSON.parse(readFileSync(a, "utf8")).labels.filter((l) => l.label !== "noise" && !v.has(l.index)).length;
+    unverified += n; cases += n ? 1 : 0;
+  }
+  console.log(`reminder: verify and rate are manual: ${unverified} unverified problems in ${cases} cases (verdicts go to ${path.join(OUT, "verify")}, ratings to ${path.join(OUT, "ratings")})`);
+}
+
 // ---------- main ----------
 // Imported (faceoff-selfcheck.mjs) rather than run: export the pure functions, dispatch nothing.
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -776,4 +933,7 @@ else if (cmd === "run") await run();
 else if (cmd === "adjudicate") { mkdirSync(path.join(OUT, "adjudications"), { recursive: true }); await adjudicateAll(trialEnv()); }
 else if (cmd === "report") { writeReport(); if (flag("ledger")) writeLedger(); }
 else if (cmd === "repair-quota-trials") repairQuotaTrials();
-else { console.error("usage: faceoff.mjs build-cases | setup-check | run [--dry-run] [--deadline HH:MM] [--out DIR] [--cases a,b] [--arms x,y] [--reps N] [--no-adjudicate] [--ledger] [--report FILE] | adjudicate [--out DIR] [--cases a,b] | report [--out DIR] [--report FILE] [--ledger] | repair-quota-trials [--dry-run] [--out DIR]"); process.exit(2); }
+else if (cmd === "eval") evalCase();
+else if (cmd === "runner") await runner();
+else if (cmd === "nightly") await nightly();
+else { console.error("usage: faceoff.mjs build-cases | setup-check | run [--dry-run] [--deadline HH:MM] [--out DIR] [--cases a,b] [--arms x,y] [--reps N] [--no-adjudicate] [--ledger] [--report FILE] | adjudicate [--out DIR] [--cases a,b] | report [--out DIR] [--report FILE] [--ledger] | repair-quota-trials [--dry-run] [--out DIR] | --campaign NAME eval <repo> <pr> [--arms x,y] | --campaign NAME runner | --campaign NAME nightly"); process.exit(2); }
