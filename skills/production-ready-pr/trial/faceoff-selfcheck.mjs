@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { adjudicationStopBelow, appReadings, blockStopAfter, capStop, caseFingerprint, livePr, LOCK_BUSY, locked, lockedArgv, readCasesFile, registerCase, trialCap, codexbarReading, floorSkip, isComplete, liveCaseId, mergeReadings, needsRelabel, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
+import { adjudicationStopBelow, gateGaps, appReadings, blockStopAfter, capStop, caseFingerprint, livePr, LOCK_BUSY, locked, lockedArgv, readCasesFile, registerCase, trialCap, codexbarReading, floorSkip, isComplete, liveCaseId, mergeReadings, needsRelabel, resolveCampaign, materialCount, pairStats, pct, quotaFinal, quotaStop, recallDefects, recallPossible } from "./faceoff.mjs";
 
 const at = Date.parse("2026-11-09T13:00:00Z");
 const fresh = "2026-11-09T12:50:00Z", stale = "2026-11-09T10:00:00Z";
@@ -216,4 +216,18 @@ try {
 } finally { process.env.PATH = savedPath; }
 assert.ok(!existsSync(pwned), "branch name ran as a command");
 ok("hostile branch name is never run");
+// Completion gate: a missing trial, an unadjudicated finding and a stale adjudication each show as a gap.
+{
+  const c = { id: "c1", defects: [] };
+  const f = { file: "a.js", line: 3, problem: "Off by one" };
+  const latest = new Map([["c1|x|0", { key: "c1|x|0", case: "c1", status: "done", findings: [f] }], ["c1|y|0", { key: "c1|y|0", case: "c1", status: "error" }]]);
+  const adj = { c1: { fingerprint: caseFingerprint(c), items: [{ ...f, index: 0, sources: ["c1|x|0"] }], labels: [{ index: 0, label: "valid", cluster: "k" }] } };
+  assert.deepEqual(gateGaps(latest, adj, [c], ["x", "y"]), [], "terminal error record and labeled finding pass");
+  assert.deepEqual(gateGaps(latest, adj, [c], ["x", "z"]), ["trial c1|z|0: no terminal record"]);
+  latest.set("c1|y|0", { key: "c1|y|0", case: "c1", status: "done", findings: [{ ...f, problem: "New one" }] });
+  assert.equal(gateGaps(latest, adj, [c], ["x", "y"]).length, 1, "a finding the adjudication lacks is a gap");
+  assert.match(gateGaps(latest, { c1: { ...adj.c1, fingerprint: "old" } }, [c], ["x"])[0], /stale/);
+  assert.deepEqual(gateGaps(latest, {}, [c], ["x"]), ["adjudication c1: missing"]);
+  ok("completion gate names missing trials and adjudications");
+}
 console.log("faceoff self-check passed");

@@ -506,9 +506,9 @@ function sandboxProfile(allowDir) {
   return r.stdout.trim();
 }
 
-function pooled(caseId) {
+function pooled(caseId, latest = latestTrials()) {
   const map = new Map();
-  for (const r of latestTrials().values()) {
+  for (const r of latest.values()) {
     if (r.case !== caseId || !r.findings) continue;
     for (const f of r.findings) {
       const k = norm(f);
@@ -607,6 +607,34 @@ async function adjudicateAll(env) {
   const queue = [...CASES];
   const worker = async () => { while (queue.length && !deadlineHit) { const c = queue.shift(); try { await adjudicateCase(c, env); } catch (e) { console.log(`${c.id}: adjudication failed: ${e.message}`); } } };
   await Promise.all(Array.from({ length: CFG.adjudicator.concurrency }, worker));
+}
+
+// Completion gate: every expected (case, arm, rep 0) key has a terminal record (last record per key wins), and every
+// case's adjudication is current and labels every pooled finding. Returns one line per gap; empty means complete.
+export function gateGaps(latest, adjudications, cases, arms) {
+  const gaps = [];
+  for (const c of cases) {
+    for (const arm of arms) if (!latest.get(`${c.id}|${arm}|0`)?.status) gaps.push(`trial ${c.id}|${arm}|0: no terminal record`);
+    const a = adjudications[c.id];
+    if (!a) { gaps.push(`adjudication ${c.id}: missing`); continue; }
+    if (needsRelabel(a, c)) gaps.push(`adjudication ${c.id}: stale (answer key or prompt changed)`);
+    const items = new Map(a.items.map((i) => [norm(i), i.index]));
+    const labeled = new Set(a.labels.map((l) => l.index));
+    for (const f of pooled(c.id, latest)) {
+      if (!items.has(f.key)) gaps.push(`adjudication ${c.id}: finding not adjudicated (${f.sources.join(", ")}: ${f.file}:${f.line})`);
+      else if (!labeled.has(items.get(f.key))) gaps.push(`adjudication ${c.id}: item ${items.get(f.key)} has no label`);
+    }
+  }
+  return gaps;
+}
+
+function gate() {
+  const latest = latestTrials();
+  const adjudications = Object.fromEntries(CASES.map((c) => [c.id, path.join(OUT, "adjudications", `${c.id}.json`)]).filter(([, f]) => existsSync(f)).map(([id, f]) => [id, JSON.parse(readFileSync(f, "utf8"))]));
+  const gaps = gateGaps(latest, adjudications, CASES, ARMS);
+  for (const g of gaps) console.log(g);
+  console.log(`gate: ${CASES.length} cases x ${ARMS.length} arms (rep 0): ${gaps.length ? `${gaps.length} gaps` : "complete"}`);
+  process.exit(gaps.length ? 1 : 0);
 }
 
 // ---------- report ----------
@@ -975,6 +1003,7 @@ else if (cmd === "quota") { const snap = quota(); for (const k of [...Object.val
 else if (cmd === "probe") console.log(JSON.stringify(credentialProbe(trialEnv()), null, 2));
 else if (cmd === "run") await run();
 else if (cmd === "adjudicate") { mkdirSync(path.join(OUT, "adjudications"), { recursive: true }); await adjudicateAll(trialEnv()); }
+else if (cmd === "gate") gate();
 else if (cmd === "report") { writeReport(); if (flag("ledger")) writeLedger(); }
 else if (cmd === "repair-quota-trials") repairQuotaTrials();
 else if (cmd === "eval") evalCase();

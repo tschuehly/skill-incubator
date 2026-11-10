@@ -60,7 +60,7 @@ The last line runs one sandboxed trial (a small diff) through the real harness i
 
 ```sh
 node $T/faceoff.mjs run --dry-run --arms <name> --reps 1     # plan, ETA, quota, disk
-node $T/faceoff.mjs run --arms <name> --reps 1 > $R/stage-<name>.log 2>&1 &
+node $T/faceoff.mjs run --arms <name> --reps 1 > $R/stage-<name>.log 2>&1 & PID=$!
 ```
 
 Run it on every case, so the new arm is comparable. A new arm needs only rep 0; the sheets read rep 0. The run refuses to start if the trial environment still carries a GitHub credential.
@@ -68,6 +68,16 @@ Run it on every case, so the new arm is comparable. A new arm needs only rep 0; 
 ## 5. Judge
 
 `run` adjudicates at the end (blind Opus medium, `adjudicator` in `faceoff.json`). Only new findings get labels; earlier labels and clusters stay fixed. To re-run alone: `node $T/faceoff.mjs adjudicate --cases a,b`.
+
+**Gate: do not start step 6 until the run is complete.** The run is in the background, and until it ends the adjudications on disk are stale. Wait for it, then check:
+
+```sh
+while kill -0 $PID 2>/dev/null; do sleep 60; done              # or, from another shell, until the log has the lines below
+grep -E ' block .* ended|^report: ' $R/stage-<name>.log          # one "block <provider> ended" per provider, then "report:"
+node $T/faceoff.mjs gate --arms <arms run> [--cases <cases run>]
+```
+
+`gate` exits non-zero and prints each gap: an expected (case, arm, rep 0) key with no terminal record in `trials.jsonl` (last record per key wins; any status counts, so a failed trial is a gap only in the sheets' coverage), a case without an adjudication, a stale adjudication (answer key or prompt changed), or a finding the adjudication does not label. A gap means re-run step 4 or `adjudicate --cases`, then gate again. Without `--arms`, it expects every live arm on every case.
 
 ## 6. Verify
 
@@ -94,6 +104,8 @@ VERIFY_DIR=$S/verify python3 $T/weighted-sets.py $S/ratings $R > $S/weighted-$D.
 VERIFY_DIR=$S/verify python3 $T/combinations.py $R > $S/combinations-$D.md
 ```
 
+**Coverage rule.** Every number of a model or set (problems, weight, minutes, tokens) comes from one cohort: the PRs where every member has a done, adjudicated rep-0 trial. The PRs column shows the cohort size; a set with fewer PRs than the case list is flagged `partial`. Only full-coverage sets are ranked (best per size, top of each size) or enter a Pareto front; partial sets are listed after them, unranked, because their numbers come from a different sample. `python3 $T/model-summary.py --selfcheck` checks the rule.
+
 Each sheet is regenerated whole; carry over any hand-written sections of the previous sheet (verification notes, recommendation, caveats) yourself.
 
 ## 10. Pages
@@ -115,6 +127,6 @@ python3 $T/case-pages.py $R            # one page per case, every model's review
 - **One rep:** most arms ran once, and a second review by the same model finds a noticeably different set.
 - **Sample size:** about 60 problems from 23 PRs; a few PRs dominate the counts.
 - **Ties:** treat gaps of 1–3 problems between models or sets as ties.
-- **Spark:** Muse Spark medium (`muse-medium`), Sol medium and Luna reviewed only the first 11 PRs, so their counts are not comparable with arms that ran all 23; Spark's quota is extrapolated.
-- **Absent arms:** the Gemini arms are retired (provider uninstalled over ToS risk) and have no rep-0 coverage of the later cases; Ember high/low and Grok low miss one of the 23.
+- **Partial coverage:** Muse Spark medium (`muse-medium`), Sol medium and Luna reviewed only the first 11 PRs, and Ember high/low and Grok low miss me#3134v2, so every set containing them is partial and unranked; Spark's quota is extrapolated.
+- **Absent arms:** the Gemini arms are retired (provider uninstalled over ToS risk) and have no rep-0 coverage of the later cases.
 - `problems.json` holds more ids than the sheets count (64 vs 60 now): it also takes problems found only in rep 1 or by a superseded attempt; the sheets read rep 0.

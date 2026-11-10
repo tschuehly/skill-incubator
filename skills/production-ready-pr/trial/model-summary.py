@@ -8,7 +8,39 @@ every model reviewed each PR once. Quota per review comes from provider blocks w
 readings are fresh on the same window: the window's percent used, shared across the block's
 trials in proportion to their tokens. Readings have 1% resolution, so short blocks read 0.
 """
-import collections, glob, json, os, sys
+import collections, glob, json, math, os, statistics, sys
+
+def set_stats(s, cover, wall, tokens, problems_of, n_cases):
+    """Every number of a review set comes from one cohort: the cases where every member has a judged rep-0 trial.
+    cover: arm -> {case}; wall, tokens: (arm, case) -> minutes, tokens; problems_of(arm) -> {(case, cluster)}."""
+    C = set.intersection(*(cover[a] for a in s))
+    per = [max(wall[(a, c)] for a in s) for c in C]
+    tk = [[tokens[(a, c)] for c in C if (a, c) in tokens] for a in s]
+    return {"cases": C, "n": len(C), "full": len(C) == n_cases, "problems": {p for a in s for p in problems_of(a) if p[0] in C},
+            "minutes": statistics.median(per) if per else math.nan,
+            "tokens": sum(statistics.mean(t) if t else math.nan for t in tk)}
+
+def ranked(st):
+    """Only full-coverage sets with known minutes and tokens are ranked or enter a Pareto front."""
+    return st["full"] and not math.isnan(st["minutes"]) and not math.isnan(st["tokens"])
+
+def selfcheck():
+    P = {"a": {("c1", "x"), ("c2", "y"), ("c3", "z")}, "b": {("c1", "w")}, "d": {("c2", "v")}}
+    cover = {"a": {"c1", "c2", "c3"}, "b": {"c1"}, "d": {"c2"}}
+    wall = {("a", "c1"): 1, ("a", "c2"): 5, ("a", "c3"): 9, ("b", "c1"): 0.5, ("d", "c2"): 2}
+    tokens = {k: 10 for k in wall}
+    st = lambda *s: set_stats(s, cover, wall, tokens, P.__getitem__, 3)
+    assert st("a")["minutes"] == 5 and ranked(st("a"))
+    # Adding a partial arm: the set is measured on its 1-PR cohort only, flagged, and never ranked.
+    ab = st("a", "b")
+    assert ab["n"] == 1 and not ab["full"] and ab["problems"] == {("c1", "x"), ("c1", "w")} and ab["minutes"] == 1 and not ranked(ab)
+    # Disjoint coverage: an empty cohort, nan minutes, no problems, kept out of every ranking.
+    bd = st("b", "d")
+    assert bd["n"] == 0 and not bd["problems"] and math.isnan(bd["minutes"]) and not ranked(bd)
+    print("selfcheck ok")
+
+if sys.argv[1:] == ["--selfcheck"]:
+    selfcheck(); sys.exit(0)
 
 def load_cases(cases_file):
     """A campaign's cases: cases_file plus one cases.d/<id>.json per registered case (faceoff.mjs readCasesFile)."""
@@ -132,22 +164,27 @@ for arm in arms:
     if only:
         print(f"- **{arm}**: " + "; ".join(f"{c.removeprefix('prr-')} {k}" for c, k in only))
 
-# Review sets: members run in parallel, so per PR the set takes as long as its slowest member; the set's runtime
-# is the median over PRs every member reviewed (rep 0).
-import itertools, statistics
+# Review sets: members run in parallel, so per PR the set takes as long as its slowest member. Problems, minutes and
+# tokens all come from the set's cohort (set_stats); only full-coverage sets are ranked.
+import itertools
+judged = {os.path.basename(f)[:-5] for f in glob.glob(os.path.join(out, "adjudications", "*.json"))}
+case_ids = [c["id"] for c in cases]
 live = [a for a in arms if a in cfg["arms"] and not cfg["arms"][a].get("retired") and any(r["arm"] == a and r["rep"] == 0 for r in done)]
-wall = {(r["arm"], r["case"]): r["wallMs"] / 60000 for r in done if r["rep"] == 0}
-tok = {a: statistics.mean(r["tokens"] for r in done if r["arm"] == a and r["rep"] == 0 and r.get("tokens")) for a in live}
-def set_minutes(s):
-    per = [max(wall[(a, c)] for a in s) for c in {c for (_, c) in wall} if all((a, c) in wall for a in s)]
-    return statistics.median(per) if per else float("nan")
+rep0 = [r for r in done if r["rep"] == 0 and r["case"] in case_ids and r["case"] in judged]
+cover = {a: {r["case"] for r in rep0 if r["arm"] == a} for a in live}
+wall = {(r["arm"], r["case"]): r["wallMs"] / 60000 for r in rep0}
+tokens = {(r["arm"], r["case"]): r["tokens"] for r in rep0 if r.get("tokens")}
+stats = lambda s: set_stats(s, cover, wall, tokens, problems, len(case_ids))
+flag = lambda st: "" if st["full"] else f" (partial: {st['n']}/{len(case_ids)} PRs)"
 print(f"\n## Review sets (rep 0, {len(everyone)} problems; retired models excluded)\n")
-print("| set | problems | median minutes (slowest member per PR) | tokens/review |\n|---|---|---|---|")
-rows = [(len(set().union(*(problems(a) for a in s))), s) for k in (1, 2, 3) for s in itertools.combinations(live, k)]
+print(f"Each set is measured on its cohort: the PRs every member reviewed. Only sets covering all {len(case_ids)} PRs are ranked; the best partial sets follow, flagged.\n")
+print("| set | PRs | problems | median minutes (slowest member per PR) | tokens/review |\n|---|---|---|---|---|")
+rows = [(s, stats(s)) for k in (1, 2, 3) for s in itertools.combinations(live, k)]
+order = lambda r: (-len(r[1]["problems"]), r[1]["minutes"])
 for k in (1, 2, 3):
-    best = sorted((r for r in rows if len(r[1]) == k), key=lambda r: (-r[0], set_minutes(r[1])))[:6]
-    for n, s in best:
-        print(f"| {' + '.join(s)} | {n} | {set_minutes(s):.1f} | {sum(tok[a] for a in s)/1e6:.1f}M |")
+    sized = [r for r in rows if len(r[0]) == k]
+    for s, st in sorted((r for r in sized if ranked(r[1])), key=order)[:6] + sorted((r for r in sized if not ranked(r[1])), key=order)[:3]:
+        print(f"| {' + '.join(s)}{flag(st)} | {st['n']} | {len(st['problems'])} | {st['minutes']:.1f} | {st['tokens']/1e6:.1f}M |")
 
 # Repeat consistency on matched cases only: a case counts when both reps of that model completed it.
 print("\n## Repeat consistency (cases where both repetitions completed)\n")
