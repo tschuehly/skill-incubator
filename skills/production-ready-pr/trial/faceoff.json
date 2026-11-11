@@ -150,7 +150,7 @@
       "reports": "~/.pi-workbench/evals/reports/prr-eval",
       "arms": ["sol-high", "sol-low", "astra-high", "astra-low", "ember-high", "ember-low", "grok-high", "grok-low"],
       "repetitions": 1,
-      "floors": { "codex": 50, "xai": 40, "meta": 35, "claude": 40 },
+      "floors": { "codex": 20, "xai": 20, "meta": 20, "claude": 20 },
       "maxTrialsPerPass": { "xai": 60, "antigravity": 40, "meta": 60 },
       "minFreeDiskGB": 50
     }

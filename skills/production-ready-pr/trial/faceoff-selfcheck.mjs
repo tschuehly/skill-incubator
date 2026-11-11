@@ -146,7 +146,7 @@ const cfg = JSON.parse(readFileSync(new URL("./faceoff.json", import.meta.url), 
 const ev = resolveCampaign(cfg, "eval");
 assert.match(ev.results, /\/\.pi-workbench\/evals\/results\/prr-eval$/);
 assert.ok(!ev.casesDir.endsWith("/evals/cases") && ev.casesFile.startsWith(ev.results), "own cases dir and file");
-assert.deepEqual([ev.arms.length, ev.repetitions, ev.floors, ev.minFreeDiskGB], [8, 1, { codex: 50, xai: 40, meta: 35, claude: 40 }, 50]);
+assert.deepEqual([ev.arms.length, ev.repetitions, ev.floors, ev.minFreeDiskGB], [8, 1, { codex: 20, xai: 20, meta: 20, claude: 20 }, 50]);
 assert.ok(ev.arms.every((a) => cfg.arms[a] && !cfg.arms[a].retired));
 assert.equal(resolveCampaign(cfg, undefined), null, "no campaign => face-off defaults");
 const file = path.join(tmp, "c.json");
@@ -163,13 +163,14 @@ assert.deepEqual([trialCap("xai", ev).cap, trialCap("meta", ev).cap, trialCap("c
 assert.equal(capStop(trialCap("meta", ev), 0, 500), null, "eval keeps running after 60 recorded trials");
 assert.equal(capStop(trialCap("meta", ev), 60, 500), "trial cap 60 per pass reached");
 ok("trial caps: face-off total, eval per pass");
-// 14. Judging floor: eval adjudication stops below claude 40%, the face-off below 20%.
-const claude38 = { provider: "claude", state: "fresh", windows: [{ id: "weekly", percentRemaining: 38 }] };
-assert.deepEqual([adjudicationStopBelow(ev), adjudicationStopBelow(null)], [40, 20]);
-assert.match(quotaStop(claude38, adjudicationStopBelow(ev)), /38% \(< 40%\)/);
-assert.equal(quotaStop(claude38, adjudicationStopBelow(null)), null);
-assert.equal(quotaStop(claude38), null, "face-off default threshold unchanged");
-ok("adjudication floor: eval 40, face-off 20");
+// 14. Judging floor: eval adjudication stops below claude 20%, the face-off below 20%.
+const claude18 = { provider: "claude", state: "fresh", windows: [{ id: "weekly", percentRemaining: 18 }] };
+const claude22 = { provider: "claude", state: "fresh", windows: [{ id: "weekly", percentRemaining: 22 }] };
+assert.deepEqual([adjudicationStopBelow(ev), adjudicationStopBelow(null)], [20, 20]);
+assert.match(quotaStop(claude18, adjudicationStopBelow(ev)), /18% \(< 20%\)/);
+assert.equal(quotaStop(claude22, adjudicationStopBelow(ev)), null);
+assert.match(quotaStop(claude18), /18% \(< 20%\)/, "face-off default threshold");
+ok("adjudication floor: eval 20, face-off 20");
 // 15. Concurrent case registrations all land.
 const casesFile = path.join(tmp, "reg/cases.json");
 const mod = new URL("./faceoff.mjs", import.meta.url).href;
