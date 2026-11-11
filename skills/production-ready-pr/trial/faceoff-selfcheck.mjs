@@ -163,13 +163,13 @@ assert.deepEqual([trialCap("xai", ev).cap, trialCap("meta", ev).cap, trialCap("c
 assert.equal(capStop(trialCap("meta", ev), 0, 500), null, "eval keeps running after 60 recorded trials");
 assert.equal(capStop(trialCap("meta", ev), 60, 500), "trial cap 60 per pass reached");
 ok("trial caps: face-off total, eval per pass");
-// 14. Judging floor: eval adjudication stops below claude 40%, the face-off below 35%.
+// 14. Judging floor: eval adjudication stops below claude 40%, the face-off below 20%.
 const claude38 = { provider: "claude", state: "fresh", windows: [{ id: "weekly", percentRemaining: 38 }] };
-assert.deepEqual([adjudicationStopBelow(ev), adjudicationStopBelow(null)], [40, 35]);
+assert.deepEqual([adjudicationStopBelow(ev), adjudicationStopBelow(null)], [40, 20]);
 assert.match(quotaStop(claude38, adjudicationStopBelow(ev)), /38% \(< 40%\)/);
 assert.equal(quotaStop(claude38, adjudicationStopBelow(null)), null);
 assert.equal(quotaStop(claude38), null, "face-off default threshold unchanged");
-ok("adjudication floor: eval 40, face-off 35");
+ok("adjudication floor: eval 40, face-off 20");
 // 15. Concurrent case registrations all land.
 const casesFile = path.join(tmp, "reg/cases.json");
 const mod = new URL("./faceoff.mjs", import.meta.url).href;

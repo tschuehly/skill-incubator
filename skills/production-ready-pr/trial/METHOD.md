@@ -49,7 +49,7 @@ The last line runs one sandboxed trial (a small diff) through the real harness i
 
 ## 3. Floors and caps (`faceoff.json`)
 
-- `stopBelowPercent` (35): a provider block stops when a fresh quota window falls below it. Stale telemetry never stops a block.
+- `stopBelowPercent` (20): a provider block stops when a fresh quota window falls below it. Stale telemetry never stops a block.
 - `providers.<p>.maxTrials`: a campaign-wide trial cap per provider; `null` means none.
 - `minFreeDiskGB` (25): no trial launches below it.
 - `deadline` (07:00) and `adjudicationReserveMinutes` (75): no trial launches after deadline minus the reserve; at the deadline, trials are killed and the partial report is written.
