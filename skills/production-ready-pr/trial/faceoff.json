@@ -4,7 +4,7 @@
   "deadline": "07:00",
   "adjudicationReserveMinutes": 75,
   "minFreeDiskGB": 25,
-  "stopBelowPercent": 35,
+  "stopBelowPercent": 20,
   "trialTimeoutMinutes": 30,
   "piExtensions": [
     "~/.pi/agent/npm/node_modules/pi-xai-oauth",
