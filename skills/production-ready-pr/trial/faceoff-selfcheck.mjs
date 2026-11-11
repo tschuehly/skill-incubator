@@ -155,9 +155,9 @@ assert.equal(resolveCampaign(cfg, file).results, path.join(tmp, "r"));
 assert.throws(() => resolveCampaign(cfg, "nope"), /unknown campaign/);
 ok("case id from repo/pr/sha; campaign selects its own dirs");
 // 13. Caps: the face-off caps all recorded trials (unchanged); an eval campaign caps only one pass.
-assert.deepEqual(trialCap("meta", null), { cap: 80, perPass: false });
+assert.deepEqual(trialCap("meta", null), { cap: 82, perPass: false });
 assert.deepEqual(trialCap("codex", null), { cap: null, perPass: false });
-assert.equal(capStop(trialCap("meta", null), 0, 80), "trial cap 80 reached");
+assert.equal(capStop(trialCap("meta", null), 0, 82), "trial cap 82 reached");
 assert.equal(capStop(trialCap("meta", null), 0, 79), null);
 assert.deepEqual([trialCap("xai", ev).cap, trialCap("meta", ev).cap, trialCap("codex", ev).cap], [60, 60, null]);
 assert.equal(capStop(trialCap("meta", ev), 0, 500), null, "eval keeps running after 60 recorded trials");
