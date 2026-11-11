@@ -118,12 +118,13 @@ roster.
 | `high` Simplicity lens | `xai-auth/grok-4.7` | `medium` |
 | Readiness judge A: invariants, data flow, abuse cases | `meta/muse-ember-1.0` | `high` |
 | Readiness judge B: differential, state-transition, compatibility probes | `xai-auth/grok-4.7` | `high` |
+| Fable trial judge (async beside judge B, exempt from swaps; see below) | `anthropic/claude-fable-5-2` | `high` |
 | `critical` readiness judge C: falsify the merged findings | `openai-codex/gpt-6.1-sol` | `xhigh` |
 | Delta re-review of a lens | that lens's model and effort | |
 | Delta re-review of a `medium` finding | the combined reviewer that raised it; Sol when both did | `high` |
 | Delta re-review of an unflagged change | `openai-codex/gpt-6.1-sol` | `medium` |
 
-When a slot's model shares the author's family, or its launch blocks, use
+When a slot's model shares the author's family, or its launch blocks (except the Fable trial slot), use
 `anthropic/claude-opus-5-5` at the same effort when the author is not Anthropic, otherwise another
 roster model whose family differs from the author's; record the swap and its reason. `light-review`
 keeps default routing. Start every lens report with `MODEL=<provider/model> EFFORT=<level>`. For
@@ -132,6 +133,31 @@ each run, append one JSON line to
 slot: model, effort, material findings, unique defect classes, refuted or noise findings, missed
 findings later caught by another reviewer, wall time, and status (`reported`, or `timed_out` with
 launch time and the head SHA it reviewed).
+
+**Fable trial (until 10 distinct high or critical PRs have a Fable report or timeout, or 2026-11-25).**
+At `high` and `critical`, the Fable trial judge runs as a second async judge: it gets judge B's
+brief, launches with judge B, and has a 60-minute cap (judge B keeps 30). It is not one of the
+five `high` lenses, but it does the delta re-review of its own material findings. The round 2,
+judge C, and ready-mark barriers in this section and section 4 name it explicitly. With `faceoff`
+at `high` or `critical`, Fable is not a contestant: it runs beside the face-off on judge B's
+brief; the scoreboard does not wait for it, and its findings join round 1 like a late Copilot
+review. A `medium` run, with or without `faceoff`, has no Fable. Before launch, skip it when the
+ledger already shows the 10 counted PRs or the date is after 2026-11-25 (status `skipped_trial_over`). Fable is exempt from the roster swap rule: it
+runs even for an Anthropic author (measured, not counted for independence; say so in the report),
+and a failed launch records `"fable": {"status": "launch_failed"}` with no substitute. Before
+launch, read the Claude week from
+`~/Library/Group Containers/Y5PE65HELJ.com.steipete.codexbar/widget-snapshot.json`
+(`.entries[] | select(.provider == "claude") | .secondary.usedPercent`): above 80% used, skip
+Fable and record `"fable": {"status": "skipped_quota"}`; when the file is missing, unreadable, or
+older than one hour, skip it and record `"fable": {"status": "skipped_quota_unknown"}`. A skip or
+`launch_failed` is a terminal, non-blocking trial outcome: the Fable barriers count as met and the
+level is not blocked. The ledger line's `fable`
+slot holds `status` (`reported`, `timed_out`, `skipped_quota`, `skipped_quota_unknown`, `launch_failed`, `skipped_trial_over`), tokens, wall
+time, the Claude week used percent at launch and at report, and its unique findings: material
+findings no other reviewer raised once judge B and every lens have been reconciled. Count toward
+the 10 only distinct repository and PR pairs with status `reported` or `timed_out`. When the trial
+ends, report to the human Fable's tokens, minutes, and Claude week percent per PR and its unique
+finds; the human decides keep, swap for judge B, or drop.
 
 **Face-off (trial).** When the invocation includes `faceoff` (at `medium` and above), round 1's
 readiness review becomes a blind face-off. One frozen brief covering both judge A and judge B
@@ -186,13 +212,15 @@ Then apply the approved review contract against one merge-base and head SHA:
   Merge readiness judges' duplicate defect classes and record each judge's unique ones. Each judge
   counts as its own lens for delta re-reviews.
 
-  At `high` and `critical`, readiness judge B (Grok, about 19 minutes) runs **async**: launch it
+  At `high` and `critical`, readiness judge B (Grok, about 19 minutes) runs **async**, and during the Fable trial so does
+  the Fable trial judge under the same barriers: launch it
   with the other lenses, but reconcile and fix round 1 without waiting for it. When it reports,
   its findings join round 1 like a late Copilot review: probe, reconcile, and fix them before
-  publication. Start round 2 only after judge B has reported or timed out, so its fixes share
-  round 2's delta re-reviews and the two-round cap holds. At `critical`, launch judge C after A and
-  B report or B times out, and include B's findings in C's brief. Don't mark the PR ready until
-  judge B has reported or 30 minutes have passed since its launch; on timeout, record the gap with
+  publication. Start round 2 only after judge B and any Fable trial judge have each reported or
+  reached their cap (30 and 60 minutes), so their fixes share round 2's delta re-reviews and the
+  two-round cap holds. At `critical`, launch judge C after A reports and B and any Fable trial
+  judge have reported or reached their cap, and include their findings in C's brief. Don't mark
+  the PR ready until the same holds; on timeout, record the gap with
   the head SHA in the section-7 report and the ledger. A face-off is synchronous: its
   scoreboard needs every contestant before fixing.
 
@@ -200,7 +228,7 @@ At `medium` and above, push the candidate before round 1 as draft PRs (section 4
 mark them draft until section 4's ready condition holds) and request Copilot, so its findings
 join round 1's fix batch instead of arriving after publication. A draft push is preliminary:
 "publication" in this skill means marking the PR ready in section 4. Before reconciling round 1,
-wait for every synchronous lens (not async judge B), section 2's parallel static, architecture, and lint checks and any full gate
+wait for every synchronous lens (not async judge B or the Fable trial judge), section 2's parallel static, architecture, and lint checks and any full gate
 already started, and the draft Copilot review or its approved substitute, then inventory Copilot's findings as section 6 describes. Verify once, before round 1, that the
 request registered in GitHub state. When Copilot is unavailable, record the gap with its reason and
 the head SHA and ask the human once to accept the gap or approve a substitute judge, unless the
@@ -248,7 +276,7 @@ State whether the reviewed head is
 intentionally unpublished or a draft; before section 4, reviewers must not treat that expected publication
 state as a code defect. A finding is actionable only when it cites code, a repository rule, the
 specification, or a concrete failure mode. Treat unsupported "best practice" claims as noise. A
-failed launch or unavailable required binding blocks its level and must be disclosed. Truncated output is incomplete; rerun narrower slices against the same base
+failed launch or unavailable required binding (not the Fable trial judge) blocks its level and must be disclosed. Truncated output is incomplete; rerun narrower slices against the same base
 and head whose union covers the complete diff. The lead's own review is not a substitute for an
 independent review required by the selected level.
 
@@ -313,7 +341,7 @@ system outcome without requiring codebase context. Use these sections in order:
 For a stacked PR, explain this layer's distinct outcome and its dependency on adjacent layers.
 
 Make the PR ready for review after the local readiness gate passes and, at `high` and above, async
-judge B has reported or timed out (section 3). Request Copilot review of the
+judge B and any Fable trial judge have reported or reached their cap (section 3). Request Copilot review of the
 published head with `--reviewer @copilot`; findings from its draft review belong to the same
 reconciliation as round 1. If the repository requests Copilot through a ruleset, confirm the request in
 GitHub state instead of issuing a duplicate. A failed or unavailable Copilot request is explicit;
