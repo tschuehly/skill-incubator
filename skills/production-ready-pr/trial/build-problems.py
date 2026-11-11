@@ -74,7 +74,9 @@ def main(ratings, results=os.path.expanduser("~/.pi-workbench/evals/results/prr-
         adj, v = json.load(open(af)), {x["index"]: x for x in json.load(open(vf))["verdicts"]}
         missing = sorted({l["index"] for l in adj["labels"]} - set(v))
         if missing:
-            print(f"{c['id']}: no verdict for label index {missing}; the first judge's label stands")
+            # An entry added before verification is never revised (merge keeps existing), so wait for the verdicts.
+            print(f"{c['id']}: no verdict for label index {missing}: skipped until verified")
+            continue
         derived += problems(c, adj, v)
     pf = os.path.join(ratings, "problems.json")
     existing = json.load(open(pf)) if os.path.exists(pf) else []

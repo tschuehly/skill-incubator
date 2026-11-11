@@ -81,7 +81,7 @@ node $T/faceoff.mjs gate --arms <arms run> [--cases <cases run>]
 
 ## 6. Verify
 
-One Opus-high subagent per batch of a few cases, with `briefs/verify.md` filled in. It adds a verdict for every label in `$S/verify/<case>.json`, joined on `item.index`, citing file:line at the head via `git show`. For a case that already has a verify file, it adds only the new indexes. `build-problems.py` (step 7) names any label still without a verdict.
+One Opus-high subagent per batch of a few cases, with `briefs/verify.md` filled in. It adds a verdict for every label in `$S/verify/<case>.json`, joined on `item.index`, citing file:line at the head via `git show`. For a case that already has a verify file, it adds only the new indexes. `build-problems.py` (step 7) names any label still without a verdict and skips that case until it has one.
 
 ## 7. Build the problem list
 
