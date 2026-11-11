@@ -24,7 +24,7 @@ The verify and ratings data currently live in the Workstream scratch folder `$S`
 Add an entry to `faceoff.json` `cases`, then build and check it:
 
 ```sh
-node $T/faceoff.mjs build-cases                 # writes ~/.pi-workbench/evals/cases/<id>/
+node $T/faceoff.mjs build-cases                 # writes ~/.pi-workbench/evals/cases/<id>/; rerun after changing trialTimeoutMinutes, which case.json bakes in
 node $T/faceoff.mjs setup-check --cases <id>    # the patch is identical, the defect is present, the fix touches it
 ```
 
