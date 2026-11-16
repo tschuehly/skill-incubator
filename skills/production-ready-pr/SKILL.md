@@ -43,7 +43,7 @@ with `gh pr view`, and known checkouts with `git worktree list --porcelain`. Kee
 worktree inventory in the session before creating another worktree. Run commands only against paths
 those commands printed; ask the human when identities conflict or multiple worktrees are plausible.
 Fetch before judging freshness and follow the repository's update policy. Reuse the open pull
-request for the current branch; never create a duplicate. If the branch belongs to a
+request for the current branch; never create a duplicate, and set its status labels now (section 4). If the branch belongs to a
 stack, load `gh-stack` and preserve the stack's branch and PR boundaries. Treat the stack as one
 delivery unit: one review contract over the combined diff from the bottom layer's merge-base to the
 top layer, and one full gate on the top layer. Fix each finding in the layer that owns it and run
@@ -347,7 +347,17 @@ reconciliation as round 1. If the repository requests Copilot through a ruleset,
 GitHub state instead of issuing a duplicate. A failed or unavailable Copilot request is explicit;
 it never silently counts as review.
 
-**Complete when:** the PR URL, number, base, and published head SHA are known and Copilot review is
+**Status labels.** The PR carries the run's state on GitHub, so anyone can see it went through this
+skill. Create missing labels with `gh label create <name> --force`, then set them with
+`gh pr edit <n> --add-label/--remove-label`; for a stack, label every layer's PR.
+
+| Label | Set when | Removed when |
+|---|---|---|
+| `prr:<level>` (`prr:low` … `prr:critical`) | the PR exists in this run | the level changes; swap it for the new one |
+| `prr:in-progress` | the PR exists in this run, and again on any later push to it | section 7 declares it decision-ready, or the human cancels the run |
+| `prr:successful` | section 7 declares it decision-ready | any later push; swap it back to `prr:in-progress` |
+
+**Complete when:** the PR URL, number, base, and published head SHA are known, its status labels are set, and Copilot review is
 requested or its unavailability is explicit.
 
 ## 5. Observe CI and review
@@ -387,7 +397,8 @@ human accepts documented Copilot unavailability.
 
 ## 6. Service feedback
 
-Stop the observer before changing the branch. Fetch every top-level PR comment and every non-empty
+Stop the observer before changing the branch. A push here swaps `prr:successful` back to
+`prr:in-progress` (section 4). Fetch every top-level PR comment and every non-empty
 Copilot review body, not only inline threads or the latest review. Expand `Suppressed comments` and
 `Previously missed` sections and inventory each finding. Classify every thread, top-level comment,
 and summary finding; a delegated classification uses the `light-review` role, while every code fix
@@ -438,6 +449,8 @@ only when:
 - all adversarial findings are resolved or accepted;
 - the PR body still describes the delivered behavior and evidence; and
 - for a stack, every layer's PR meets these conditions.
+
+On declaring it, swap `prr:in-progress` for `prr:successful` on every PR it covers (section 4).
 
 Inspect `git worktree list --porcelain` and remove every clean worktree that was absent from the
 initial inventory and explicitly created by this run. Preserve pre-existing, dirty, or
