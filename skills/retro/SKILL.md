@@ -12,7 +12,7 @@ Adapted from Matt Pocock's `retro` (mattpocock/skills 2b47ffc).
 
 1. Load the `writing-for-agents` skill; every candidate that edits an agent-facing document follows it.
 
-2. **Find the session.** Default: the current one (`PI_SESSION_ID`). Otherwise use the session the user names, found with `python3 ~/IdeaProjects/pi-workbench.installed/tools/session-logs/cli.py list|read` (see its `README.md`). Never pick a session by recency alone. Done when one session id is fixed.
+2. **Find the session.** Default: the current one (`PI_SESSION_ID`). Otherwise use the session the user names, found with `python3 ~/IdeaProjects/pi-workbench.installed/tools/session-logs/cli.py list|read` (see its `README.md`). PI WEB chats live in a separate archive: put `--pi-web` before `list` or `read`, or the lookup finds nothing. Never pick a session by recency alone. Done when one session id is fixed.
 
 3. **Read it bounded.** Never load a whole session file. Check its size first; use the CLI, `jq` and `rg` slices to pull the moments that cost time: long searches, failed tool calls, repeated corrections from the user, rework, stalls. Prefer repository evidence (commits, diffs, failing checks) over the transcript's own claims. Done when each moment you'll cite has a session offset or a commit.
 
