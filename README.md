@@ -46,6 +46,8 @@ Local edits to re-apply after every upstream refresh:
   (cursor/plugins 0b46ec3, MIT).
 - `mattpocock/codebase-design`: `DEEPENING.md` "Before moving structure" section and its pointer
   in `SKILL.md`, adapted from pstack `playbooks/refactoring.md` (cursor/plugins 0b46ec3, MIT).
+- `kunchenguid/kun`, `mattpocock/wizard`: `disable-model-invocation: true`, because each loaded at
+  most 4 times in 60 days; `/skill:name` still works.
 
 This is a fork, and it has a price:
 

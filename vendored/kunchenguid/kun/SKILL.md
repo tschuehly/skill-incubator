@@ -1,5 +1,6 @@
 ---
 name: kun
+disable-model-invocation: true
 description: >
   Summon Kun to solve your problems.
   Use on /kun or when asked how Kun thinks, builds, or solves problems.
