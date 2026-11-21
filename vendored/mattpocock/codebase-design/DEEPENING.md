@@ -35,3 +35,9 @@ Third-party services (Stripe, Twilio, etc.) you don't control. The deepened modu
 - Write new tests at the deepened module's interface. The **interface is the test surface**.
 - Tests assert on observable outcomes through the interface, not internal state.
 - Tests should survive internal refactors, since they describe behaviour, not implementation. If a test has to change when the implementation changes, it's testing past the interface.
+
+## Before moving structure
+
+- Pin current behaviour first: a characterization test, snapshot, or equivalence check that passes on the untouched tree and goes red when one behaviour is deliberately broken. Type check and lint are not a pin.
+- After a rename, search strings, prose, and docs for the old name; renames silently miss them.
+- If the diff does not make some part easier to follow, revert it.

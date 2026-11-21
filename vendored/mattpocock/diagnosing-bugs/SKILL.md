@@ -119,6 +119,8 @@ A correct seam is one where the test exercises the **real bug pattern** as it oc
 
 **If no correct seam exists, that itself is the finding.** Note it. The codebase architecture is preventing the bug from being locked down. Flag this for the next phase.
 
+**Fix where the system first went wrong.** Ask whether the state that triggered the symptom is legitimate. If it is, handle it where the code broke. If it should never exist, a guard at the crash site hides the bug: find what produced the state and fix it there. Guards, retries, swallowed errors and clamped values are the usual ways to hide one.
+
 If a correct seam exists:
 
 1. Turn the minimised repro into a failing test at that seam.
@@ -136,3 +138,4 @@ Required before declaring done:
 - [ ] All `[DEBUG-...]` instrumentation removed (`grep` the prefix)
 - [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
 - [ ] The hypothesis that turned out correct is stated in the commit / PR message, so the next debugger learns
+- [ ] The message says whether the triggering state was legitimate; if finding the cause took a deep dig, it proposes the cheap always-on signal that would have shown it

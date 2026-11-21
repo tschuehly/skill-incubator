@@ -41,6 +41,11 @@ Local edits to re-apply after every upstream refresh:
 
 - `vercel-labs/agent-browser`: `description` shortened (≈1.1k → ≈280 chars) because every Pi
   session pays for it in the skill catalog. Keep the triggers; drop product name lists.
+- `mattpocock/diagnosing-bugs`: Phase 5 "Fix where the system first went wrong" paragraph and
+  the Phase 6 legitimate-state checkbox, adopted from pstack `principle-fix-root-causes`
+  (cursor/plugins 0b46ec3, MIT).
+- `mattpocock/codebase-design`: `DEEPENING.md` "Before moving structure" section and its pointer
+  in `SKILL.md`, adapted from pstack `playbooks/refactoring.md` (cursor/plugins 0b46ec3, MIT).
 
 This is a fork, and it has a price:
 
