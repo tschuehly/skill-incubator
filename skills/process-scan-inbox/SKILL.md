@@ -1,13 +1,13 @@
 ---
 name: process-scan-inbox
-description: Process newly scanned paper documents into verified OneDrive sources and knowledge updates.
+description: Process newly scanned paper documents and downloaded digital PDFs into verified OneDrive sources and knowledge updates.
 disable-model-invocation: true
 compatibility: macOS with the personal OneDrive document pipeline and its local Python environment.
 ---
 
 # Process scan inbox
 
-Turn scan batches into verified sources, useful knowledge, and surfaced actions. Preserve paper and immutable raw bytes.
+Turn scan batches and digital documents into verified sources, useful knowledge, and surfaced actions. Preserve paper and immutable raw bytes.
 
 ## 1. Locate the workflow
 
@@ -27,7 +27,7 @@ Complete when the inbox, calibrated profile, batch archive, local work directory
 
 ## 2. Select and preserve batches
 
-Read the production inbox path from `SCANNEN.md`. List PDFs directly under it; a filename in the invocation narrows the selection. Also list archive bundles lacking `disposition.json`, even when their original inbox file is absent.
+Read the production inbox path from `SCANNEN.md`. List PDFs directly under it; a filename in the invocation narrows the selection. A file or folder path outside the inbox in the invocation selects digital inputs instead (Step 2a); a folder includes its PDFs recursively. An inbox PDF with a text layer on every page is a digital input too, because the Kyocera never produces one. Also list archive bundles lacking `disposition.json`, even when their original inbox file is absent.
 
 Hash inbox PDFs and inspect their content-addressed archive directories. A valid disposition defined by the pipeline README is terminal and skipped unless the user explicitly requests correction. Every missing archive or archive without a disposition is new or resumable.
 
@@ -38,6 +38,17 @@ Run the existing `stage` command only on inbox inputs. Staging is idempotent; us
 Prefer new batches, then resumable batches oldest first. Carry one batch through Steps 3–5 to a terminal disposition before starting the next. When no new or resumable batch exists, ask whether the human wants to scan one now. If not, report that no work is pending. If so, walk them through scanner-preparation instructions 1–5 under **Routine pro Batch** in `SCANNEN.md` instead of paraphrasing them. The routine has them sort paper into a one-sided and a double-sided stack, so ask which stack this is. A one-sided stack needs neither calibration nor a sheet count, because its page count is its sheet count. For a double-sided stack ask the physical sheet count and require the calibration procedure first if the profile is pending. Wait for confirmation that scanning finished, then repeat discovery once. If no new inbox hash appears, report the production inbox path and stop for scanner-target troubleshooting instead of repeating the walkthrough.
 
 Complete when every selected input is immutable and each batch is either selected for work or has a valid terminal disposition.
+
+## 2a. Digital inputs
+
+A digital PDF is already one document with its own text, so it skips staging, OCR, and splitting; `SCANNEN.md` **Digitale Eingänge** is the source of truth.
+
+- Hash each input and look its SHA-256 up in `_agent/library-index.jsonl`. Also compare it byte for byte with any file at the destination path you would propose. A byte-identical copy already filed is a duplicate: report it and file nothing.
+- An input lacking text on any page goes through Steps 2–5 as a one-sided scan batch.
+- Otherwise read its text and propose one filename and an existing destination folder per input. Keep the sender's systematic filename where the destination folder already uses that scheme; otherwise use `JJJJ-MM-TT_Absender_Dokumentart.pdf`. Send every proposal in one message, as in Step 4. When an input mirrors an existing folder tree whose filenames already match, its matching path is the proposal and needs no confirmation.
+- File the unchanged bytes with a temporary sibling, `cmp`, and an atomic no-overwrite rename. The index derives `doc-<sha12>` from those bytes, so never rewrite, re-OCR, or stamp a digital source.
+- Then apply Step 5 from its integration paragraph onward. Digital inputs have no batch and no disposition: a filed copy in the index makes reruns idempotent.
+- Delete an input only after its filed copy verifies byte-identical: in the inbox by default, elsewhere only when the human asks.
 
 ## 3. Establish capture mode
 
