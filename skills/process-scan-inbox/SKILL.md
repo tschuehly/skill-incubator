@@ -48,7 +48,7 @@ A digital PDF is already one document with its own text, so it skips staging, OC
 - Otherwise read its text and propose one filename and an existing destination folder per input. Keep the sender's systematic filename where the destination folder already uses that scheme; otherwise use `JJJJ-MM-TT_Absender_Dokumentart.pdf`. Send every proposal in one message, as in Step 4. When an input mirrors an existing folder tree whose filenames already match, its matching path is the proposal and needs no confirmation.
 - File the unchanged bytes with a temporary sibling, `cmp`, and an atomic no-overwrite rename. The index derives `doc-<sha12>` from those bytes, so never rewrite, re-OCR, or stamp a digital source.
 - Then apply Step 5 from its integration paragraph onward. Digital inputs have no batch and no disposition: a filed copy in the index makes reruns idempotent.
-- Delete an input only after its filed copy verifies byte-identical: in the inbox by default, elsewhere only when the human asks.
+- Once every input from a selected folder or file has a byte-identical filed copy, filed now or before, delete the inputs automatically, wherever they are. Then remove the folder if it holds nothing but `.DS_Store`. Keep any input that is unfiled, unresolved, or mismatched, and report it.
 
 ## 3. Establish capture mode
 
